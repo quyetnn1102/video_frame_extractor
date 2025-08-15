@@ -4,6 +4,9 @@
 
 Your code has been committed locally with all sensitive files properly excluded. Here's how to push it to GitHub:
 
+> 📚 **Related Guides**:
+> - [Git Author Change Guide](GIT_AUTHOR_CHANGE_GUIDE.md) - Change commit author information to match GitHub username
+
 ### Step 1: Create GitHub Repository
 
 1. Go to [GitHub.com](https://github.com)
