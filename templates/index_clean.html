@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Video Frame Extractor - Extract Frames from Videos</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        :root {
+            --primary-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            --secondary-gradient: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            --success-gradient: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+        }
+
+        body {
+            background: var(--primary-gradient);
+            min-height: 100vh;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+
+        .main-container {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 20px;
+            backdrop-filter: blur(10px);
+            box-shadow: 0 15px 35px rgba(0, 0, 0, 0.1);
+            margin: 20px auto;
+            max-width: 1200px;
+        }
+
+        .navbar-brand {
+            font-weight: bold;
+            background: var(--primary-gradient);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            font-size: 1.5rem;
+        }
+
+        .hero-section {
+            background: var(--primary-gradient);
+            color: white;
+            border-radius: 20px 20px 0 0;
+            padding: 3rem 2rem;
+            text-align: center;
+        }
+
+        .hero-title {
+            font-size: 2.5rem;
+            font-weight: 700;
+            margin-bottom: 1rem;
+        }
+
+        .hero-subtitle {
+            font-size: 1.2rem;
+            opacity: 0.9;
+            margin-bottom: 2rem;
+        }
+
+        .feature-card {
+            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+            border: none;
+            border-radius: 15px;
+            padding: 1.5rem;
+            height: 100%;
+            transition: transform 0.3s, box-shadow 0.3s;
+        }
+
+        .feature-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15);
+        }
+
+        .feature-icon {
+            font-size: 3rem;
+            background: var(--primary-gradient);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            margin-bottom: 1rem;
+        }
+
+        .form-section {
+            background: white;
+            border-radius: 15px;
+            padding: 2rem;
+            margin: 2rem 0;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
+        }
+
+        .form-control:focus {
+            border-color: #667eea;
+            box-shadow: 0 0 0 0.2rem rgba(102, 126, 234, 0.25);
+        }
+
+        .btn-primary {
+            background: var(--primary-gradient);
+            border: none;
+            padding: 12px 30px;
+            border-radius: 25px;
+            font-weight: 600;
+            transition: all 0.3s;
+        }
+
+        .btn-primary:hover {
+            background: var(--secondary-gradient);
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);
+        }
+
+        .platform-badge {
+            display: inline-block;
+            padding: 0.25rem 0.75rem;
+            margin: 0.25rem;
+            background: var(--success-gradient);
+            color: white;
+            border-radius: 20px;
+            font-size: 0.85rem;
+            font-weight: 500;
+        }
+
+        .loading-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.8);
+            z-index: 9999;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .loading-content {
+            background: white;
+            padding: 2rem;
+            border-radius: 15px;
+            text-align: center;
+            max-width: 400px;
+            width: 90%;
+        }
+
+        .results-section {
+            display: none;
+            background: white;
+            border-radius: 15px;
+            padding: 2rem;
+            margin: 2rem 0;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
+        }
+
+        .timestamp-input {
+            background: #f8f9fa;
+            border: 2px dashed #dee2e6;
+            border-radius: 10px;
+            padding: 1rem;
+            margin: 0.5rem 0;
+        }
+
+        .navbar {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+        }
+    </style>
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="navbar navbar-expand-lg navbar-light sticky-top">
+        <div class="container">
+            <a class="navbar-brand" href="/">
+                <i class="fas fa-video mr-2"></i>
+                Video Frame Extractor
+            </a>
+            <div class="navbar-nav ms-auto">
+                <a class="nav-link active" href="/">
+                    <i class="fas fa-home mr-1"></i>
+                    Home
+                </a>
+                <a class="nav-link" href="/trending">
+                    <i class="fas fa-fire mr-1"></i>
+                    Trending
+                </a>
+                <a class="nav-link" href="/dashboard">
+                    <i class="fas fa-chart-bar mr-1"></i>
+                    Dashboard
+                </a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container-fluid">
+        <div class="main-container">
+            <!-- Hero Section -->
+            <div class="hero-section">
+                <h1 class="hero-title">
+                    <i class="fas fa-video mr-3"></i>
+                    Video Frame Extractor
+                </h1>
+                <p class="hero-subtitle">
+                    Extract frames from videos across multiple platforms with precision and ease
+                </p>
+                <div class="supported-platforms">
+                    <span class="platform-badge"><i class="fab fa-youtube"></i> YouTube</span>
+                    <span class="platform-badge"><i class="fab fa-tiktok"></i> TikTok</span>
+                    <span class="platform-badge"><i class="fab fa-instagram"></i> Instagram</span>
+                    <span class="platform-badge"><i class="fab fa-facebook"></i> Facebook</span>
+                    <span class="platform-badge">Douyin</span>
+                </div>
+            </div>
+
+            <div class="container py-4">
+                <!-- Features Overview -->
+                <div class="row mb-5">
+                    <div class="col-md-4 mb-3">
+                        <div class="feature-card text-center">
+                            <i class="fas fa-bolt feature-icon"></i>
+                            <h5>Fast Processing</h5>
+                            <p>Lightning-fast frame extraction with optimized algorithms</p>
+                        </div>
+                    </div>
+                    <div class="col-md-4 mb-3">
+                        <div class="feature-card text-center">
+                            <i class="fas fa-globe feature-icon"></i>
+                            <h5>Multi-Platform</h5>
+                            <p>Support for YouTube, TikTok, Instagram, Facebook, and more</p>
+                        </div>
+                    </div>
+                    <div class="col-md-4 mb-3">
+                        <div class="feature-card text-center">
+                            <i class="fas fa-clock feature-icon"></i>
+                            <h5>Precise Timing</h5>
+                            <p>Extract frames at exact timestamps with millisecond accuracy</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Main Form -->
+                <div class="form-section">
+                    <h3 class="mb-4 text-center">
+                        <i class="fas fa-link mr-2"></i>
+                        Extract Frames from Video
+                    </h3>
+                    
+                    <form id="extractForm">
+                        <div class="row">
+                            <div class="col-md-8">
+                                <div class="mb-3">
+                                    <label for="videoUrl" class="form-label">
+                                        <i class="fas fa-link mr-1"></i>
+                                        Video URL
+                                    </label>
+                                    <input type="url" class="form-control" id="videoUrl" 
+                                           placeholder="https://www.youtube.com/watch?v=..." required>
+                                    <div class="form-text">
+                                        Paste a video URL from YouTube, TikTok, Instagram, Facebook, or Douyin
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div class="mb-3">
+                                    <label class="form-label">
+                                        <i class="fas fa-check-circle mr-1"></i>
+                                        Validate URL
+                                    </label>
+                                    <button type="button" class="btn btn-outline-primary w-100" id="validateBtn">
+                                        <i class="fas fa-search mr-1"></i>
+                                        Check URL
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label for="timestamps" class="form-label">
+                                <i class="fas fa-clock mr-1"></i>
+                                Timestamps (one per line)
+                            </label>
+                            <textarea class="form-control timestamp-input" id="timestamps" rows="4" 
+                                      placeholder="0:05&#10;0:30&#10;1:15&#10;2:45" required></textarea>
+                            <div class="form-text">
+                                Enter timestamps in format: mm:ss or h:mm:ss (e.g., 0:05, 1:30, 2:15)
+                            </div>
+                        </div>
+
+                        <div class="text-center">
+                            <button type="submit" class="btn btn-primary btn-lg">
+                                <i class="fas fa-images mr-2"></i>
+                                Extract Frames
+                            </button>
+                        </div>
+                    </form>
+                </div>
+
+                <!-- Results Section -->
+                <div class="results-section" id="resultsSection">
+                    <h3 class="mb-4 text-center">
+                        <i class="fas fa-images mr-2"></i>
+                        Extracted Frames
+                    </h3>
+                    <div id="framesContainer" class="row">
+                        <!-- Frames will be displayed here -->
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Loading Overlay -->
+    <div class="loading-overlay" id="loadingOverlay">
+        <div class="loading-content">
+            <div class="spinner-border text-primary mb-3" style="width: 3rem; height: 3rem;">
+                <span class="visually-hidden">Loading...</span>
+            </div>
+            <h4>Processing Video...</h4>
+            <p id="loadingMessage">Downloading and extracting frames, please wait...</p>
+            <div class="progress mt-3">
+                <div class="progress-bar progress-bar-striped progress-bar-animated" style="width: 100%"></div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // Auto-fill URL and title from query parameters
+        document.addEventListener('DOMContentLoaded', function() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const url = urlParams.get('url');
+            const title = urlParams.get('title');
+            
+            if (url) {
+                document.getElementById('videoUrl').value = url;
+            }
+            
+            if (title) {
+                console.log('Video title:', title);
+            }
+        });
+
+        // URL Validation
+        document.getElementById('validateBtn').addEventListener('click', async function() {
+            const url = document.getElementById('videoUrl').value.trim();
+            if (!url) {
+                alert('Please enter a video URL first');
+                return;
+            }
+
+            try {
+                const response = await fetch('/api/test-platform', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ url })
+                });
+
+                const result = await response.json();
+                
+                if (result.valid) {
+                    alert(`✅ URL is valid!\n\nPlatform: ${result.platform}\nStatus: ${result.info.status}\nReliability: ${result.info.reliability}\n\nTips: ${result.info.tips.join(', ')}`);
+                } else {
+                    alert(`❌ URL validation failed:\n${result.info.notes || 'Invalid or unsupported URL'}`);
+                }
+            } catch (error) {
+                console.error('Validation error:', error);
+                alert('❌ Error validating URL. Please try again.');
+            }
+        });
+
+        // Form Submission
+        document.getElementById('extractForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const url = document.getElementById('videoUrl').value.trim();
+            const timestampsText = document.getElementById('timestamps').value.trim();
+            
+            if (!url || !timestampsText) {
+                alert('Please fill in all required fields');
+                return;
+            }
+            
+            // Parse timestamps
+            const timestamps = timestampsText.split('\n').map(t => t.trim()).filter(t => t);
+            if (timestamps.length === 0) {
+                alert('Please enter at least one timestamp');
+                return;
+            }
+            
+            // Show loading overlay
+            document.getElementById('loadingOverlay').style.display = 'flex';
+            document.getElementById('loadingMessage').textContent = 'Downloading and extracting frames, please wait...';
+            
+            try {
+                const response = await fetch('/api/extract', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        url: url,
+                        timestamps: timestamps
+                    })
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    displayResults(result.frames);
+                } else {
+                    throw new Error(result.error || 'Extraction failed');
+                }
+                
+            } catch (error) {
+                console.error('Extraction error:', error);
+                alert(`❌ Error: ${error.message}`);
+            } finally {
+                // Hide loading overlay
+                document.getElementById('loadingOverlay').style.display = 'none';
+            }
+        });
+        
+        function displayResults(frames) {
+            const container = document.getElementById('framesContainer');
+            const resultsSection = document.getElementById('resultsSection');
+            
+            container.innerHTML = '';
+            
+            frames.forEach((frame, index) => {
+                const frameCard = `
+                    <div class="col-md-6 col-lg-4 mb-4">
+                        <div class="card">
+                            <img src="/frames/${frame.filename}" class="card-img-top" alt="Frame ${frame.timestamp}" 
+                                 style="height: 200px; object-fit: cover;">
+                            <div class="card-body text-center">
+                                <h5 class="card-title">Frame at ${frame.timestamp}</h5>
+                                <a href="/frames/${frame.filename}" download class="btn btn-outline-primary btn-sm">
+                                    <i class="fas fa-download mr-1"></i>
+                                    Download
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                `;
+                container.innerHTML += frameCard;
+            });
+            
+            resultsSection.style.display = 'block';
+            resultsSection.scrollIntoView({ behavior: 'smooth' });
+        }
+    </script>
+</body>
+</html>

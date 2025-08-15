@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Video Frame Extractor - Trending Videos</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        .video-card {
+            border: none;
+            border-radius: 15px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            transition: transform 0.3s, box-shadow 0.3s;
+            overflow: hidden;
+            margin-bottom: 20px;
+        }
+        .video-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 8px 15px rgba(0, 0, 0, 0.2);
+        }
+        .video-thumbnail {
+            width: 100%;
+            height: 200px;
+            object-fit: cover;
+            border-radius: 15px 15px 0 0;
+        }
+        .video-info {
+            padding: 15px;
+        }
+        .video-title {
+            font-weight: bold;
+            font-size: 1.1rem;
+            margin-bottom: 8px;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+        .video-description {
+            color: #6c757d;
+            font-size: 0.9rem;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+            margin-bottom: 10px;
+        }
+        .video-meta {
+            font-size: 0.8rem;
+            color: #6c757d;
+        }
+        .video-stats {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 10px;
+        }
+        .category-badge {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            font-weight: 500;
+        }
+        .trending-header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-radius: 15px;
+            padding: 2rem;
+            margin-bottom: 2rem;
+            text-align: center;
+        }
+        .filter-section {
+            background: white;
+            border-radius: 15px;
+            padding: 20px;
+            margin-bottom: 30px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+        }
+        .extract-button {
+            background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+            border: none;
+            color: white;
+            padding: 8px 16px;
+            border-radius: 8px;
+            font-size: 0.85rem;
+            transition: all 0.3s;
+        }
+        .extract-button:hover {
+            background: linear-gradient(135deg, #20c997 0%, #28a745 100%);
+            transform: scale(1.05);
+            color: white;
+        }
+        .navbar-brand {
+            font-weight: bold;
+            color: #667eea !important;
+        }
+        .loading-spinner {
+            display: none;
+            text-align: center;
+            margin: 2rem 0;
+        }
+    </style>
+</head>
+<body class="bg-light">
+    <!-- Navigation -->
+    <nav class="navbar navbar-expand-lg navbar-light bg-white shadow-sm">
+        <div class="container">
+            <a class="navbar-brand" href="/">
+                <i class="fas fa-video mr-2"></i>
+                Video Frame Extractor
+            </a>
+            <div class="navbar-nav ms-auto">
+                <a class="nav-link" href="/">
+                    <i class="fas fa-home mr-1"></i>
+                    Home
+                </a>
+                <a class="nav-link active" href="/trending">
+                    <i class="fas fa-fire mr-1"></i>
+                    Trending
+                </a>
+                <a class="nav-link" href="/dashboard">
+                    <i class="fas fa-chart-bar mr-1"></i>
+                    Dashboard
+                </a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container py-4">
+        <!-- Trending Header -->
+        <div class="trending-header">
+            <h1><i class="fas fa-fire mr-2"></i>Trending Videos</h1>
+            <p class="mb-0">Discover popular videos and extract frames instantly</p>
+        </div>
+
+        <!-- Filter Section -->
+        <div class="filter-section">
+            <div class="row align-items-end">
+                <div class="col-md-3">
+                    <label for="platformSelect" class="form-label">Platform</label>
+                    <select class="form-select" id="platformSelect" onchange="handlePlatformChange()">
+                        <option value="youtube">YouTube ✅</option>
+                        <option value="tiktok" disabled>TikTok (Coming Soon) 🚧</option>
+                        <option value="instagram" disabled>Instagram (Coming Soon) 🚧</option>
+                    </select>
+                    <small class="text-muted">More platforms are being added!</small>
+                </div>
+                <div class="col-md-3">
+                    <label for="categorySelect" class="form-label">Category</label>
+                    <select class="form-select" id="categorySelect">
+                        <option value="0">All Categories</option>
+                        <option value="10">Music</option>
+                        <option value="20">Gaming</option>
+                        <option value="28">Science & Technology</option>
+                        <option value="24">Entertainment</option>
+                        <option value="25">News & Politics</option>
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <label for="regionSelect" class="form-label">Region</label>
+                    <select class="form-select" id="regionSelect">
+                        <option value="US">United States</option>
+                        <option value="GB">United Kingdom</option>
+                        <option value="CA">Canada</option>
+                        <option value="AU">Australia</option>
+                        <option value="DE">Germany</option>
+                        <option value="FR">France</option>
+                        <option value="JP">Japan</option>
+                        <option value="KR">South Korea</option>
+                        <option value="IN">India</option>
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <button class="btn btn-primary w-100" onclick="loadTrendingVideos()">
+                        <i class="fas fa-search mr-1"></i>
+                        Update Results
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Loading Spinner -->
+        <div class="loading-spinner" id="loadingSpinner">
+            <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Loading...</span>
+            </div>
+            <p class="mt-2">Loading trending videos...</p>
+        </div>
+
+        <!-- Videos Grid -->
+        <div class="row" id="videosGrid">
+            <!-- Videos will be loaded here -->
+        </div>
+
+        <!-- No Results Message -->
+        <div id="noResults" style="display: none;" class="text-center py-5">
+            <i class="fas fa-video-slash fa-3x text-muted mb-3"></i>
+            <h4 class="text-muted">No videos found</h4>
+            <p class="text-muted">Try changing your filters or check back later.</p>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        let currentVideos = [];
+
+        function formatViews(views) {
+            const num = parseInt(views);
+            if (num >= 1000000) {
+                return (num / 1000000).toFixed(1) + 'M';
+            } else if (num >= 1000) {
+                return (num / 1000).toFixed(1) + 'K';
+            }
+            return num.toString();
+        }
+
+        function createVideoCard(video) {
+            return `
+                <div class="col-lg-4 col-md-6">
+                    <div class="card video-card">
+                        <img src="${video.thumbnail}" class="video-thumbnail" alt="${video.title}" loading="lazy">
+                        <div class="video-info">
+                            <div class="video-title">${video.title}</div>
+                            <div class="video-description">${video.description}</div>
+                            <div class="video-meta">
+                                <div><i class="fas fa-user mr-1"></i>${video.channel}</div>
+                                <div class="video-stats">
+                                    <div>
+                                        <i class="fas fa-eye mr-1"></i>${formatViews(video.views)} views
+                                        <span class="ms-2"><i class="fas fa-clock mr-1"></i>${video.duration}</span>
+                                    </div>
+                                    <span class="category-badge">${video.category}</span>
+                                </div>
+                                <div class="mt-2">
+                                    <small class="text-muted"><i class="fas fa-calendar mr-1"></i>${video.published}</small>
+                                </div>
+                            </div>
+                            <div class="mt-3 d-flex gap-2">
+                                <button class="btn extract-button flex-grow-1" onclick="extractFromVideo('${video.url}', '${video.title}')">
+                                    <i class="fas fa-images mr-1"></i>Extract Frames
+                                </button>
+                                <a href="${video.url}" target="_blank" class="btn btn-outline-primary">
+                                    <i class="fas fa-external-link-alt"></i>
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function displayVideos(videos) {
+            const videosGrid = document.getElementById('videosGrid');
+            const noResults = document.getElementById('noResults');
+            
+            if (videos.length === 0) {
+                videosGrid.innerHTML = '';
+                noResults.style.display = 'block';
+                return;
+            }
+            
+            noResults.style.display = 'none';
+            videosGrid.innerHTML = videos.map(createVideoCard).join('');
+        }
+
+        function loadTrendingVideos() {
+            const platform = document.getElementById('platformSelect').value;
+            const category = document.getElementById('categorySelect').value;
+            const region = document.getElementById('regionSelect').value;
+            const loadingSpinner = document.getElementById('loadingSpinner');
+            
+            // Check if platform is supported
+            const supportedPlatforms = ['youtube'];
+            if (!supportedPlatforms.includes(platform)) {
+                displayError(`Platform "${platform}" is not supported yet. Only YouTube is currently available.`);
+                return;
+            }
+            
+            // Show loading spinner
+            loadingSpinner.style.display = 'block';
+            document.getElementById('videosGrid').style.display = 'none';
+            document.getElementById('noResults').style.display = 'none';
+            
+            const params = new URLSearchParams({
+                platform: platform,
+                category: category,
+                region: region,
+                max_results: '12'
+            });
+            
+            fetch(`/api/trending?${params.toString()}`)
+                .then(response => {
+                    if (!response.ok) {
+                        return response.json().then(errorData => {
+                            throw new Error(errorData.message || errorData.error || `HTTP ${response.status}`);
+                        });
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    loadingSpinner.style.display = 'none';
+                    document.getElementById('videosGrid').style.display = 'flex';
+                    
+                    if (data.videos) {
+                        currentVideos = data.videos;
+                        displayVideos(data.videos);
+                    } else {
+                        displayVideos([]);
+                    }
+                })
+                .catch(error => {
+                    console.error('Error loading trending videos:', error);
+                    loadingSpinner.style.display = 'none';
+                    document.getElementById('videosGrid').style.display = 'flex';
+                    displayError(error.message || 'Failed to load trending videos');
+                });
+        }
+
+        function displayError(message) {
+            const videosGrid = document.getElementById('videosGrid');
+            const noResults = document.getElementById('noResults');
+            
+            videosGrid.innerHTML = `
+                <div class="col-12">
+                    <div class="alert alert-warning" role="alert">
+                        <i class="fas fa-exclamation-triangle mr-2"></i>
+                        ${message}
+                        <br><br>
+                        <small class="text-muted">
+                            <i class="fas fa-info-circle mr-1"></i>
+                            We're working on adding support for more platforms. Stay tuned!
+                        </small>
+                    </div>
+                </div>
+            `;
+            noResults.style.display = 'none';
+        }
+
+        function extractFromVideo(videoUrl, videoTitle) {
+            // Redirect to main page with video URL pre-filled
+            const mainPageUrl = new URL('/', window.location.origin);
+            mainPageUrl.searchParams.set('url', videoUrl);
+            mainPageUrl.searchParams.set('title', videoTitle);
+            window.location.href = mainPageUrl.toString();
+        }
+
+        function handlePlatformChange() {
+            const platform = document.getElementById('platformSelect').value;
+            const supportedPlatforms = ['youtube'];
+            
+            if (!supportedPlatforms.includes(platform)) {
+                // Reset to YouTube if unsupported platform is somehow selected
+                document.getElementById('platformSelect').value = 'youtube';
+                
+                // Show a message
+                const videosGrid = document.getElementById('videosGrid');
+                videosGrid.innerHTML = `
+                    <div class="col-12">
+                        <div class="alert alert-info" role="alert">
+                            <i class="fas fa-info-circle mr-2"></i>
+                            That platform isn't supported yet! Switched back to YouTube.
+                            <br><br>
+                            <small class="text-muted">
+                                We're working on adding TikTok, Instagram, and more platforms soon! 🚀
+                            </small>
+                        </div>
+                    </div>
+                `;
+                
+                // Auto-load YouTube trending after 2 seconds
+                setTimeout(loadTrendingVideos, 2000);
+            } else {
+                loadTrendingVideos();
+            }
+        }
+
+        // Load trending videos on page load
+        document.addEventListener('DOMContentLoaded', function() {
+            loadTrendingVideos();
+        });
+
+        // Auto-refresh every 5 minutes
+        setInterval(loadTrendingVideos, 300000);
+    </script>
+</body>
+</html>

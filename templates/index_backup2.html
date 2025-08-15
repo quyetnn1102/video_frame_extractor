@@ -1,0 +1,711 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Video Frame Extractor & Short Video Creator</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 15px;
+            padding: 30px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .header h1 {
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 2.5em;
+        }
+
+        .header p {
+            color: #666;
+            font-size: 1.1em;
+        }
+
+        /* Tab Navigation */
+        .tab-nav {
+            display: flex;
+            border-bottom: 2px solid #eee;
+            margin-bottom: 30px;
+        }
+
+        .tab-button {
+            background: none;
+            border: none;
+            padding: 15px 25px;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: 600;
+            color: #666;
+            border-bottom: 3px solid transparent;
+            transition: all 0.3s;
+        }
+
+        .tab-button:hover {
+            color: #667eea;
+        }
+
+        .tab-button.active {
+            color: #667eea;
+            border-bottom-color: #667eea;
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: #333;
+        }
+
+        input[type="url"], input[type="number"], select, textarea {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            font-size: 16px;
+            transition: border-color 0.3s;
+        }
+
+        input[type="url"]:focus, input[type="number"]:focus, select:focus, textarea:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        textarea {
+            height: 100px;
+            resize: vertical;
+            font-family: monospace;
+        }
+
+        .form-row {
+            display: flex;
+            gap: 15px;
+        }
+
+        .form-row .form-group {
+            flex: 1;
+        }
+
+        .checkbox-group {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .checkbox-group input[type="checkbox"] {
+            width: auto;
+        }
+
+        .btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 15px 30px;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s;
+            margin-right: 10px;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+        }
+
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .btn-secondary {
+            background: linear-gradient(135deg, #95a5a6 0%, #7f8c8d 100%);
+        }
+
+        .loading {
+            display: none;
+            text-align: center;
+            margin: 20px 0;
+        }
+
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #667eea;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 15px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .alert {
+            padding: 15px;
+            border-radius: 8px;
+            margin: 20px 0;
+            font-weight: 500;
+        }
+
+        .alert-error {
+            background: #ffebee;
+            border: 1px solid #f44336;
+            color: #d32f2f;
+        }
+
+        .alert-success {
+            background: #e8f5e8;
+            border: 1px solid #4caf50;
+            color: #2e7d32;
+        }
+
+        .results {
+            margin-top: 30px;
+        }
+
+        .result-item {
+            background: #f9f9f9;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 15px;
+            border: 1px solid #eee;
+        }
+
+        .video-info {
+            background: #e3f2fd;
+            border: 1px solid #2196f3;
+            color: #1976d2;
+        }
+
+        .video-preview {
+            max-width: 100%;
+            border-radius: 8px;
+            margin-top: 10px;
+        }
+
+        .frame-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 15px;
+            margin-top: 20px;
+        }
+
+        .frame-item {
+            text-align: center;
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+        }
+
+        .frame-item img {
+            max-width: 100%;
+            border-radius: 4px;
+            margin-bottom: 10px;
+        }
+
+        .frame-item .timestamp {
+            font-weight: 600;
+            color: #667eea;
+            margin-bottom: 5px;
+        }
+
+        .download-link {
+            color: #667eea;
+            text-decoration: none;
+            font-weight: 500;
+        }
+
+        .download-link:hover {
+            text-decoration: underline;
+        }
+
+        .help-text {
+            font-size: 0.9em;
+            color: #888;
+            margin-top: 5px;
+        }
+
+        .feature-info {
+            background: #fff3e0;
+            border: 1px solid #ff9800;
+            color: #e65100;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+
+        .feature-info h3 {
+            margin-bottom: 10px;
+        }
+
+        .feature-info ul {
+            margin-left: 20px;
+        }
+
+        .feature-info li {
+            margin-bottom: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🎬 Video Tool Suite</h1>
+            <p>Extract frames từ video hoặc tạo short videos từ YouTube & TikTok</p>
+        </div>
+
+        <!-- Tab Navigation -->
+        <div class="tab-nav">
+            <button class="tab-button active" onclick="switchTab('frames')">📸 Extract Frames</button>
+            <button class="tab-button" onclick="switchTab('shorts')">🎞️ Create Short Videos</button>
+            <button class="tab-button" onclick="switchTab('info')">ℹ️ Video Info</button>
+        </div>
+
+        <!-- Frames Tab -->
+        <div id="frames-tab" class="tab-content active">
+            <div class="feature-info">
+                <h3>📸 Extract Frames Feature</h3>
+                <ul>
+                    <li>Trích xuất frame từ video tại các thời điểm cụ thể</li>
+                    <li>Hỗ trợ YouTube & TikTok</li>
+                    <li>Format thời gian: giây (30) hoặc phút:giây (1:30)</li>
+                </ul>
+            </div>
+
+            <form id="extract-form">
+                <div class="form-group">
+                    <label for="video-url">Video URL:</label>
+                    <input type="url" id="video-url" placeholder="https://www.youtube.com/watch?v=..." required>
+                    <div class="help-text">Paste YouTube hoặc TikTok URL vào đây</div>
+                </div>
+
+                <div class="form-group">
+                    <label for="timestamps">Timestamps:</label>
+                    <textarea id="timestamps" placeholder="0:10&#10;0:30&#10;1:00&#10;1:30" required></textarea>
+                    <div class="help-text">Nhập mỗi timestamp trên một dòng. VD: 0:30, 1:15, 2:00</div>
+                </div>
+
+                <button type="submit" class="btn">Extract Frames</button>
+                <button type="button" class="btn btn-secondary" onclick="cleanup()">Clean Up</button>
+            </form>
+        </div>
+
+        <!-- Shorts Tab -->
+        <div id="shorts-tab" class="tab-content">
+            <div class="feature-info">
+                <h3>🎞️ Short Video Creator</h3>
+                <ul>
+                    <li>Tạo video ngắn từ video dài</li>
+                    <li>Tùy chọn định dạng dọc cho social media</li>
+                    <li>Thêm text overlay</li>
+                    <li>Chọn chất lượng video</li>
+                </ul>
+            </div>
+
+            <form id="short-form">
+                <div class="form-group">
+                    <label for="short-video-url">Video URL:</label>
+                    <input type="url" id="short-video-url" placeholder="https://www.youtube.com/watch?v=..." required>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="start-time">Start Time:</label>
+                        <input type="text" id="start-time" placeholder="0:30" required>
+                        <div class="help-text">Thời điểm bắt đầu (VD: 0:30, 1:15)</div>
+                    </div>
+                    <div class="form-group">
+                        <label for="duration">Duration (seconds):</label>
+                        <input type="number" id="duration" min="1" max="300" value="30" required>
+                        <div class="help-text">Độ dài video (1-300 giây)</div>
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="quality">Quality:</label>
+                        <select id="quality">
+                            <option value="low">Low (1000k)</option>
+                            <option value="medium" selected>Medium (2000k)</option>
+                            <option value="high">High (5000k)</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <div class="checkbox-group">
+                            <input type="checkbox" id="vertical-format">
+                            <label for="vertical-format">Vertical Format (9:16 for shorts)</label>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="overlay-text">Text Overlay (Optional):</label>
+                    <input type="text" id="overlay-text" placeholder="Your text here...">
+                    <div class="help-text">Text sẽ được hiển thị trên video</div>
+                </div>
+
+                <button type="submit" class="btn">Create Short Video</button>
+            </form>
+        </div>
+
+        <!-- Video Info Tab -->
+        <div id="info-tab" class="tab-content">
+            <div class="feature-info">
+                <h3>ℹ️ Video Information</h3>
+                <ul>
+                    <li>Xem thông tin chi tiết về video</li>
+                    <li>Kiểm tra độ dài, title, mô tả</li>
+                    <li>Không cần download video</li>
+                </ul>
+            </div>
+
+            <form id="info-form">
+                <div class="form-group">
+                    <label for="info-video-url">Video URL:</label>
+                    <input type="url" id="info-video-url" placeholder="https://www.youtube.com/watch?v=..." required>
+                </div>
+
+                <button type="submit" class="btn">Get Video Info</button>
+            </form>
+        </div>
+
+        <!-- Loading indicator -->
+        <div id="loading" class="loading">
+            <div class="spinner"></div>
+            <p>Processing... Please wait</p>
+        </div>
+
+        <!-- Results area -->
+        <div id="results" class="results"></div>
+    </div>
+
+    <script>
+        // Tab switching
+        function switchTab(tabName) {
+            // Hide all tabs
+            document.querySelectorAll('.tab-content').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            
+            // Remove active from all buttons
+            document.querySelectorAll('.tab-button').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            
+            // Show selected tab
+            document.getElementById(tabName + '-tab').classList.add('active');
+            
+            // Add active to clicked button
+            event.target.classList.add('active');
+            
+            // Clear results
+            clearResults();
+        }
+
+        // Extract frames form
+        document.getElementById('extract-form').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const url = document.getElementById('video-url').value;
+            const timestampsText = document.getElementById('timestamps').value;
+            const timestamps = timestampsText.split('\\n').map(t => t.trim()).filter(t => t);
+            
+            if (timestamps.length === 0) {
+                showError('Please enter at least one timestamp.');
+                return;
+            }
+            
+            showLoading();
+            clearResults();
+            
+            try {
+                const response = await fetch('/api/extract', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        url: url,
+                        timestamps: timestamps
+                    })
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    showFrameResults(result);
+                } else {
+                    showError(result.error || 'An error occurred');
+                }
+            } catch (error) {
+                showError('Network error: ' + error.message);
+            } finally {
+                hideLoading();
+            }
+        });
+
+        // Create short video form
+        document.getElementById('short-form').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const url = document.getElementById('short-video-url').value;
+            const startTime = document.getElementById('start-time').value;
+            const duration = parseInt(document.getElementById('duration').value);
+            const quality = document.getElementById('quality').value;
+            const verticalFormat = document.getElementById('vertical-format').checked;
+            const overlayText = document.getElementById('overlay-text').value;
+            
+            const requestData = {
+                url: url,
+                start_time: startTime,
+                duration: duration,
+                quality: quality,
+                vertical_format: verticalFormat
+            };
+            
+            if (overlayText) {
+                requestData.text_overlay = {
+                    text: overlayText,
+                    position: 'bottom',
+                    fontsize: 50,
+                    color: 'white',
+                    stroke_color: 'black',
+                    stroke_width: 2
+                };
+            }
+            
+            showLoading();
+            clearResults();
+            
+            try {
+                const response = await fetch('/api/create-short', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(requestData)
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    showShortVideoResults(result);
+                } else {
+                    showError(result.error || 'An error occurred');
+                }
+            } catch (error) {
+                showError('Network error: ' + error.message);
+            } finally {
+                hideLoading();
+            }
+        });
+
+        // Video info form
+        document.getElementById('info-form').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const url = document.getElementById('info-video-url').value;
+            
+            showLoading();
+            clearResults();
+            
+            try {
+                const response = await fetch('/api/video-info', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({url: url})
+                });
+                
+                const result = await response.json();
+                
+                if (result.success) {
+                    showVideoInfo(result.video_info);
+                } else {
+                    showError(result.error || 'An error occurred');
+                }
+            } catch (error) {
+                showError('Network error: ' + error.message);
+            } finally {
+                hideLoading();
+            }
+        });
+
+        // Cleanup function
+        async function cleanup() {
+            if (confirm('Are you sure you want to clean up all files?')) {
+                try {
+                    const response = await fetch('/api/cleanup', {
+                        method: 'POST'
+                    });
+                    const result = await response.json();
+                    
+                    if (result.success) {
+                        showSuccess('Cleanup completed successfully');
+                    } else {
+                        showError('Cleanup failed: ' + result.error);
+                    }
+                } catch (error) {
+                    showError('Network error: ' + error.message);
+                }
+            }
+        }
+
+        // Display functions
+        function showLoading() {
+            document.getElementById('loading').style.display = 'block';
+        }
+
+        function hideLoading() {
+            document.getElementById('loading').style.display = 'none';
+        }
+
+        function clearResults() {
+            document.getElementById('results').innerHTML = '';
+        }
+
+        function showError(message) {
+            const results = document.getElementById('results');
+            results.innerHTML = `<div class="alert alert-error">❌ ${message}</div>`;
+        }
+
+        function showSuccess(message) {
+            const results = document.getElementById('results');
+            results.innerHTML = `<div class="alert alert-success">✅ ${message}</div>`;
+        }
+
+        function showFrameResults(result) {
+            let html = `
+                <div class="result-item">
+                    <h3>✅ Extraction Complete!</h3>
+                    <p><strong>Video:</strong> ${result.title}</p>
+                    <p><strong>Total Frames:</strong> ${result.total_extracted}</p>
+                </div>
+            `;
+            
+            if (result.frames && result.frames.length > 0) {
+                html += '<div class="frame-grid">';
+                result.frames.forEach(frame => {
+                    html += `
+                        <div class="frame-item">
+                            <div class="timestamp">${frame.timestamp}</div>
+                            <img src="/frames/${frame.filename}" alt="Frame at ${frame.timestamp}">
+                            <div>
+                                <a href="/frames/${frame.filename}" class="download-link" download>Download</a>
+                            </div>
+                        </div>
+                    `;
+                });
+                html += '</div>';
+            }
+            
+            document.getElementById('results').innerHTML = html;
+        }
+
+        function showShortVideoResults(result) {
+            const short = result.short_video;
+            const sizeInMB = (short.file_size / (1024 * 1024)).toFixed(2);
+            
+            const html = `
+                <div class="result-item">
+                    <h3>🎬 Short Video Created!</h3>
+                    <p><strong>Original Title:</strong> ${short.title}</p>
+                    <p><strong>Duration:</strong> ${short.duration}s (from ${short.start_time}s)</p>
+                    <p><strong>File Size:</strong> ${sizeInMB} MB</p>
+                    <p><strong>Quality:</strong> ${short.options_applied.quality}</p>
+                    <p><strong>Vertical Format:</strong> ${short.options_applied.resize_to_vertical ? 'Yes' : 'No'}</p>
+                    
+                    <video class="video-preview" controls>
+                        <source src="/shorts/${short.filename}" type="video/mp4">
+                        Your browser does not support the video tag.
+                    </video>
+                    
+                    <div style="margin-top: 15px;">
+                        <a href="/shorts/${short.filename}" class="btn" download>📥 Download Short Video</a>
+                    </div>
+                </div>
+            `;
+            
+            document.getElementById('results').innerHTML = html;
+        }
+
+        function showVideoInfo(info) {
+            const durationFormatted = formatDuration(info.duration);
+            const viewCount = info.view_count ? info.view_count.toLocaleString() : 'N/A';
+            
+            const html = `
+                <div class="result-item video-info">
+                    <h3>📺 Video Information</h3>
+                    <p><strong>Title:</strong> ${info.title}</p>
+                    <p><strong>Duration:</strong> ${durationFormatted}</p>
+                    <p><strong>Views:</strong> ${viewCount}</p>
+                    <p><strong>Uploader:</strong> ${info.uploader}</p>
+                    <p><strong>Upload Date:</strong> ${info.upload_date}</p>
+                    <p><strong>Description:</strong> ${info.description}</p>
+                    
+                    ${info.thumbnail ? `<img src="${info.thumbnail}" alt="Thumbnail" style="max-width: 300px; margin-top: 10px; border-radius: 8px;">` : ''}
+                    
+                    <div style="margin-top: 15px;">
+                        <a href="${info.webpage_url}" target="_blank" class="btn">🔗 Open Original Video</a>
+                    </div>
+                </div>
+            `;
+            
+            document.getElementById('results').innerHTML = html;
+        }
+
+        function formatDuration(seconds) {
+            if (!seconds) return 'N/A';
+            
+            const hours = Math.floor(seconds / 3600);
+            const minutes = Math.floor((seconds % 3600) / 60);
+            const secs = Math.floor(seconds % 60);
+            
+            if (hours > 0) {
+                return `${hours}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+            } else {
+                return `${minutes}:${secs.toString().padStart(2, '0')}`;
+            }
+        }
+    </script>
+</body>
+</html>

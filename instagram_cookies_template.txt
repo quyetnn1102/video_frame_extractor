@@ -1,0 +1,17 @@
+# Netscape HTTP Cookie File
+# This is a sample file - replace with your actual Instagram cookies
+# 
+# To use this:
+# 1. Export your Instagram cookies from browser
+# 2. Replace this content with your actual cookies
+# 3. Save as 'instagram_cookies.txt' 
+#
+# Format: domain	domain_specified	path	secure	expiry	name	value
+#
+# Example (replace with your actual values):
+# .instagram.com	TRUE	/	FALSE	1735689600	sessionid	YOUR_ACTUAL_SESSION_ID_HERE
+# .instagram.com	TRUE	/	FALSE	1735689600	csrftoken	YOUR_ACTUAL_CSRF_TOKEN_HERE
+# .instagram.com	TRUE	/	FALSE	1735689600	mid	YOUR_ACTUAL_MID_HERE
+# .instagram.com	TRUE	/	FALSE	1735689600	ig_did	YOUR_ACTUAL_IG_DID_HERE
+
+# This is just a template - it won't work for authentication

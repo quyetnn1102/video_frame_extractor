@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Video Frame Extractor</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 15px;
+            padding: 30px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .header h1 {
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 2.5em;
+        }
+
+        .header p {
+            color: #666;
+            font-size: 1.1em;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: #333;
+        }
+
+        input[type="url"], textarea {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            font-size: 16px;
+            transition: border-color 0.3s;
+        }
+
+        input[type="url"]:focus, textarea:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        textarea {
+            height: 100px;
+            resize: vertical;
+            font-family: monospace;
+        }
+
+        .btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 15px 30px;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s;
+            margin-right: 10px;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+        }
+
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .btn-secondary {
+            background: #6c757d;
+        }
+
+        .loading {
+            display: none;
+            text-align: center;
+            margin: 20px 0;
+        }
+
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #667eea;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 10px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .alert {
+            padding: 15px;
+            border-radius: 8px;
+            margin: 20px 0;
+            display: none;
+        }
+
+        .alert-success {
+            background-color: #d4edda;
+            border: 1px solid #c3e6cb;
+            color: #155724;
+        }
+
+        .alert-error {
+            background-color: #f8d7da;
+            border: 1px solid #f5c6cb;
+            color: #721c24;
+        }
+
+        .results {
+            margin-top: 30px;
+        }
+
+        .frames-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+            gap: 20px;
+            margin-top: 20px;
+        }
+
+        .frame-item {
+            background: white;
+            border-radius: 10px;
+            padding: 15px;
+            box-shadow: 0 5px 15px rgba(0, 0, 0, 0.1);
+            transition: transform 0.2s;
+        }
+
+        .frame-item:hover {
+            transform: translateY(-3px);
+        }
+
+        .frame-item img {
+            width: 100%;
+            height: 150px;
+            object-fit: cover;
+            border-radius: 8px;
+            margin-bottom: 10px;
+        }
+
+        .frame-info {
+            text-align: center;
+        }
+
+        .frame-timestamp {
+            font-weight: 600;
+            color: #667eea;
+            margin-bottom: 5px;
+        }
+
+        .download-btn {
+            background: #28a745;
+            color: white;
+            padding: 8px 16px;
+            border: none;
+            border-radius: 5px;
+            text-decoration: none;
+            display: inline-block;
+            font-size: 14px;
+            transition: background 0.2s;
+        }
+
+        .download-btn:hover {
+            background: #218838;
+        }
+
+        .help-text {
+            font-size: 14px;
+            color: #666;
+            margin-top: 5px;
+            font-style: italic;
+        }
+
+        .example-box {
+            background: #f8f9fa;
+            border-left: 4px solid #667eea;
+            padding: 15px;
+            margin: 15px 0;
+            border-radius: 5px;
+        }
+
+        .example-box h4 {
+            color: #333;
+            margin-bottom: 10px;
+        }
+
+        .example-box ul {
+            margin-left: 20px;
+        }
+
+        .example-box li {
+            margin-bottom: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🎬 Video Frame Extractor</h1>
+            <p>Cắt ảnh từ video YouTube và TikTok theo mốc thời gian</p>
+        </div>
+
+        <form id="extractForm">
+            <div class="form-group">
+                <label for="videoUrl">URL Video (YouTube hoặc TikTok):</label>
+                <input type="url" id="videoUrl" name="videoUrl" required 
+                       placeholder="https://www.youtube.com/watch?v=... hoặc https://www.tiktok.com/@.../video/...">
+            </div>
+
+            <div class="form-group">
+                <label for="timestamps">Mốc thời gian (mỗi dòng một mốc):</label>
+                <textarea id="timestamps" name="timestamps" required 
+                          placeholder="1:23&#10;2:45&#10;5:30"></textarea>
+                <div class="help-text">
+                    Hỗ trợ định dạng: 30 (30 giây), 1:23 (1 phút 23 giây), 1:23:45 (1 giờ 23 phút 45 giây)
+                </div>
+            </div>
+
+            <div class="example-box">
+                <h4>Ví dụ mốc thời gian:</h4>
+                <ul>
+                    <li><strong>30</strong> - Giây thứ 30</li>
+                    <li><strong>1:23</strong> - Phút thứ 1, giây thứ 23</li>
+                    <li><strong>1:23:45</strong> - Giờ thứ 1, phút thứ 23, giây thứ 45</li>
+                </ul>
+            </div>
+
+            <button type="submit" class="btn" id="extractBtn">🎯 Cắt Ảnh</button>
+            <button type="button" class="btn btn-secondary" id="cleanupBtn">🗑️ Xóa Ảnh Cũ</button>
+        </form>
+
+        <div class="loading" id="loading">
+            <div class="spinner"></div>
+            <p>Đang xử lý video... Vui lòng chờ</p>
+        </div>
+
+        <div class="alert alert-success" id="successAlert"></div>
+        <div class="alert alert-error" id="errorAlert"></div>
+
+        <div class="results" id="results" style="display: none;">
+            <h3>Kết quả:</h3>
+            <div id="videoTitle"></div>
+            <div class="frames-grid" id="framesGrid"></div>
+        </div>
+    </div>
+
+    <script>
+        document.getElementById('extractForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            const videoUrl = document.getElementById('videoUrl').value.trim();
+            const timestampsText = document.getElementById('timestamps').value.trim();
+            const timestamps = timestampsText.split('\n').filter(t => t.trim());
+            
+            if (!videoUrl || !timestamps.length) {
+                showError('Vui lòng nhập URL video và ít nhất một mốc thời gian');
+                return;
+            }
+            
+            showLoading(true);
+            hideAlerts();
+            
+            try {
+                const response = await fetch('/api/extract', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        url: videoUrl,
+                        timestamps: timestamps
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (!response.ok) {
+                    throw new Error(data.error || 'Có lỗi xảy ra');
+                }
+                
+                showSuccess(`Đã cắt thành công ${data.total_extracted} ảnh từ video: ${data.title}`);
+                displayResults(data);
+                
+            } catch (error) {
+                showError(error.message);
+            } finally {
+                showLoading(false);
+            }
+        });
+        
+        document.getElementById('cleanupBtn').addEventListener('click', async function() {
+            if (!confirm('Bạn có chắc muốn xóa tất cả ảnh đã cắt?')) {
+                return;
+            }
+            
+            try {
+                const response = await fetch('/api/cleanup', {
+                    method: 'POST'
+                });
+                
+                const data = await response.json();
+                
+                if (!response.ok) {
+                    throw new Error(data.error || 'Có lỗi xảy ra');
+                }
+                
+                showSuccess('Đã xóa thành công tất cả ảnh cũ');
+                document.getElementById('results').style.display = 'none';
+                
+            } catch (error) {
+                showError(error.message);
+            }
+        });
+        
+        function showLoading(show) {
+            document.getElementById('loading').style.display = show ? 'block' : 'none';
+            document.getElementById('extractBtn').disabled = show;
+        }
+        
+        function showSuccess(message) {
+            const alert = document.getElementById('successAlert');
+            alert.textContent = message;
+            alert.style.display = 'block';
+        }
+        
+        function showError(message) {
+            const alert = document.getElementById('errorAlert');
+            alert.textContent = message;
+            alert.style.display = 'block';
+        }
+        
+        function hideAlerts() {
+            document.getElementById('successAlert').style.display = 'none';
+            document.getElementById('errorAlert').style.display = 'none';
+        }
+        
+        function displayResults(data) {
+            const resultsDiv = document.getElementById('results');
+            const titleDiv = document.getElementById('videoTitle');
+            const framesGrid = document.getElementById('framesGrid');
+            
+            titleDiv.innerHTML = `<h4>Video: ${data.title}</h4>`;
+            
+            framesGrid.innerHTML = '';
+            
+            data.frames.forEach(frame => {
+                const frameItem = document.createElement('div');
+                frameItem.className = 'frame-item';
+                
+                frameItem.innerHTML = `
+                    <img src="/frames/${frame.filename}" alt="Frame tại ${frame.timestamp}" loading="lazy">
+                    <div class="frame-info">
+                        <div class="frame-timestamp">⏱️ ${frame.timestamp}</div>
+                        <a href="/frames/${frame.filename}" download="${frame.filename}" class="download-btn">
+                            📥 Tải xuống
+                        </a>
+                    </div>
+                `;
+                
+                framesGrid.appendChild(frameItem);
+            });
+            
+            resultsDiv.style.display = 'block';
+        }
+    </script>
+</body>
+</html>

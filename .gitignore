@@ -1,0 +1,74 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual environment
+.venv/
+venv/
+env/
+ENV/
+
+# Downloaded videos
+downloads/*
+!downloads/.gitkeep
+
+# Extracted frames
+extracted_frames/*
+!extracted_frames/.gitkeep
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# YouTube API credentials (NEVER COMMIT THESE!)
+client_secrets.json
+youtube_credentials.pickle
+
+# Environment variables
+.env
+
+# Database files
+app_data.db
+*.db
+*.sqlite
+*.sqlite3
+
+# Instagram cookies and authentication
+instagram_cookies.txt
+
+# Generated short videos
+generated_shorts/*
+!generated_shorts/.gitkeep
+
+# Log directories
+logs/
