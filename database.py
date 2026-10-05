@@ -3,6 +3,7 @@ Database models for enhanced data management and analytics
 Using SQLite for simplicity, can be easily upgraded to PostgreSQL
 """
 import sqlite3
+from contextlib import contextmanager
 from datetime import datetime
 from typing import Dict, Any
 import json
@@ -13,15 +14,31 @@ from logger import app_logger
 class DatabaseManager:
     """Enhanced database management with connection pooling and migration support"""
     
-    def __init__(self):
+    def __init__(self, db_path=None):
         self.config = get_config()
-        self.db_path = self.config.BASE_DIR / 'app_data.db'
+        self.db_path = db_path or self.config.BASE_DIR / 'app_data.db'
         self.init_database()
     
+    @contextmanager
+    def connection(self):
+        """
+        A connection that commits on success, rolls back on error and is always closed.
+
+        `with sqlite3.connect(...)` only manages the transaction: it never closes the
+        connection, which then stays open (and locks the file on Windows) until it is
+        garbage collected.
+        """
+        conn = sqlite3.connect(self.db_path)
+        try:
+            with conn:
+                yield conn
+        finally:
+            conn.close()
+
     def init_database(self):
         """Initialize database with required tables"""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with self.connection() as conn:
                 cursor = conn.cursor()
                 
                 # Video processing requests table
@@ -97,7 +114,7 @@ class DatabaseManager:
                          duration: int = None, user_ip: str = None, user_agent: str = None) -> int:
         """Log a new video processing request"""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with self.connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute('''
                     INSERT INTO video_requests (url_hash, platform, title, duration, user_ip, user_agent)
@@ -110,18 +127,18 @@ class DatabaseManager:
             app_logger.error(f"Failed to log video request: {str(e)}")
             return 0
     
-    def update_video_request(self, request_id: int, status: str, error_message: str = None, 
-                           processing_time_ms: int = None):
-        """Update video request status"""
+    def update_video_request(self, request_id: int, status: str, error_message: str = None,
+                           processing_time_ms: int = None, title: str = None):
+        """Update video request status (and its title, known only once the video is downloaded)"""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with self.connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute('''
-                    UPDATE video_requests 
-                    SET status = ?, error_message = ?, processing_time_ms = ?, 
-                        completed_at = CURRENT_TIMESTAMP
+                    UPDATE video_requests
+                    SET status = ?, error_message = ?, processing_time_ms = ?,
+                        completed_at = CURRENT_TIMESTAMP, title = COALESCE(?, title)
                     WHERE id = ?
-                ''', (status, error_message, processing_time_ms, request_id))
+                ''', (status, error_message, processing_time_ms, title, request_id))
                 conn.commit()
         except Exception as e:
             app_logger.error(f"Failed to update video request: {str(e)}")
@@ -129,7 +146,7 @@ class DatabaseManager:
     def log_extracted_frame(self, request_id: int, timestamp: int, filename: str, file_size: int = None):
         """Log an extracted frame"""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with self.connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute('''
                     INSERT INTO extracted_frames (request_id, timestamp, filename, file_size)
@@ -143,7 +160,7 @@ class DatabaseManager:
                           success: bool, response_time_ms: int = None):
         """Log user analytics data"""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with self.connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute('''
                     INSERT INTO user_analytics (user_ip, platform, action, success, response_time_ms)
@@ -156,7 +173,7 @@ class DatabaseManager:
     def record_system_metric(self, metric_name: str, metric_value: float, metadata: Dict = None):
         """Record system performance metric"""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with self.connection() as conn:
                 cursor = conn.cursor()
                 metadata_json = json.dumps(metadata) if metadata else None
                 cursor.execute('''
@@ -170,7 +187,7 @@ class DatabaseManager:
     def get_platform_statistics(self, days: int = 7) -> Dict[str, Any]:
         """Get platform usage statistics for the last N days"""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with self.connection() as conn:
                 cursor = conn.cursor()
                 
                 # Platform usage stats
@@ -220,7 +237,7 @@ class DatabaseManager:
     def get_error_analysis(self, days: int = 7) -> Dict[str, Any]:
         """Get error analysis for troubleshooting"""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with self.connection() as conn:
                 cursor = conn.cursor()
                 
                 cursor.execute('''
@@ -255,7 +272,7 @@ class DatabaseManager:
     def cleanup_old_records(self, days: int = 30) -> int:
         """Clean up old database records"""
         try:
-            with sqlite3.connect(self.db_path) as conn:
+            with self.connection() as conn:
                 cursor = conn.cursor()
                 
                 # Clean up old records
@@ -301,7 +318,7 @@ db_manager = DatabaseManager()
 def get_analytics() -> Dict[str, Any]:
     """Get comprehensive analytics data"""
     try:
-        with sqlite3.connect(db_manager.db_path) as conn:
+        with db_manager.connection() as conn:
             cursor = conn.cursor()
             
             # Total requests
@@ -361,26 +378,33 @@ def get_analytics() -> Dict[str, Any]:
             'total_frames_extracted': 0
         }
 
+def sqlite_time_to_iso(value):
+    """CURRENT_TIMESTAMP is UTC without a zone ('2026-10-05 15:44:30'); browsers need the 'Z'."""
+    if isinstance(value, str) and len(value) == len('YYYY-MM-DD HH:MM:SS'):
+        return value.replace(' ', 'T') + 'Z'
+    return value
+
+
 def get_recent_requests(limit: int = 10) -> list:
     """Get recent video processing requests"""
     try:
-        with sqlite3.connect(db_manager.db_path) as conn:
+        with db_manager.connection() as conn:
             cursor = conn.cursor()
             cursor.execute('''
-                SELECT platform, title, status, created_at, processing_time_ms, user_ip
-                FROM video_requests 
-                ORDER BY created_at DESC 
+                SELECT platform, title, status, created_at, processing_time_ms, error_message
+                FROM video_requests
+                ORDER BY created_at DESC, id DESC
                 LIMIT ?
             ''', (limit,))
-            
+
             rows = cursor.fetchall()
             return [{
                 'platform': row[0],
                 'title': row[1] or 'Unknown',
                 'status': row[2],
-                'created_at': row[3],
+                'created_at': sqlite_time_to_iso(row[3]),
                 'processing_time_ms': row[4],
-                'user_ip': row[5]
+                'error': row[5],  # why it failed; the messages are written to be shown
             } for row in rows]
             
     except Exception as e:

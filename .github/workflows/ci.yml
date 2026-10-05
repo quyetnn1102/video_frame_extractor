@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Tests (${{ matrix.os }}, Python ${{ matrix.python-version }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python-version: ['3.10', '3.11']
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false  # pip runs third-party package code later in the job
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: System libraries for OpenCV
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libgl1 libglib2.0-0
+
+      - name: Lockfile is up to date
+        run: uv lock --check
+
+      - name: Install dependencies (exactly uv.lock)
+        run: uv sync --frozen --python ${{ matrix.python-version }}
+
+      - name: Byte-compile
+        run: uv run --frozen python -m compileall -q app_enhanced.py config.py database.py link_resolver.py logger.py short_video.py trending.py validators.py video_processor.py youtube_uploader.py deploy.py tests scripts
+
+      - name: Unit tests (offline)
+        run: uv run --frozen python -m unittest discover -s tests -t . -v
+
+  security:
+    name: Security scans
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # gitleaks scans the whole history
+          persist-credentials: false
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Dependency vulnerabilities (advisory)
+        # Some pinned versions (Flask/Werkzeug 2.3, Pillow 10.0, ...) have published
+        # advisories. This reports them without failing the build until they are upgraded.
+        continue-on-error: true
+        run: |
+          uv export --frozen --no-dev --no-hashes --no-emit-project -o "$RUNNER_TEMP/locked.txt"
+          uv run --frozen pip-audit -r "$RUNNER_TEMP/locked.txt"
+
+      - name: Secret scan
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

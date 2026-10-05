@@ -1,0 +1,46 @@
+<aside class="sidebar" id="sidebar" aria-label="Main">
+    <div class="brand-row">
+        <a class="brand" href="/" aria-label="VideoExtract home"><span class="mark" aria-hidden="true"></span><span class="brand-name">VideoExtract</span></a>
+        <button type="button" class="side-toggle" id="sideToggle" aria-label="Collapse the sidebar" aria-expanded="true">
+            <svg class="icon" aria-hidden="true"><use href="#i-collapse"/></svg>
+        </button>
+    </div>
+
+    <nav class="side-nav" aria-label="Pages">
+        <a href="/"{% if active_page == 'home' %} aria-current="page"{% endif %} title="Home">
+            <svg class="icon" aria-hidden="true"><use href="#i-home"/></svg><span class="nav-label">Home</span>
+        </a>
+    </nav>
+
+    <p class="nav-title">Create</p>
+    <nav class="side-nav" aria-label="Create">
+        <a href="/extract"{% if active_page == 'extract' %} aria-current="page"{% endif %} title="Extract frames">
+            <svg class="icon" aria-hidden="true"><use href="#i-frames"/></svg><span class="nav-label">Extract frames</span>
+        </a>
+        <a href="/create-short"{% if active_page == 'create' %} aria-current="page"{% endif %} title="Create short">
+            <svg class="icon" aria-hidden="true"><use href="#i-scissors"/></svg><span class="nav-label">Create short</span>
+        </a>
+        <a href="/create-short#resultsSection" title="Your shorts">
+            <svg class="icon" aria-hidden="true"><use href="#i-library"/></svg><span class="nav-label">Your shorts</span>
+        </a>
+    </nav>
+
+    <p class="nav-title">Explore</p>
+    <nav class="side-nav" aria-label="Explore">
+        <a href="/trending"{% if active_page == 'trending' %} aria-current="page"{% endif %} title="Trending">
+            <svg class="icon" aria-hidden="true"><use href="#i-trending"/></svg><span class="nav-label">Trending</span>
+        </a>
+        <a href="/dashboard"{% if active_page == 'dashboard' %} aria-current="page"{% endif %} title="Dashboard">
+            <svg class="icon" aria-hidden="true"><use href="#i-chart"/></svg><span class="nav-label">Dashboard</span>
+        </a>
+    </nav>
+
+    <div class="side-foot">
+        <div class="local-card">
+            <strong>Runs on this computer</strong>
+            Videos, frames and shorts stay in this app's folders. Nothing is uploaded unless you choose YouTube.
+            <a href="/dashboard">See how it is going</a>
+        </div>
+    </div>
+</aside>
+<div class="scrim" id="scrim"></div>

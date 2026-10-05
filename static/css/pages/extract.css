@@ -1,0 +1,141 @@
+.extract-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+    grid-template-areas:
+        "link time"
+        "go   time";
+    gap: 1.5rem 2rem;
+}
+
+.extract-grid .field-link { grid-area: link; }
+.extract-grid .field-time { grid-area: time; display: flex; flex-direction: column; }
+.extract-grid .go { grid-area: go; align-self: end; }
+
+/* A log sheet: ruled lines, one timecode per line */
+.timecodes {
+    flex: 1;
+    min-height: 11rem;
+    resize: vertical;
+    font-size: 0.95rem;
+    font-variant-numeric: tabular-nums;
+    line-height: 1.9rem;
+    padding-block: 0.45rem;
+    background:
+        repeating-linear-gradient(transparent 0 calc(1.9rem - 1px), var(--ruled-line) calc(1.9rem - 1px) 1.9rem) 0 0.45rem local,
+        var(--surface);
+}
+
+.result-actions {
+    gap: var(--space-2);
+}
+
+#archiveStatus:not(:empty) {
+    margin-bottom: var(--space-4);
+}
+
+.contact {
+    margin-top: clamp(2rem, 5vw, 3rem);
+}
+
+/* The film strip: ghost frames mirror the timecodes you type, then fill with real frames */
+.strip {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr));
+    gap: 1rem;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.frame {
+    padding: 0 0.55rem 0.4rem;
+    color: var(--strip-ink);
+    background: var(--strip);
+    border-radius: var(--radius-sm);
+    box-shadow: var(--card-shadow);
+}
+
+.frame::before {
+    content: "";
+    display: block;
+    height: 1rem;
+    background: linear-gradient(90deg, var(--sprocket) 0 0.55rem, transparent 0.55rem) 0 50% / 1.1rem 0.38rem repeat-x;
+}
+
+.frame-pic {
+    aspect-ratio: 16 / 9;
+    background: var(--strip-deep);
+    overflow: hidden;
+    border-radius: 3px;
+}
+
+.frame-pic img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.frame.is-ghost .frame-pic {
+    background: var(--hatch);
+}
+
+.frame-meta {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 1rem;
+    padding-top: 0.55rem;
+}
+
+.frame-gone {
+    display: grid;
+    place-items: center;
+    height: 100%;
+    padding: 1rem;
+    text-align: center;
+    font-size: var(--text-sm);
+    color: var(--strip-dim);
+}
+
+.frame-code {
+    font-size: 1rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+}
+
+.frame-note {
+    font-size: var(--text-sm);
+    color: var(--strip-dim);
+}
+
+.frame.is-ghost .frame-code {
+    color: var(--strip-dim);
+}
+
+.frame a {
+    font-weight: 600;
+    font-size: var(--text-sm);
+}
+
+.frame a:focus-visible {
+    outline-color: var(--surface);
+}
+
+/* The one orchestrated moment: frames develop in order when the extraction finishes */
+.frame.is-new .frame-pic img {
+    animation: develop 0.7s ease-out both;
+    animation-delay: calc(var(--i, 0) * 110ms);
+}
+
+@keyframes develop {
+    from { opacity: 0; filter: brightness(2.4) contrast(0.5); }
+    to { opacity: 1; filter: none; }
+}
+
+@media (max-width: 52rem) {
+    .extract-grid {
+        grid-template-columns: minmax(0, 1fr);
+        grid-template-areas: "link" "time" "go";
+    }
+}

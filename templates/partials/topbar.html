@@ -1,0 +1,17 @@
+<header class="topbar">
+    <div class="topbar-title">
+        <button type="button" class="menu-button" id="menuButton" aria-label="Open the menu" aria-expanded="false" aria-controls="sidebar">
+            <svg class="icon" aria-hidden="true"><use href="#i-menu"/></svg>
+        </button>
+        <h1>{{ page_title }}</h1>
+    </div>
+    <div class="topbar-actions">
+        {% if active_page == 'create' %}
+        <a class="btn" href="/extract">Extract frames</a>
+        {% else %}
+        <a class="btn" href="/create-short">
+            <svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg><span class="btn-label">New short</span>
+        </a>
+        {% endif %}
+    </div>
+</header>

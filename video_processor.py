@@ -1,33 +1,184 @@
 """
 Enhanced video processing module with improved error handling and performance
 """
+import importlib.util
 import os
 import cv2
 import yt_dlp
 import uuid
-from typing import Optional, Tuple, Dict, List, Any
+from pathlib import Path
+from typing import Optional, Tuple, Dict, List, Any, Callable, Sequence
 from datetime import datetime, timedelta
 
 from config import get_config
+from jobs import JobCancelled
+from link_resolver import resolve_short_url
 from logger import video_logger, LogContext
 from validators import validator, ValidationError
 
-class VideoProcessingError(Exception):
-    """Custom exception for video processing errors"""
-    pass
+# Extensions the frame extractor accepts for downloaded videos.
+ALLOWED_VIDEO_EXTENSIONS = ('.mp4', '.avi', '.mov', '.mkv', '.webm', '.flv', '.m4v')
+
+# Leftovers of unfinished downloads; never treat these as the finished video.
+PARTIAL_DOWNLOAD_SUFFIXES = ('.part', '.ytdl', '.temp', '.tmp')
+
+# yt-dlp extractors (lower-cased IE_NAME) the app may use. The generic
+# extractor is deliberately absent, so URLs no platform extractor claims are
+# refused instead of being fetched.
+YTDLP_ALLOWED_EXTRACTORS = (
+    'youtube', 'tiktok', 'vm.tiktok', 'instagram',
+    'facebook', 'facebook:reel', 'douyin',
+)
+
+MAX_DESCRIPTION_LENGTH = 500
+BYTES_PER_MB = 1024 * 1024
+# yt-dlp's wording (lower case) when TikTok serves its bot-check page instead of the video page
+TIKTOK_BLOCKED_MARKER = 'unexpected response from webpage request'
+
+# Modern sites (YouTube first) serve video and audio as separate streams, with no single
+# "best" file, so a selector like best[height<=720] finds nothing. Take video+audio and let
+# the sort prefer 720p or below and mp4/m4a (which merge without re-encoding); fall back to a
+# single combined file where that is all a site offers.
+DOWNLOAD_FORMAT = 'bv*+ba/b'
+DOWNLOAD_FORMAT_SORT = ['res:720', 'ext:mp4:m4a']
+MERGE_FORMAT = 'mp4'
+
+
+def bundled_ffmpeg_path() -> Optional[str]:
+    """Path of the FFmpeg that ships with MoviePy (imageio-ffmpeg), used to merge streams."""
+    try:
+        import imageio_ffmpeg
+        return imageio_ffmpeg.get_ffmpeg_exe()
+    except Exception as error:  # missing package or binary: fall back to ffmpeg on PATH
+        video_logger.warning(f"Bundled FFmpeg not available ({type(error).__name__})")
+        return None
+
+
+def find_downloaded_file(folder: Path, unique_id: str) -> Optional[Path]:
+    """Return the newest finished download whose name carries `unique_id`."""
+    candidates = [
+        path for path in Path(folder).iterdir()
+        if path.is_file()
+        and unique_id in path.name
+        and not path.name.endswith(PARTIAL_DOWNLOAD_SUFFIXES)
+    ]
+    if not candidates:
+        return None
+    return max(candidates, key=lambda path: path.stat().st_mtime)
+
+
+EXTRACT_FAILED_MESSAGE = (
+    "Could not extract video information "
+    "(the video may be unavailable, live, or longer than the configured limit)")
+NOT_DOWNLOADED_MESSAGE = "The video was not downloaded (it may exceed the size or duration limit)"
+
+
+def remove_partial_downloads(folder: Path, unique_id: str) -> None:
+    """Delete everything a (failed) download left behind under its random id."""
+    for path in Path(folder).glob(f'*{unique_id}*'):
+        try:
+            path.unlink(missing_ok=True)
+        except OSError as error:
+            video_logger.warning(f"Could not remove partial download ({type(error).__name__})")
+
+
+def download_with_ytdlp(url: str, opts: Dict[str, Any],
+                        folder: Path) -> Tuple[Optional[str], Optional[str], Optional[str]]:
+    """
+    Download `url` into `folder` with yt-dlp in a single pass.
+
+    The file is named after a random id only. yt-dlp expands $VAR and
+    %(field)s inside the output template, so remote text (the video title)
+    must never be part of it; the title is returned separately for display.
+
+    Returns:
+        (file_path, sanitized_title, error_message)
+    """
+    folder = Path(folder)
+    unique_id = uuid.uuid4().hex[:8]
+    options = dict(opts)
+    options['paths'] = {'home': str(folder)}
+    options['outtmpl'] = {'default': f'{unique_id}.%(ext)s'}
+
+    try:
+        with yt_dlp.YoutubeDL(options) as ydl:
+            info = ydl.extract_info(url, download=True)
+    except BaseException:
+        remove_partial_downloads(folder, unique_id)
+        raise
+
+    if not isinstance(info, dict) or not info:
+        remove_partial_downloads(folder, unique_id)
+        return None, None, EXTRACT_FAILED_MESSAGE
+
+    finished = find_downloaded_file(folder, unique_id)
+    if finished is None:  # skipped by the duration/size filter, or only partial files exist
+        remove_partial_downloads(folder, unique_id)
+        return None, None, NOT_DOWNLOADED_MESSAGE
+    return str(finished), validator.sanitize_filename(info.get('title') or 'unknown'), None
+
+
+def make_size_limit_hook(limit_bytes: int):
+    """
+    yt-dlp progress hook that aborts a download once it passes `limit_bytes`.
+
+    The max_filesize option only applies when the server announces a size in
+    advance; HLS/DASH streams and chunked responses report none, so they need this.
+    """
+    def hook(status: Dict[str, Any]) -> None:
+        downloaded = status.get('downloaded_bytes') or 0
+        if downloaded > limit_bytes:
+            raise yt_dlp.utils.DownloadError(
+                f"The download is larger than the {limit_bytes // BYTES_PER_MB} MB limit")
+    return hook
+
+
+def make_progress_hook(on_progress: Callable[[Optional[float]], None]):
+    """
+    yt-dlp progress hook that reports the share downloaded so far (None while unknown).
+
+    `bv*+ba` fetches video and audio as separate files, so the share is summed over every
+    file seen; it dips a little when the audio starts instead of jumping back to zero.
+    `on_progress` may raise (JobCancelled) to stop the download; yt-dlp lets it through.
+    """
+    sizes: Dict[str, Tuple[int, Optional[int]]] = {}
+
+    def hook(status: Dict[str, Any]) -> None:
+        done = status.get('downloaded_bytes') or 0
+        total = status.get('total_bytes') or status.get('total_bytes_estimate')
+        if status.get('status') == 'finished':
+            done = total = total or done
+        sizes[status.get('filename') or ''] = (done, total)
+        known = [(part_done, part_total) for part_done, part_total in sizes.values() if part_total]
+        fraction = sum(part[0] for part in known) / sum(part[1] for part in known) if known else None
+        on_progress(fraction)
+    return hook
+
+
+def browser_impersonation_available() -> bool:
+    """
+    True when yt-dlp can imitate a real browser's connection, which needs the curl_cffi
+    package (the "curl-cffi" extra in pyproject.toml). TikTok answers plain Python clients
+    with a bot-check page, so without it every TikTok download fails.
+    """
+    return importlib.util.find_spec('curl_cffi') is not None
+
 
 class PlatformProcessor:
     """Base class for platform-specific video processing"""
-    
+
     def __init__(self, platform: str):
         self.platform = platform
         self.config = get_config()
         self.base_opts = self._get_base_options()
-    
+
     def _get_base_options(self) -> Dict[str, Any]:
-        """Get base yt-dlp options"""
-        return {
-            'format': f'best[height<={self.config.DEFAULT_VIDEO_QUALITY}]',
+        """Get base yt-dlp options, including the safety limits for untrusted input"""
+        max_duration = self.config.MAX_VIDEO_DURATION
+        options = {
+            'format': DOWNLOAD_FORMAT,
+            'format_sort': list(DOWNLOAD_FORMAT_SORT),
+            'merge_output_format': MERGE_FORMAT,
             'outtmpl': {'default': f'{self.config.DOWNLOAD_FOLDER}/%(title)s_%(id)s.%(ext)s'},
             'noplaylist': True,
             'ignoreerrors': False,
@@ -37,8 +188,22 @@ class PlatformProcessor:
             'writedescription': False,
             'writesubtitles': False,
             'writeautomaticsub': False,
+            'writethumbnail': False,
+            # Limits for untrusted URLs
+            'max_filesize': self.config.MAX_DOWNLOAD_MB * BYTES_PER_MB,
+            'progress_hooks': [make_size_limit_hook(self.config.MAX_DOWNLOAD_MB * BYTES_PER_MB)],
+            'socket_timeout': self.config.SOCKET_TIMEOUT,
+            'retries': self.config.DOWNLOAD_RETRIES,
+            'match_filter': yt_dlp.utils.match_filter_func(
+                f'duration <=? {max_duration} & !is_live'),
+            'cachedir': False,
+            'allowed_extractors': list(YTDLP_ALLOWED_EXTRACTORS),
         }
-    
+        ffmpeg = bundled_ffmpeg_path()
+        if ffmpeg:
+            options['ffmpeg_location'] = ffmpeg
+        return options
+
     def get_download_options(self, url: str) -> Dict[str, Any]:
         """Get platform-specific download options - override in subclasses"""
         return self.base_opts.copy()
@@ -52,24 +217,22 @@ class YouTubeProcessor(PlatformProcessor):
     
     def __init__(self):
         super().__init__('youtube')
-    
-    def get_download_options(self, url: str) -> Dict[str, Any]:
-        opts = self.base_opts.copy()
-        opts['format'] = 'best[height<=720]/best'
-        return opts
 
 class TikTokProcessor(PlatformProcessor):
     """TikTok-specific processing"""
     
     def __init__(self):
         super().__init__('tiktok')
-    
-    def get_download_options(self, url: str) -> Dict[str, Any]:
-        opts = self.base_opts.copy()
-        opts['format'] = 'best/h264_540p_468478/h264_540p_287260/bytevc1_540p_248040/download'
-        return opts
-    
+
     def process_download_error(self, error: str) -> str:
+        if TIKTOK_BLOCKED_MARKER in error.lower():
+            if not browser_impersonation_available():
+                return ("TikTok Error: TikTok did not send the video page because it refuses plain "
+                        "Python requests. Run `uv sync` to install the browser-impersonation "
+                        "package (curl-cffi), then restart the app.")
+            return ("TikTok Error: TikTok did not send the video page. It sometimes blocks "
+                    "automated requests for a while. Try again in a few minutes, or use the "
+                    "vm.tiktok.com share link.")
         if 'format' in error.lower():
             return (
                 f"TikTok Error: {error}\n\n"
@@ -86,12 +249,7 @@ class InstagramProcessor(PlatformProcessor):
     def __init__(self):
         super().__init__('instagram')
         self.cookie_sources = self.config.COOKIE_BROWSERS
-    
-    def get_download_options(self, url: str) -> Dict[str, Any]:
-        opts = self.base_opts.copy()
-        opts['format'] = 'best[height<=720]/mp4/best'
-        return opts
-    
+
     def try_with_cookies(self, url: str, base_opts: Dict[str, Any]) -> Tuple[Optional[str], Optional[str]]:
         """Try download with various cookie sources"""
         # Try manual cookie file first
@@ -104,46 +262,37 @@ class InstagramProcessor(PlatformProcessor):
                 if result[0]:
                     video_logger.info("Success with manual cookie file!", platform=self.platform)
                     return result
+            except JobCancelled:
+                raise  # the user stopped the job: no further attempts
             except Exception as e:
                 video_logger.warning(f"Manual cookie failed: {str(e)}", platform=self.platform)
         
-        # Try browser cookies
-        for browser in self.cookie_sources:
-            video_logger.info(f"Trying {browser} cookies", platform=self.platform)
-            try:
-                opts = base_opts.copy()
-                opts['cookiesfrombrowser'] = (browser,)
-                result = self._attempt_download(url, opts)
-                if result[0]:
-                    video_logger.info(f"Success with {browser} cookies!", platform=self.platform)
-                    return result
-            except Exception as e:
-                video_logger.warning(f"{browser} cookies failed: {str(e)}", platform=self.platform)
-        
+        # Browser cookies expose the whole local profile, so they are opt-in
+        if self.config.USE_BROWSER_COOKIES:
+            for browser in self.cookie_sources:
+                video_logger.info(f"Trying {browser} cookies", platform=self.platform)
+                try:
+                    opts = base_opts.copy()
+                    opts['cookiesfrombrowser'] = (browser,)
+                    result = self._attempt_download(url, opts)
+                    if result[0]:
+                        video_logger.info(f"Success with {browser} cookies!", platform=self.platform)
+                        return result
+                except JobCancelled:
+                    raise
+                except Exception as e:
+                    video_logger.warning(f"{browser} cookies failed: {str(e)}", platform=self.platform)
+
         # Try without cookies
         video_logger.info("Trying without cookies", platform=self.platform)
         return self._attempt_download(url, base_opts)
-    
+
     def _attempt_download(self, url: str, opts: Dict[str, Any]) -> Tuple[Optional[str], Optional[str]]:
-        """Attempt download with given options"""
-        with yt_dlp.YoutubeDL(opts) as ydl:
-            info = ydl.extract_info(url, download=False)
-            if not isinstance(info, dict) or not info:
-                return None, "Could not extract video information"
-            
-            title = validator.sanitize_filename(info.get('title', 'unknown'))
-            unique_id = str(uuid.uuid4())[:8]
-            filename = f"{title}_{unique_id}.%(ext)s"
-            opts['outtmpl'] = {'default': f'{self.config.DOWNLOAD_FOLDER}/{filename}'}
-            
-            ydl.download([url])
-            
-            # Find downloaded file
-            for file in os.listdir(self.config.DOWNLOAD_FOLDER):
-                if unique_id in file:
-                    return os.path.join(self.config.DOWNLOAD_FOLDER, file), title
-            
-            return None, "Downloaded file not found"
+        """Attempt download with given options; returns (path, title) or (None, error)"""
+        path, title, error = download_with_ytdlp(url, opts, self.config.DOWNLOAD_FOLDER)
+        if path:
+            return path, title
+        return None, error
     
     def process_download_error(self, error: str) -> str:
         if 'Restricted Video' in error or 'cookies' in error:
@@ -166,12 +315,7 @@ class FacebookProcessor(PlatformProcessor):
     
     def __init__(self):
         super().__init__('facebook')
-    
-    def get_download_options(self, url: str) -> Dict[str, Any]:
-        opts = self.base_opts.copy()
-        opts['format'] = 'best[height<=720]/best'
-        return opts
-    
+
     def process_download_error(self, error: str) -> str:
         if 'login' in error.lower() or 'private' in error.lower():
             return (
@@ -188,11 +332,6 @@ class DouyinProcessor(PlatformProcessor):
     
     def __init__(self):
         super().__init__('douyin')
-    
-    def get_download_options(self, url: str) -> Dict[str, Any]:
-        opts = self.base_opts.copy()
-        opts['format'] = 'best/mp4'
-        return opts
 
 class EnhancedVideoFrameExtractor:
     """Enhanced video processing with improved error handling and modular design"""
@@ -221,14 +360,19 @@ class EnhancedVideoFrameExtractor:
                 video_logger.warning(f"URL validation failed: {str(e)}", url=validator.hash_sensitive_data(url))
                 return False, 'unknown', str(e)
     
-    def download_video(self, url: str) -> Tuple[Optional[str], Optional[str], Optional[str]]:
+    def download_video(self, url: str, on_progress: Optional[Callable[[Optional[float]], None]] = None
+                       ) -> Tuple[Optional[str], Optional[str], Optional[str]]:
         """
         Download video and return path, title, and any error
-        
+
+        Args:
+            on_progress: called with the share downloaded (0..1, None while unknown); it may
+                raise JobCancelled, which stops the download and is passed on to the caller.
         Returns:
             (file_path, title, error_message)
         """
         start_time = datetime.now()
+        hooks = [make_progress_hook(on_progress)] if on_progress else []
         
         with LogContext(video_logger, "Video download", url=validator.hash_sensitive_data(url)):
             try:
@@ -236,7 +380,12 @@ class EnhancedVideoFrameExtractor:
                 is_valid, platform, error = self.validate_and_process_url(url)
                 if not is_valid:
                     return None, None, error
-                
+
+                url, link_error = resolve_short_url(url)
+                if link_error:
+                    return None, None, link_error
+                url = validator.canonicalize_url(url)
+
                 processor = self.processors.get(platform)
                 if not processor:
                     error = f"No processor available for platform: {platform}"
@@ -245,11 +394,13 @@ class EnhancedVideoFrameExtractor:
                 
                 # Special handling for Instagram
                 if platform == 'instagram':
-                    return self._download_instagram_video(url, processor)
-                
+                    return self._download_instagram_video(url, processor, hooks)
+
                 # Standard download process
-                return self._download_standard_video(url, processor)
-                
+                return self._download_standard_video(url, processor, hooks)
+
+            except JobCancelled:
+                raise  # not a failure: download_with_ytdlp has already removed the partial files
             except yt_dlp.utils.DownloadError as e:
                 error_msg = str(e)
                 platform = self.get_platform_from_url(url)
@@ -268,54 +419,46 @@ class EnhancedVideoFrameExtractor:
                 return None, None, enhanced_error
                 
             except Exception as e:
-                error_msg = f"Unexpected error during download: {str(e)}"
-                video_logger.exception("Video download failed", 
-                                     url=validator.hash_sensitive_data(url), 
+                # The details (paths, OS errors) go to the log, not to the browser
+                video_logger.exception("Video download failed",
+                                     url=validator.hash_sensitive_data(url),
                                      error=str(e))
-                return None, None, error_msg
+                return None, None, "Unexpected error during download. See the application log."
     
-    def _download_standard_video(self, url: str, processor: PlatformProcessor) -> Tuple[Optional[str], Optional[str], Optional[str]]:
-        """Download video using standard process"""
+    @staticmethod
+    def _options_with_hooks(processor: PlatformProcessor, url: str, hooks: Sequence) -> Dict[str, Any]:
+        # A new list: the processor's options are shared by every download (and thread)
         opts = processor.get_download_options(url)
-        
-        with yt_dlp.YoutubeDL(opts) as ydl:
-            # Extract info
-            info = ydl.extract_info(url, download=False)
-            if not isinstance(info, dict) or not info:
-                return None, None, "Could not extract video information"
-            
-            title = validator.sanitize_filename(info.get('title', 'unknown'))
-            unique_id = str(uuid.uuid4())[:8]
-            filename = f"{title}_{unique_id}.%(ext)s"
-            opts['outtmpl'] = {'default': f'{self.config.DOWNLOAD_FOLDER}/{filename}'}
-            
-            # Download
-            ydl.download([url])
-            
-            # Find downloaded file
-            for file in os.listdir(self.config.DOWNLOAD_FOLDER):
-                if unique_id in file:
-                    file_path = os.path.join(self.config.DOWNLOAD_FOLDER, file)
-                    video_logger.log_video_processing(
-                        processor.platform, url, 'download', 'success'
-                    )
-                    return file_path, title, None
-            
-            return None, None, "Downloaded file not found"
+        opts['progress_hooks'] = [*opts.get('progress_hooks', []), *hooks]
+        return opts
+
+    def _download_standard_video(self, url: str, processor: PlatformProcessor,
+                                 hooks: Sequence = ()) -> Tuple[Optional[str], Optional[str], Optional[str]]:
+        """Download video using standard process"""
+        opts = self._options_with_hooks(processor, url, hooks)
+        file_path, title, error = download_with_ytdlp(url, opts, self.config.DOWNLOAD_FOLDER)
+        if file_path:
+            video_logger.log_video_processing(processor.platform, url, 'download', 'success')
+        return file_path, title, error
     
-    def _download_instagram_video(self, url: str, processor: InstagramProcessor) -> Tuple[Optional[str], Optional[str], Optional[str]]:
+    def _download_instagram_video(self, url: str, processor: InstagramProcessor,
+                                  hooks: Sequence = ()) -> Tuple[Optional[str], Optional[str], Optional[str]]:
         """Download Instagram video with cookie fallback"""
-        base_opts = processor.get_download_options(url)
-        
+        base_opts = self._options_with_hooks(processor, url, hooks)
+
         try:
             file_path, title = processor.try_with_cookies(url, base_opts)
             if file_path:
                 return file_path, title, None
             else:
                 return None, None, title or "Instagram download failed with all methods"
+        except JobCancelled:
+            raise
+        except yt_dlp.utils.DownloadError as e:
+            return None, None, processor.process_download_error(str(e))
         except Exception as e:
-            enhanced_error = processor.process_download_error(str(e))
-            return None, None, enhanced_error
+            video_logger.exception("Instagram download failed", error=str(e))
+            return None, None, "Unexpected error during download. See the application log."
     
     def get_platform_from_url(self, url: str) -> str:
         """Get platform from URL"""
@@ -334,17 +477,19 @@ class EnhancedVideoFrameExtractor:
                        timestamp=timestamp):
             try:
                 # Validate inputs
-                is_valid_path, path_error = validator.validate_file_path(video_path, ['.mp4', '.avi', '.mov', '.mkv'])
+                is_valid_path, path_error = validator.validate_file_path(
+                    video_path, list(ALLOWED_VIDEO_EXTENSIONS))
                 if not is_valid_path:
                     return False, path_error
                 
+                # Messages reach the browser, so they never include server paths
                 if not os.path.exists(video_path):
-                    return False, f"Video file not found: {video_path}"
-                
+                    return False, "Video file not found"
+
                 # Use OpenCV for frame extraction (more reliable than moviepy for single frames)
                 cap = cv2.VideoCapture(video_path)
                 if not cap.isOpened():
-                    return False, f"Could not open video file: {video_path}"
+                    return False, "Could not open the video file"
                 
                 # Set video position to timestamp (in milliseconds)
                 cap.set(cv2.CAP_PROP_POS_MSEC, timestamp * 1000)
@@ -359,18 +504,18 @@ class EnhancedVideoFrameExtractor:
                 # Save frame
                 success = cv2.imwrite(output_path, frame)
                 if not success:
-                    return False, f"Could not save frame to {output_path}"
+                    return False, "Could not save the extracted frame"
                 
                 video_logger.info("Frame extracted successfully", 
                                 timestamp=timestamp, 
                                 output_path=os.path.basename(output_path))
                 return True, None
                 
-            except Exception as e:
-                video_logger.exception("Frame extraction failed", 
-                                     timestamp=timestamp, 
+            except (cv2.error, OSError, ValueError) as e:
+                video_logger.exception("Frame extraction failed",
+                                     timestamp=timestamp,
                                      error=str(e))
-                return False, f"Frame extraction error: {str(e)}"
+                return False, "Frame extraction failed"
     
     def get_video_info(self, url: str) -> Tuple[bool, Optional[Dict[str, Any]], Optional[str]]:
         """
@@ -385,19 +530,28 @@ class EnhancedVideoFrameExtractor:
                 is_valid, platform, error = self.validate_and_process_url(url)
                 if not is_valid:
                     return False, None, error
-                
+
+                url, link_error = resolve_short_url(url)
+                if link_error:
+                    return False, None, link_error
+                url = validator.canonicalize_url(url)
+
                 processor = self.processors.get(platform)
                 if not processor:
                     return False, None, f"No processor available for platform: {platform}"
-                
+
                 opts = processor.get_download_options(url)
                 opts['quiet'] = True
-                
+                # Showing details of a long video is harmless; only downloads are limited,
+                # and a title does not depend on which formats are available
+                opts.pop('match_filter', None)
+                opts['ignore_no_formats_error'] = True
+
                 with yt_dlp.YoutubeDL(opts) as ydl:
                     info = ydl.extract_info(url, download=False)
-                    
+
                     if not isinstance(info, dict) or not info:
-                        return False, None, "Could not extract video information"
+                        return False, None, EXTRACT_FAILED_MESSAGE
                     
                     # Extract relevant information
                     video_info = {
@@ -406,7 +560,8 @@ class EnhancedVideoFrameExtractor:
                         'view_count': info.get('view_count'),
                         'uploader': info.get('uploader'),
                         'upload_date': info.get('upload_date'),
-                        'description': info.get('description', '')[:500],  # Truncate long descriptions
+                        # description is often present but None (TikTok, Instagram, Facebook)
+                        'description': (info.get('description') or '')[:MAX_DESCRIPTION_LENGTH],
                         'thumbnail': info.get('thumbnail'),
                         'platform': platform
                     }
@@ -427,7 +582,7 @@ class EnhancedVideoFrameExtractor:
                 video_logger.exception("Video info extraction failed", 
                                      url=validator.hash_sensitive_data(url), 
                                      error=str(e))
-                return False, None, f"Error extracting video info: {str(e)}"
+                return False, None, "Could not read the video information. See the application log."
     
     def cleanup_old_files(self, max_age_hours: int = None) -> Tuple[int, int, List[str]]:
         """
@@ -457,28 +612,30 @@ class EnhancedVideoFrameExtractor:
                 try:
                     if not folder.exists():
                         continue
-                        
+
                     for file_path in folder.iterdir():
-                        if file_path.is_file():
+                        # stat() and unlink() share one try: another request may
+                        # delete the file between listing and here
+                        try:
+                            if not file_path.is_file():
+                                continue
                             file_stat = file_path.stat()
-                            file_time = datetime.fromtimestamp(file_stat.st_mtime)
-                            
-                            if file_time < cutoff_time:
-                                try:
-                                    file_size = file_stat.st_size
-                                    file_path.unlink()
-                                    files_deleted += 1
-                                    space_freed += file_size
-                                    video_logger.debug(f"Deleted old file: {file_path.name}")
-                                except Exception as e:
-                                    error_msg = f"Could not delete {file_path.name}: {str(e)}"
-                                    errors.append(error_msg)
-                                    video_logger.warning(error_msg)
-                                    
-                except Exception as e:
-                    error_msg = f"Could not clean folder {folder}: {str(e)}"
-                    errors.append(error_msg)
-                    video_logger.warning(error_msg)
+                            if datetime.fromtimestamp(file_stat.st_mtime) >= cutoff_time:
+                                continue
+                            file_path.unlink()
+                            files_deleted += 1
+                            space_freed += file_stat.st_size
+                            video_logger.debug(f"Deleted old file: {file_path.name}")
+                        except FileNotFoundError:
+                            continue  # already gone
+                        except OSError as e:
+                            # Messages reach the browser: file name only, details go to the log
+                            errors.append(f"Could not delete {file_path.name}")
+                            video_logger.warning(f"Could not delete {file_path.name} ({type(e).__name__})")
+
+                except OSError as e:
+                    errors.append(f"Could not clean the {folder.name} folder")
+                    video_logger.warning(f"Could not clean {folder.name} ({type(e).__name__})")
             
             space_freed_mb = space_freed / (1024 * 1024)  # Convert to MB
             video_logger.info("Cleanup completed", 

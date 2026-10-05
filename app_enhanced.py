@@ -1,1116 +1,707 @@
 """
-Enhanced Flask application with improved architecture, security, and monitoring
+Flask application: web pages and JSON API for the Video Frame Extractor.
+
+Heavy lifting lives in other modules (video_processor, short_video, trending,
+youtube_uploader); this module validates requests, calls them, and shapes the
+responses. It is built for local use: it listens on loopback by default and
+only answers requests whose Host header is on the allow-list.
 """
-from flask import Flask, request, render_template, jsonify, send_from_directory, redirect, url_for
+import io
+import os
+import re
+import time
+import zipfile
+import uuid
+from datetime import datetime
+from typing import Any, Dict, Optional
+from urllib.parse import urlsplit
+
+from flask import (Flask, jsonify, render_template, render_template_string, request,
+                   send_file, send_from_directory)
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
+from werkzeug.exceptions import HTTPException
 from werkzeug.middleware.proxy_fix import ProxyFix
-import time
-import os
-from datetime import datetime
-import requests
-from dotenv import load_dotenv
 
+import media_jobs
 from config import get_config
-from logger import app_logger, api_logger, LogContext
-from validators import validator
-
-# Load environment variables
-load_dotenv()
+from database import db_manager, get_analytics, get_recent_requests
+from jobs import JobFailed, JobQueueFull, JobRegistry, NullReporter
+from library import folder_size_bytes, list_shorts
+from logger import LogContext, api_logger, app_logger
+from media_jobs import (EXTRACT_STAGES, SHORT_STAGES, finish_request_record, parse_extract_request,
+                        parse_short_request, run_recorded)
+from short_video import remove_partial_renders, text_overlay_available
+from trending import VIDEO_CATEGORIES, get_youtube_trending
+from validators import MAX_TIMESTAMPS, resolve_in_folder, validator
 from video_processor import extractor
-from database import get_analytics, get_recent_requests
-from youtube_uploader import youtube_uploader
+from youtube_uploader import PRIVACY_STATUSES, YouTubeUploaderError, youtube_uploader
 
-def get_youtube_trending(category: str = '0', region: str = 'US', max_results: int = 20) -> list:
+APP_VERSION = '2.1.0'
+LOOPBACK_HOSTS = ('127.0.0.1', 'localhost', '::1')
+HOST_HEADER = re.compile(r'(?P<host>\[[0-9a-f:.]+\]|[a-z0-9.-]+)(?::(?P<port>\d{1,5}))?')
+MAX_PORT = 65535
+CROSS_SITE_VALUES = ('cross-site', 'same-site')
+JOB_ID_PATTERN = re.compile(r'[0-9a-f]{32}')
+RECENT_REQUESTS_SHOWN = 10
+MAX_TRENDING_RESULTS = 50
+
+# One registry per process: deploy.py runs a single worker, so every request sees the same jobs
+job_registry = JobRegistry(max_workers=get_config().MAX_CONCURRENT_JOBS)
+
+CONTENT_SECURITY_POLICY = "; ".join([
+    "default-src 'self'",
+    # No 'unsafe-inline': pages keep their scripts and styles in /static (tests/test_templates.py)
+    "script-src 'self' https://cdn.jsdelivr.net",
+    "style-src 'self' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com",
+    "font-src 'self' https://cdnjs.cloudflare.com",
+    "img-src 'self' data: https:",
+    "media-src 'self'",
+    "connect-src 'self'",
+    "object-src 'none'",
+    "base-uri 'self'",
+    "form-action 'self'",
+    "frame-ancestors 'none'",
+])
+
+HTTP_ERROR_MESSAGES = {
+    400: 'Bad request',
+    404: 'Not found',
+    405: 'Method not allowed',
+    413: 'Request too large',
+    415: 'Unsupported media type',
+    429: 'Rate limit exceeded. Please try again later.',
+}
+
+PLATFORM_GUIDANCE = {
+    'youtube': {
+        'status': 'supported',
+        'notes': 'Public videos, Shorts and live replays up to the duration limit',
+        'tips': ['Copy the URL from the browser address bar or the Share button'],
+    },
+    'tiktok': {
+        'status': 'supported',
+        'notes': 'Public videos; some are region-blocked',
+        'tips': ['Share → Copy link works (vm.tiktok.com / vt.tiktok.com links are fine)'],
+    },
+    'facebook': {
+        'status': 'limited',
+        'notes': 'Public videos only',
+        'tips': ['Videos that need a login or are private cannot be downloaded',
+                 'fb.watch share links are supported'],
+    },
+    'instagram': {
+        'status': 'limited',
+        'notes': 'Public posts and reels; some content needs a logged-in session',
+        'tips': ['Use public posts or reels',
+                 'For restricted content provide instagram_cookies.txt (see the README)'],
+    },
+    'douyin': {
+        'status': 'limited',
+        'notes': 'Public videos with a full douyin.com/video/<id> link',
+        'tips': ['v.douyin.com short links are not supported; open the video and copy its full URL'],
+    },
+}
+
+OAUTH_RESULT_PAGE = """<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>YouTube sign-in</title>
+<link rel="stylesheet" href="/static/css/app.css"></head>
+<body><main class="result-page">
+<h1>{{ heading }}</h1><p>{{ message }}</p><p>You can close this window.</p>
+</main>
+<script src="/static/js/oauth-result.js"></script>
+</body></html>"""
+
+
+def json_error(message: str, status: int):
+    """Standard error envelope used by every API route."""
+    return jsonify({'success': False, 'error': message}), status
+
+
+def get_json_body() -> Optional[Dict[str, Any]]:
+    """The request's JSON object, or None (Flask would raise 400/415 instead)."""
+    data = request.get_json(silent=True)
+    return data if isinstance(data, dict) else None
+
+
+def host_is_allowed(host_header: Optional[str], allowed_hosts) -> bool:
     """
-    Get real trending videos from YouTube Data API v3
+    True when a Host header is exactly `<allowed host>` or `<allowed host>:<port>`.
+
+    The whole header must match a strict pattern (no userinfo, tabs, paths or
+    extra colons), instead of being parsed leniently and then trusted.
     """
+    match = HOST_HEADER.fullmatch((host_header or '').lower())
+    if not match:
+        return False
+    port = match.group('port')
+    if port is not None and int(port) > MAX_PORT:
+        return False
+    allowed = {host.strip('[]').lower() for host in allowed_hosts}
+    return match.group('host').strip('[]') in allowed
+
+
+def origin_is_allowed(origin: str, allowed_hosts) -> bool:
+    """True when an Origin header names this app (an allowed host over http or https)."""
     try:
-        # Get API key from environment
-        api_key = os.getenv('YOUTUBE_API_KEY')
-        if not api_key:
-            app_logger.error("YouTube API key not found in environment variables")
-            return get_fallback_trending_data()
-        
-        # YouTube Data API endpoint
-        url = "https://www.googleapis.com/youtube/v3/videos"
-        
-        # Prepare parameters
-        params = {
-            'part': 'snippet,statistics,contentDetails',
-            'chart': 'mostPopular',
-            'regionCode': region,
-            'maxResults': min(max_results, 50),  # API limit is 50
-            'key': api_key
-        }
-        
-        # Add category filter if specified (not '0' = all categories)
-        if category != '0':
-            params['videoCategoryId'] = category
-        
-        # Make API request
-        response = requests.get(url, params=params, timeout=10)
-        response.raise_for_status()
-        
-        data = response.json()
-        
-        if 'items' not in data:
-            app_logger.warning(f"No items found in YouTube API response: {data}")
-            return get_fallback_trending_data()
-        
-        # Transform API response to our format
-        videos = []
-        for item in data['items']:
-            try:
-                snippet = item.get('snippet', {})
-                statistics = item.get('statistics', {})
-                content_details = item.get('contentDetails', {})
-                
-                # Parse duration (ISO 8601 format like PT4M13S)
-                duration = parse_youtube_duration(content_details.get('duration', 'PT0S'))
-                
-                # Format view count
-                view_count = int(statistics.get('viewCount', 0))
-                
-                # Calculate time ago from published date
-                published_at = snippet.get('publishedAt', '')
-                time_ago = calculate_time_ago(published_at)
-                
-                # Get category name
-                category_name = get_youtube_category_name(snippet.get('categoryId', '1'))
-                
-                video = {
-                    'id': item['id'],
-                    'title': snippet.get('title', 'Untitled'),
-                    'description': (snippet.get('description', '')[:200] + '...') if len(snippet.get('description', '')) > 200 else snippet.get('description', ''),
-                    'thumbnail': snippet.get('thumbnails', {}).get('medium', {}).get('url', f'https://img.youtube.com/vi/{item["id"]}/mqdefault.jpg'),
-                    'url': f"https://www.youtube.com/watch?v={item['id']}",
-                    'channel': snippet.get('channelTitle', 'Unknown Channel'),
-                    'views': str(view_count),
-                    'duration': duration,
-                    'published': time_ago,
-                    'category': category_name
-                }
-                videos.append(video)
-                
-            except Exception as item_error:
-                app_logger.error(f"Error processing video item {item.get('id', 'unknown')}: {str(item_error)}")
-                continue
-        
-        if not videos:
-            app_logger.warning("No valid videos processed from YouTube API")
-            return get_fallback_trending_data()
-            
-        app_logger.info(f"Successfully fetched {len(videos)} trending videos from YouTube API")
-        return videos
-        
-    except requests.exceptions.RequestException as e:
-        app_logger.error(f"YouTube API request failed: {str(e)}")
-        return get_fallback_trending_data()
-    except Exception as e:
-        app_logger.error(f"Unexpected error fetching YouTube trending: {str(e)}")
-        return get_fallback_trending_data()
+        parsed = urlsplit(origin)
+    except ValueError:
+        return False
+    return (parsed.scheme in ('http', 'https') and bool(parsed.netloc)
+            and host_is_allowed(parsed.netloc, allowed_hosts))
 
-def get_fallback_trending_data() -> list:
-    """
-    Fallback sample data when YouTube API is unavailable
-    """
-    return [
-        {
-            'id': 'fallback1',
-            'title': '[DEMO] Sample Trending Video',
-            'description': 'This is sample data shown when YouTube API is unavailable',
-            'thumbnail': 'https://img.youtube.com/vi/dQw4w9WgXcQ/mqdefault.jpg',
-            'url': 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
-            'channel': 'Demo Channel',
-            'views': '1000000',
-            'duration': '3:35',
-            'published': '2 hours ago',
-            'category': 'Demo'
-        }
-    ]
 
-def parse_youtube_duration(duration_str: str) -> str:
-    """
-    Parse YouTube API duration format (ISO 8601) to readable format
-    Example: PT4M13S -> 4:13, PT1H2M30S -> 1:02:30
-    """
-    try:
-        # Remove PT prefix
-        duration_str = duration_str.replace('PT', '')
-        
-        hours = 0
-        minutes = 0
-        seconds = 0
-        
-        # Extract hours
-        if 'H' in duration_str:
-            hours = int(duration_str.split('H')[0])
-            duration_str = duration_str.split('H')[1]
-        
-        # Extract minutes
-        if 'M' in duration_str:
-            minutes = int(duration_str.split('M')[0])
-            duration_str = duration_str.split('M')[1]
-        
-        # Extract seconds
-        if 'S' in duration_str:
-            seconds = int(duration_str.split('S')[0])
-        
-        # Format duration
-        if hours > 0:
-            return f"{hours}:{minutes:02d}:{seconds:02d}"
-        else:
-            return f"{minutes}:{seconds:02d}"
-            
-    except Exception:
-        return "0:00"
-
-def calculate_time_ago(published_at: str) -> str:
-    """
-    Calculate human-readable time ago from ISO datetime string
-    """
-    try:
-        # Parse the datetime (YouTube uses ISO format like 2025-01-15T10:30:00Z)
-        published_dt = datetime.fromisoformat(published_at.replace('Z', '+00:00'))
-        now = datetime.now(published_dt.tzinfo)
-        
-        diff = now - published_dt
-        
-        if diff.days > 365:
-            years = diff.days // 365
-            return f"{years} year{'s' if years != 1 else ''} ago"
-        elif diff.days > 30:
-            months = diff.days // 30
-            return f"{months} month{'s' if months != 1 else ''} ago"
-        elif diff.days > 0:
-            return f"{diff.days} day{'s' if diff.days != 1 else ''} ago"
-        elif diff.seconds > 3600:
-            hours = diff.seconds // 3600
-            return f"{hours} hour{'s' if hours != 1 else ''} ago"
-        elif diff.seconds > 60:
-            minutes = diff.seconds // 60
-            return f"{minutes} minute{'s' if minutes != 1 else ''} ago"
-        else:
-            return "Just now"
-            
-    except Exception:
-        return "Recently"
-
-def get_youtube_category_name(category_id: str) -> str:
-    """
-    Map YouTube category ID to category name
-    """
-    category_map = {
-        '1': 'Film & Animation',
-        '2': 'Autos & Vehicles', 
-        '10': 'Music',
-        '15': 'Pets & Animals',
-        '17': 'Sports',
-        '19': 'Travel & Events',
-        '20': 'Gaming',
-        '22': 'People & Blogs',
-        '23': 'Comedy',
-        '24': 'Entertainment',
-        '25': 'News & Politics',
-        '26': 'Howto & Style',
-        '27': 'Education',
-        '28': 'Science & Technology',
-        '29': 'Nonprofits & Activism'
+def storage_usage(config) -> Dict[str, int]:
+    """Bytes kept by this app in its working folders (shown on the dashboard)."""
+    return {
+        'frames': folder_size_bytes(config.FRAMES_FOLDER),
+        'shorts': folder_size_bytes(config.SHORTS_FOLDER),
+        'downloads': folder_size_bytes(config.DOWNLOAD_FOLDER),
     }
-    return category_map.get(category_id, 'Unknown')
 
-def create_app(config_name: str = None) -> Flask:
-    """Application factory pattern"""
+
+def collect_system_info(base_dir, include_uptime: bool = False) -> Dict[str, Any]:
+    import psutil
+
+    info = {
+        'cpu_percent': psutil.cpu_percent(),
+        'memory_percent': psutil.virtual_memory().percent,
+        'disk_usage': psutil.disk_usage(str(base_dir)).percent,
+    }
+    if include_uptime:
+        info['uptime'] = time.time() - psutil.boot_time()
+    return info
+
+
+def start_request_record(url: str, platform: str) -> int:
+    return db_manager.log_video_request(
+        url_hash=validator.hash_sensitive_data(url),
+        platform=platform,
+        user_ip=request.remote_addr,
+        user_agent=(request.headers.get('User-Agent') or '')[:200],
+    )
+
+
+def create_app() -> Flask:
+    """Application factory"""
     app = Flask(__name__)
-    
-    # Load configuration
+
     config = get_config()
     app.config.from_object(config)
-    
-    # Trust proxy headers in production
-    if not config.DEBUG:
-        app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_port=1)
-    
-    # Setup rate limiter
+
+    # Only trust X-Forwarded-* headers when a reverse proxy is configured
+    if config.TRUSTED_PROXY_COUNT > 0:
+        hops = config.TRUSTED_PROXY_COUNT
+        app.wsgi_app = ProxyFix(app.wsgi_app, x_for=hops, x_proto=hops)
+
     limiter = Limiter(
         key_func=get_remote_address,
         default_limits=[f"{config.RATE_LIMIT_PER_MINUTE} per minute"],
-        storage_uri="memory://"
+        storage_uri="memory://",
     )
     limiter.init_app(app)
-    
-    # Request logging middleware
+    # The @limiter.limit decorators only hold a weak reference to the Limiter. When
+    # RATE_LIMIT_ENABLED=false, init_app() returns before registering it on the app,
+    # so the Limiter would be garbage collected once create_app() returns and every
+    # decorated route would fail with "ReferenceError: weakly-referenced object ...".
+    app.extensions['rate_limiter'] = limiter
+
     @app.before_request
-    def log_request_info():
+    def guard_request():
         request.start_time = time.time()
-        
-        # Rate limit check
-        user_ip = get_remote_address()
-        is_allowed, remaining = validator.check_rate_limit(user_ip)
-        
-        if not is_allowed:
-            app_logger.warning(
-                "Rate limit exceeded",
-                user_ip=user_ip,
-                endpoint=request.endpoint,
-                user_agent=request.headers.get('User-Agent', 'Unknown')
-            )
-    
+        # A rebinding attack reaches this server under an attacker's hostname
+        if not host_is_allowed(request.host, config.ALLOWED_HOSTS):
+            app_logger.warning("Rejected request with unexpected Host header")
+            return json_error('Invalid Host header', 400)
+
+        # There is no login, so the browser must not let another website call the API.
+        # Pages and /oauth2callback are exempt: following a link or Google's redirect
+        # back after sign-in are cross-site navigations.
+        if request.path.startswith('/api/'):
+            if request.headers.get('Sec-Fetch-Site') in CROSS_SITE_VALUES:
+                return json_error('Cross-site requests are not allowed', 403)
+            origin = request.headers.get('Origin')
+            if origin is not None and not origin_is_allowed(origin, config.ALLOWED_HOSTS):
+                return json_error('Origin not allowed', 403)
+
     @app.after_request
-    def log_response_info(response):
+    def finish_response(response):
         if hasattr(request, 'start_time'):
-            duration = (time.time() - request.start_time) * 1000
-            
             api_logger.log_api_request(
                 method=request.method,
                 endpoint=request.endpoint or request.path,
                 user_ip=get_remote_address(),
                 user_agent=request.headers.get('User-Agent', 'Unknown'),
                 status_code=response.status_code,
-                duration_ms=duration
+                duration_ms=(time.time() - request.start_time) * 1000,
             )
-        
-        # Security headers
+
         response.headers['X-Content-Type-Options'] = 'nosniff'
         response.headers['X-Frame-Options'] = 'DENY'
-        response.headers['X-XSS-Protection'] = '1; mode=block'
-        
-        if not config.DEBUG:
+        response.headers['Referrer-Policy'] = 'no-referrer'
+        response.headers['Content-Security-Policy'] = CONTENT_SECURITY_POLICY
+        if request.is_secure:
             response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
-        
         return response
-    
-    # Error handlers
-    @app.errorhandler(400)
-    def bad_request(error):
-        app_logger.warning("Bad request", error=str(error))
-        return jsonify({'success': False, 'error': 'Bad request'}), 400
-    
-    @app.errorhandler(404)
-    def not_found(error):
-        return jsonify({'success': False, 'error': 'Endpoint not found'}), 404
-    
-    @app.errorhandler(429)
-    def rate_limit_exceeded(error):
-        app_logger.warning("Rate limit exceeded", error=str(error))
-        return jsonify({
-            'success': False, 
-            'error': 'Rate limit exceeded. Please try again later.'
-        }), 429
-    
-    @app.errorhandler(500)
-    def internal_error(error):
-        app_logger.error("Internal server error", error=str(error))
-        return jsonify({
-            'success': False, 
-            'error': 'Internal server error'
-        }), 500
-    
-    # Routes
+
+    @app.errorhandler(HTTPException)
+    def handle_http_error(error):
+        return json_error(HTTP_ERROR_MESSAGES.get(error.code, error.name), error.code)
+
+    @app.errorhandler(Exception)
+    def handle_unexpected_error(error):
+        error_id = uuid.uuid4().hex[:8]
+        app_logger.exception(f"Unhandled error {error_id}", error_type=type(error).__name__)
+        return jsonify({'success': False, 'error': 'Internal server error',
+                        'error_id': error_id}), 500
+
+    # -- pages ----------------------------------------------------------------
+
     @app.route('/')
     def index():
-        """Main page"""
         return render_template('index.html')
-    
+
+    @app.route('/extract')
+    def extract_page():
+        return render_template('extract.html')
+
     @app.route('/trending')
-    def trending():
-        """Trending videos page"""
+    def trending_page():
         return render_template('trending.html')
-    
+
     @app.route('/create-short')
-    def create_short():
-        """Create short video page"""
-        return render_template('create_short.html')
-    
+    def create_short_page():
+        # Captions need ImageMagick; without it the field is disabled and says why
+        return render_template('create_short.html', text_overlay_available=text_overlay_available())
+
+    @app.route('/dashboard')
+    def dashboard():
+        try:
+            system_info = collect_system_info(config.BASE_DIR)
+            return render_template('dashboard.html', analytics=get_analytics(),
+                                   system_info=system_info,
+                                   recent_requests=get_recent_requests(limit=RECENT_REQUESTS_SHOWN),
+                                   storage=storage_usage(config), cleanup_hours=config.AUTO_CLEANUP_HOURS)
+        except Exception as error:  # the page should still load without metrics
+            app_logger.error(f"Dashboard error ({type(error).__name__})")
+            return render_template('dashboard.html', analytics={}, system_info={},
+                                   recent_requests=[], storage={}, cleanup_hours=config.AUTO_CLEANUP_HOURS)
+
+    # -- API: validation and information --------------------------------------
+
+    @app.route('/api/health')
+    def health_check():
+        return jsonify({'status': 'healthy', 'timestamp': datetime.now().isoformat(),
+                        'version': APP_VERSION})
+
+    @app.route('/api/dashboard-data')
+    def dashboard_data():
+        try:
+            return jsonify({
+                'analytics': get_analytics(),
+                'system_info': collect_system_info(config.BASE_DIR, include_uptime=True),
+                'recent_requests': get_recent_requests(limit=RECENT_REQUESTS_SHOWN),
+                'storage': storage_usage(config),
+                'timestamp': datetime.now().isoformat(),
+            })
+        except Exception as error:
+            app_logger.error(f"Dashboard API error ({type(error).__name__})")
+            return json_error('Failed to fetch dashboard data', 500)
+
     @app.route('/api/validate-url', methods=['POST'])
     @limiter.limit("30 per minute")
     def validate_url():
-        """Validate URL and detect platform"""
-        with LogContext(api_logger, "URL validation"):
-            try:
-                data = request.get_json()
-                if not data or 'url' not in data:
-                    return jsonify({'success': False, 'error': 'URL is required'}), 400
-                
-                url = data['url']
-                is_valid, platform, error = validator.validate_url(url)
-                
-                if not is_valid:
-                    return jsonify({
-                        'success': False,
-                        'valid': False,
-                        'error': error
-                    })
-                
-                # Get video info for additional validation
-                info_success, video_info, info_error = extractor.get_video_info(url)
-                
-                response_data = {
-                    'success': True,
-                    'valid': True,
-                    'platform': platform
-                }
-                
-                if info_success and video_info:
-                    response_data.update({
-                        'title': video_info.get('title', 'Unknown'),
-                        'duration': video_info.get('duration'),
-                        'thumbnail': video_info.get('thumbnail')
-                    })
-                
-                return jsonify(response_data)
-                
-            except Exception as e:
-                api_logger.exception("URL validation failed", error=str(e))
-                return jsonify({
-                    'success': False,
-                    'error': 'Validation failed'
-                }), 500
-    
-    @app.route('/api/extract', methods=['POST'])
-    @limiter.limit("10 per minute")
-    def extract_frames():
-        """Extract frames from video at specified timestamps"""
-        with LogContext(api_logger, "Frame extraction"):
-            try:
-                data = request.get_json()
-                if not data:
-                    return jsonify({'success': False, 'error': 'No data provided'}), 400
-                
-                url = data.get('url')
-                timestamps = data.get('timestamps', [])
-                
-                # Validate inputs
-                if not url:
-                    return jsonify({'success': False, 'error': 'URL is required'}), 400
-                
-                # Validate URL
-                is_valid_url, platform, url_error = validator.validate_url(url)
-                if not is_valid_url:
-                    return jsonify({'success': False, 'error': url_error}), 400
-                
-                # Validate timestamps
-                is_valid_timestamps, timestamp_errors, valid_seconds = validator.validate_timestamps(timestamps)
-                if not is_valid_timestamps:
-                    return jsonify({
-                        'success': False, 
-                        'error': '; '.join(timestamp_errors)
-                    }), 400
-                
-                app_logger.info(
-                    "Starting frame extraction",
-                    platform=platform,
-                    timestamp_count=len(valid_seconds)
-                )
-                
-                # Download video
-                video_path, title, download_error = extractor.download_video(url)
-                if not video_path:
-                    return jsonify({'success': False, 'error': download_error or 'Download failed'}), 400
-                
-                # Extract frames
-                extracted_frames = []
-                errors = []
-                
-                for i, timestamp in enumerate(valid_seconds):
-                    try:
-                        # Generate unique filename
-                        frame_id = f"frame_{timestamp}s_{str(uuid.uuid4())[:8]}"
-                        frame_filename = f"{frame_id}.jpg"
-                        frame_path = os.path.join(config.FRAMES_FOLDER, frame_filename)
-                        
-                        # Extract frame
-                        success, frame_error = extractor.extract_frame_at_timestamp(
-                            video_path, timestamp, frame_path
-                        )
-                        
-                        if success:
-                            extracted_frames.append({
-                                'timestamp': timestamp,
-                                'filename': frame_filename,
-                                'url': f'/frames/{frame_filename}'
-                            })
-                        else:
-                            errors.append(f"Timestamp {timestamp}s: {frame_error}")
-                            
-                    except Exception as e:
-                        error_msg = f"Timestamp {timestamp}s: {str(e)}"
-                        errors.append(error_msg)
-                        app_logger.warning("Frame extraction error", 
-                                         timestamp=timestamp, error=str(e))
-                
-                # Clean up video file
-                try:
-                    if os.path.exists(video_path):
-                        os.remove(video_path)
-                except Exception as e:
-                    app_logger.warning("Could not clean up video file", 
-                                     video_path=video_path, error=str(e))
-                
-                if not extracted_frames and errors:
-                    return jsonify({
-                        'success': False,
-                        'error': 'Frame extraction failed: ' + '; '.join(errors)
-                    }), 400
-                
-                response_data = {
-                    'success': True,
-                    'title': title,
-                    'frames': extracted_frames,
-                    'platform': platform
-                }
-                
-                if errors:
-                    response_data['warnings'] = errors
-                
-                app_logger.info(
-                    "Frame extraction completed",
-                    platform=platform,
-                    frames_extracted=len(extracted_frames),
-                    errors=len(errors)
-                )
-                
-                return jsonify(response_data)
-                
-            except Exception as e:
-                api_logger.exception("Frame extraction failed", error=str(e))
-                return jsonify({
-                    'success': False,
-                    'error': 'Frame extraction failed'
-                }), 500
-    
+        data = get_json_body()
+        if data is None or 'url' not in data:
+            return json_error('URL is required', 400)
+
+        url = data['url']
+        is_valid, platform, error = validator.validate_url(url)
+        if not is_valid:
+            return jsonify({'success': False, 'valid': False, 'error': error})
+
+        response = {'success': True, 'valid': True, 'platform': platform}
+        info_success, video_info, _ = extractor.get_video_info(url.strip())
+        if info_success and video_info:
+            response.update({
+                'title': video_info.get('title', 'Unknown'),
+                'duration': video_info.get('duration'),
+                'thumbnail': video_info.get('thumbnail'),
+            })
+        return jsonify(response)
+
     @app.route('/api/video-info', methods=['POST'])
     @limiter.limit("20 per minute")
     def get_video_info():
-        """Get video information without downloading"""
-        with LogContext(api_logger, "Video info request"):
+        data = get_json_body()
+        if data is None or not isinstance(data.get('url'), str):
+            return json_error('URL is required', 400)
+
+        url = data['url'].strip()
+        is_valid, _, error = validator.validate_url(url)
+        if not is_valid:
+            return json_error(error, 400)
+
+        success, video_info, info_error = extractor.get_video_info(url)
+        if not success:
+            return json_error(info_error, 400)
+        return jsonify({'success': True, 'video_info': video_info})
+
+    @app.route('/api/test-platform', methods=['POST'])
+    @limiter.limit("30 per minute")
+    def test_platform_compatibility():
+        data = get_json_body()
+        url = data.get('url') if data else None
+        if not isinstance(url, str) or not url.strip():
+            return json_error('URL is required', 400)
+
+        # Same check create-short applies, so "valid" here means the link will be accepted
+        url = url.strip()
+        is_valid, platform, error = validator.validate_url(url)
+        if platform == 'unknown':
+            platform = validator.get_platform_from_url(url)
+        guidance = PLATFORM_GUIDANCE.get(platform)
+
+        if is_valid:
+            info = guidance
+        else:
+            info = {
+                'status': 'invalid' if guidance else 'unsupported',
+                'notes': error or 'Unsupported platform',
+                'tips': guidance['tips'] if guidance else
+                        ['Try a YouTube, TikTok, Facebook, Instagram or Douyin link'],
+            }
+        return jsonify({'platform': platform, 'valid': is_valid, 'info': info})
+
+    @app.route('/api/video-categories')
+    def get_video_categories():
+        categories = [{'id': key, 'name': name} for key, name in VIDEO_CATEGORIES.items()]
+        return jsonify({'categories': categories, 'total': len(categories)})
+
+    @app.route('/api/trending')
+    def get_trending():
+        platform = request.args.get('platform', 'youtube').lower()
+        if platform != 'youtube':
+            return jsonify({
+                'success': False,
+                'error': f'Platform "{platform}" is not supported yet',
+                'supported_platforms': ['youtube'],
+            }), 400
+
+        try:
+            max_results = int(request.args.get('max_results', '20'))
+        except ValueError:
+            return json_error('max_results must be a number', 400)
+        max_results = max(1, min(max_results, MAX_TRENDING_RESULTS))
+
+        category = request.args.get('category', '0')
+        region = request.args.get('region', 'US')
+        videos = get_youtube_trending(category, region, max_results)
+        return jsonify({
+            # Sample data stands in when YouTube cannot be reached; the page must say so
+            'sample': bool(videos) and all(str(video.get('id', '')).startswith('fallback') for video in videos),
+            'api_key_configured': bool(os.getenv('YOUTUBE_API_KEY')),
+            'platform': platform,
+            'category': category,
+            'region': region,
+            'videos': videos,
+            'total': len(videos),
+            'timestamp': datetime.now().isoformat(),
+        })
+
+    # -- API: frames ------------------------------------------------------------
+
+    @app.route('/api/extract', methods=['POST'])
+    @limiter.limit("10 per minute")
+    def extract_frames():
+        """Synchronous: answers when the frames are ready. The pages use /api/jobs/extract."""
+        extract_request, error = parse_extract_request(get_json_body())
+        if error:
+            return json_error(error, 400)
+        record_id = start_request_record(extract_request.url, extract_request.platform)
+        try:
+            result = run_recorded(record_id, 'Frame extraction crashed',
+                                  lambda: media_jobs.extract_frames(extract_request, record_id, NullReporter()))
+        except JobFailed as failure:
+            return json_error(failure.message, 400)
+        return jsonify(result)
+
+    # The file routes are cheap and a results page loads up to 50 frames at once (and
+    # videos are fetched in ranges), so they are exempt from the API rate limit.
+    @app.route('/frames/<filename>')
+    @limiter.exempt
+    def serve_frame(filename):
+        path = resolve_in_folder(config.FRAMES_FOLDER, filename, ('.jpg',))
+        if path is None:
+            return json_error('Not found', 404)
+        return send_from_directory(config.FRAMES_FOLDER, path.name)
+
+    @app.route('/api/frames/archive', methods=['POST'])
+    @limiter.limit("10 per minute")
+    def download_frames_archive():
+        """Several frames as one zip file. Takes frame file names, never paths."""
+        data = get_json_body()
+        names = data.get('filenames') if data else None
+        if (not isinstance(names, list) or not names or len(names) > MAX_TIMESTAMPS
+                or not all(isinstance(name, str) for name in names)):
+            return json_error('filenames must be a list of frame file names', 400)
+        paths = [path for path in (resolve_in_folder(config.FRAMES_FOLDER, name, ('.jpg',))
+                                   for name in dict.fromkeys(names)) if path is not None]
+        if not paths:
+            return json_error('These frames are no longer on disk', 404)
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, 'w', zipfile.ZIP_STORED) as archive:  # JPEGs do not compress further
+            for path in paths:
+                try:
+                    archive.write(path, arcname=path.name)
+                except OSError:
+                    continue  # removed meanwhile (cleanup): the zip has the others
+        buffer.seek(0)
+        return send_file(buffer, mimetype='application/zip', as_attachment=True, download_name='frames.zip')
+
+    # -- API: short videos --------------------------------------------------------
+
+    @app.route('/api/create-short', methods=['POST'])
+    @limiter.limit("5 per minute")
+    def create_short_video():
+        """Synchronous: answers when the short is rendered. The pages use /api/jobs/create-short."""
+        short_request, error = parse_short_request(get_json_body())
+        if error:
+            return json_error(error, 400)
+        with LogContext(api_logger, "Short video creation"):
+            record_id = start_request_record(short_request.url, short_request.platform)
             try:
-                data = request.get_json()
-                if not data or 'url' not in data:
-                    return jsonify({'success': False, 'error': 'URL is required'}), 400
-                
-                url = data['url']
-                
-                # Validate URL
-                is_valid, platform, error = validator.validate_url(url)
-                if not is_valid:
-                    return jsonify({'success': False, 'error': error}), 400
-                
-                # Get video info
-                success, video_info, info_error = extractor.get_video_info(url)
-                
-                if not success:
-                    return jsonify({'success': False, 'error': info_error}), 400
-                
-                return jsonify({
-                    'success': True,
-                    'video_info': video_info
-                })
-                
-            except Exception as e:
-                api_logger.exception("Video info request failed", error=str(e))
-                return jsonify({
-                    'success': False,
-                    'error': 'Could not get video information'
-                }), 500
-    
+                result = run_recorded(record_id, 'Rendering failed',
+                                      lambda: media_jobs.render_short(short_request, NullReporter()))
+            except JobFailed as failure:
+                return json_error(failure.message, 400)
+            return jsonify(result)
+
+    # -- API: background jobs (download + extract / render, with progress and cancel) ----
+
+    def start_job(kind: str, stages, record_id: int, work):
+        """Queues `work` (it records its own outcome); answers 202 with the job, or 429."""
+        queued_at = time.time()
+        try:
+            job = job_registry.submit(kind, stages, work, on_cancel_while_queued=lambda: finish_request_record(
+                record_id, 'cancelled', queued_at, 'Cancelled by the user'))
+        except JobQueueFull:
+            finish_request_record(record_id, 'failed', queued_at, 'Too many jobs waiting')
+            return json_error('Too many jobs are running or waiting. Wait for one to finish.', 429)
+        return jsonify({'success': True, 'job': job_registry.snapshot(job.id)}), 202
+
+    @app.route('/api/jobs/extract', methods=['POST'])
+    @limiter.limit("10 per minute")
+    def start_extract_job():
+        extract_request, error = parse_extract_request(get_json_body())
+        if error:
+            return json_error(error, 400)
+        # Recorded here: the request (IP, user agent) is gone by the time the job runs
+        record_id = start_request_record(extract_request.url, extract_request.platform)
+        return start_job('extract', EXTRACT_STAGES, record_id, lambda reporter: run_recorded(
+            record_id, 'Frame extraction crashed',
+            lambda: media_jobs.extract_frames(extract_request, record_id, reporter)))
+
+    @app.route('/api/jobs/create-short', methods=['POST'])
+    @limiter.limit("5 per minute")
+    def start_short_job():
+        short_request, error = parse_short_request(get_json_body())
+        if error:
+            return json_error(error, 400)
+        record_id = start_request_record(short_request.url, short_request.platform)
+        return start_job('short', SHORT_STAGES, record_id, lambda reporter: run_recorded(
+            record_id, 'Rendering failed', lambda: media_jobs.render_short(short_request, reporter)))
+
+    # Polled about once a second by an open page, so not counted against the API limit
+    @app.route('/api/jobs')
+    @limiter.exempt
+    def list_jobs():
+        return jsonify({'success': True, 'jobs': job_registry.snapshots()})
+
+    @app.route('/api/jobs/<job_id>')
+    @limiter.exempt
+    def job_status(job_id):
+        job = job_registry.snapshot(job_id) if JOB_ID_PATTERN.fullmatch(job_id) else None
+        if job is None:
+            return json_error('Job not found', 404)
+        return jsonify({'success': True, 'job': job})
+
+    @app.route('/api/jobs/<job_id>/cancel', methods=['POST'])
+    @limiter.limit("30 per minute")
+    def cancel_job(job_id):
+        job = job_registry.cancel(job_id) if JOB_ID_PATTERN.fullmatch(job_id) else None
+        if job is None:
+            return json_error('Job not found', 404)
+        return jsonify({'success': True, 'job': job})
+
+    @app.route('/shorts/<filename>')
+    @limiter.exempt
+    def serve_short_video(filename):
+        path = resolve_in_folder(config.SHORTS_FOLDER, filename, ('.mp4',))
+        if path is None:
+            return json_error('Not found', 404)
+        return send_from_directory(config.SHORTS_FOLDER, path.name)
+
+    @app.route('/api/shorts')
+    def list_generated_shorts():
+        return jsonify({'success': True, 'shorts': list_shorts(config.SHORTS_FOLDER)})
+
+    @app.route('/api/shorts/delete', methods=['POST'])
+    @limiter.limit("30 per minute")
+    def delete_generated_short():
+        data = get_json_body()
+        filename = data.get('filename') if data else None
+        if not isinstance(filename, str):
+            return json_error('filename is required', 400)
+        path = resolve_in_folder(config.SHORTS_FOLDER, filename, ('.mp4',))
+        if path is None:
+            return json_error('Not found', 404)
+        try:
+            path.unlink()
+        except PermissionError:
+            return json_error('The short is open in another program. Close it and try again.', 409)
+        except OSError as error:
+            app_logger.error(f"Could not delete a short ({type(error).__name__})")
+            return json_error('Could not delete the short', 500)
+        return jsonify({'success': True})
+
     @app.route('/api/cleanup', methods=['POST'])
     @limiter.limit("5 per minute")
     def cleanup_files():
-        """Clean up old files"""
-        with LogContext(api_logger, "File cleanup"):
-            try:
-                files_deleted, space_freed, errors = extractor.cleanup_old_files()
-                
-                response_data = {
-                    'success': True,
-                    'files_deleted': files_deleted,
-                    'space_freed_mb': space_freed,
-                    'message': f'Cleaned up {files_deleted} files, freed {space_freed} MB'
-                }
-                
-                if errors:
-                    response_data['warnings'] = errors
-                
-                return jsonify(response_data)
-                
-            except Exception as e:
-                api_logger.exception("File cleanup failed", error=str(e))
-                return jsonify({
-                    'success': False,
-                    'error': 'Cleanup failed'
-                }), 500
-    
-    @app.route('/frames/<filename>')
-    def serve_frame(filename):
-        """Serve extracted frame files"""
-        # Validate filename to prevent directory traversal
-        safe_filename = validator.sanitize_filename(filename)
-        if safe_filename != filename:
-            return jsonify({'error': 'Invalid filename'}), 400
-        
-        return send_from_directory(config.FRAMES_FOLDER, filename)
-    
-    @app.route('/api/health')
-    def health_check():
-        """Health check endpoint"""
-        return jsonify({
-            'status': 'healthy',
-            'timestamp': datetime.now().isoformat(),
-            'version': '2.0.0'
-        })
-    
-    @app.route('/dashboard')
-    def dashboard():
-        """Dashboard with analytics and system information"""
-        try:
-            # Get analytics data
-            analytics = get_analytics()
-            
-            # Get system information
-            import psutil
-            system_info = {
-                'cpu_percent': psutil.cpu_percent(),
-                'memory_percent': psutil.virtual_memory().percent,
-                'disk_usage': psutil.disk_usage('/').percent if hasattr(psutil.disk_usage('/'), 'percent') else 0
-            }
-            
-            # Get recent requests
-            recent_requests = get_recent_requests(limit=10)
-            
-            return render_template('dashboard.html', 
-                                 analytics=analytics,
-                                 system_info=system_info,
-                                 recent_requests=recent_requests)
-        except Exception as e:
-            app_logger.error(f"Dashboard error: {str(e)}")
-            return render_template('dashboard.html', 
-                                 analytics={},
-                                 system_info={},
-                                 recent_requests=[])
-    
-    @app.route('/api/dashboard-data')
-    def dashboard_data():
-        """API endpoint for dashboard data"""
-        try:
-            analytics = get_analytics()
-            
-            import psutil
-            system_info = {
-                'cpu_percent': psutil.cpu_percent(),
-                'memory_percent': psutil.virtual_memory().percent,
-                'disk_usage': psutil.disk_usage('/').percent if hasattr(psutil.disk_usage('/'), 'percent') else 0,
-                'uptime': time.time() - psutil.boot_time() if hasattr(psutil, 'boot_time') else 0
-            }
-            
-            recent_requests = get_recent_requests(limit=5)
-            
-            return jsonify({
-                'analytics': analytics,
-                'system_info': system_info,
-                'recent_requests': recent_requests,
-                'timestamp': datetime.now().isoformat()
-            })
-        except Exception as e:
-            app_logger.error(f"Dashboard API error: {str(e)}")
-            return jsonify({'error': 'Failed to fetch dashboard data'}), 500
-    
-    @app.route('/api/trending')
-    def get_trending():
-        """Get trending videos from various platforms"""
-        try:
-            platform = request.args.get('platform', 'youtube').lower()
-            category = request.args.get('category', '0')  # 0 = all categories
-            region = request.args.get('region', 'US')
-            max_results = min(int(request.args.get('max_results', '20')), 50)
-            
-            # List of supported platforms
-            supported_platforms = ['youtube']
-            
-            if platform not in supported_platforms:
-                return jsonify({
-                    'error': f'Platform "{platform}" is not supported yet',
-                    'supported_platforms': supported_platforms,
-                    'coming_soon': ['tiktok', 'instagram', 'facebook'],
-                    'message': 'Currently only YouTube trending videos are available. More platforms coming soon!'
-                }), 400
-            
-            if platform == 'youtube':
-                trending_videos = get_youtube_trending(category, region, max_results)
-            
-            return jsonify({
-                'platform': platform,
-                'category': category,
-                'region': region,
-                'videos': trending_videos,
-                'total': len(trending_videos),
-                'timestamp': datetime.now().isoformat()
-            })
-            
-        except Exception as e:
-            app_logger.error(f"Trending API error: {str(e)}")
-            return jsonify({'error': 'Failed to fetch trending videos'}), 500
-    
-    @app.route('/api/test-platform', methods=['POST'])
-    def test_platform_compatibility():
-        """Test platform compatibility and provide specific guidance"""
-        try:
-            data = request.get_json()
-            url = data.get('url', '').strip()
-            
-            if not url:
-                return jsonify({'error': 'URL is required'})
-            
-            platform = validator.get_platform_from_url(url)
-            
-            # Platform-specific guidance
-            guidance = {
-                'youtube': {
-                    'status': 'excellent',
-                    'reliability': '95%',
-                    'notes': 'Fully supported with all features',
-                    'tips': ['Copy URL from browser address bar', 'All video types supported']
-                },
-                'tiktok': {
-                    'status': 'good',
-                    'reliability': '85%',
-                    'notes': 'Enhanced format support implemented',
-                    'tips': ['Use vm.tiktok.com links', 'Share → Copy link from app']
-                },
-                'facebook': {
-                    'status': 'limited',
-                    'reliability': '70%',
-                    'notes': 'Public videos only',
-                    'tips': ['Only public videos work', 'Right-click → Copy video URL']
-                },
-                'instagram': {
-                    'status': 'limited',
-                    'reliability': '65%',
-                    'notes': 'May require browser login for restricted content',
-                    'tips': ['Log into Instagram in browser first', 'Use public posts/reels', 'Avoid age-restricted content']
-                },
-                'douyin': {
-                    'status': 'good',
-                    'reliability': '80%',
-                    'notes': 'Chinese TikTok version',
-                    'tips': ['Use official share links', 'Public videos work best']
-                }
-            }
-            
-            platform_info = guidance.get(platform, {
-                'status': 'unknown',
-                'reliability': '0%',
-                'notes': 'Unsupported platform',
-                'tips': ['Try YouTube, TikTok, Facebook, Instagram, or Douyin instead']
-            })
-            
-            return jsonify({
-                'platform': platform,
-                'valid': platform in guidance,
-                'info': platform_info
-            })
-            
-        except Exception as e:
-            app_logger.error(f"Platform test error: {str(e)}")
-            return jsonify({'error': 'Failed to test platform compatibility'}), 500
-    
-    @app.route('/api/platform-status')
-    def get_platform_status():
-        """Get the status of supported platforms"""
-        platforms = {
-            'youtube': {'name': '📺 YouTube', 'status': 'active', 'note': 'Fully supported'},
-            'tiktok': {'name': '🎵 TikTok', 'status': 'active', 'note': 'Enhanced format support'},
-            'facebook': {'name': '📘 Facebook', 'status': 'active', 'note': 'Public videos supported'},
-            'douyin': {'name': '🎨 Douyin', 'status': 'active', 'note': 'Chinese TikTok version'},
-            'instagram': {'name': '📸 Instagram', 'status': 'active', 'note': 'Posts and Reels supported'}
+        files_deleted, space_freed, errors = extractor.cleanup_old_files()
+        response = {
+            'success': True,
+            'files_deleted': files_deleted,
+            'space_freed_mb': space_freed,
+            'message': f'Cleaned up {files_deleted} files, freed {space_freed} MB',
         }
-        return jsonify(platforms)
-    
-    @app.route('/api/test-ytdlp', methods=['POST'])
-    def test_ytdlp():
-        """Test endpoint to debug yt-dlp issues"""
+        if errors:
+            response['warnings'] = errors
+        return jsonify(response)
+
+    # -- API: YouTube -----------------------------------------------------------
+
+    @app.route('/api/youtube-auth')
+    @limiter.limit("120 per minute")  # the page polls this while the sign-in window is open
+    def youtube_auth_status():
+        """Sign-in state only. No side effects, so polling cannot disturb a sign-in in progress."""
+        return jsonify({'authenticated': youtube_uploader.is_authenticated()})
+
+    @app.route('/api/youtube-auth/start', methods=['POST'])
+    @limiter.limit("20 per minute")
+    def youtube_auth_start():
+        """Begin sign-in and return the Google consent URL to open in a popup."""
+        if youtube_uploader.is_authenticated():
+            return jsonify({'authenticated': True})
         try:
-            data = request.get_json()
-            url = data.get('url', 'https://www.youtube.com/watch?v=dQw4w9WgXcQ')
-            
-            # Test yt-dlp directly in Flask context
-            import yt_dlp
-            ydl_opts = {
-                'format': 'best[height<=720]',
-                'noplaylist': True,
-            }
-            
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(url, download=False)
-                
-            return jsonify({
-                'success': True,
-                'info_type': str(type(info)),
-                'is_dict': isinstance(info, dict),
-                'title': info.get('title', 'No title') if isinstance(info, dict) else 'Not a dict',
-                'keys': list(info.keys())[:10] if isinstance(info, dict) else []
-            })
-            
-        except Exception as e:
-            app_logger.error(f"yt-dlp test error: {str(e)}")
-            return jsonify({
-                'success': False,
-                'error': str(e)
-            })
-    
-    @app.route('/api/video-categories', methods=['GET'])
-    def get_video_categories():
-        """Get YouTube video categories"""
-        try:
-            # Common YouTube categories
-            categories = [
-                {'id': '1', 'name': 'Film & Animation'},
-                {'id': '2', 'name': 'Autos & Vehicles'},
-                {'id': '10', 'name': 'Music'},
-                {'id': '15', 'name': 'Pets & Animals'},
-                {'id': '17', 'name': 'Sports'},
-                {'id': '19', 'name': 'Travel & Events'},
-                {'id': '20', 'name': 'Gaming'},
-                {'id': '22', 'name': 'People & Blogs'},
-                {'id': '23', 'name': 'Comedy'},
-                {'id': '24', 'name': 'Entertainment'},
-                {'id': '25', 'name': 'News & Politics'},
-                {'id': '26', 'name': 'Howto & Style'},
-                {'id': '27', 'name': 'Education'},
-                {'id': '28', 'name': 'Science & Technology'}
-            ]
-            
-            return jsonify({
-                'categories': categories,
-                'total': len(categories)
-            })
-            
-        except Exception as e:
-            app_logger.error(f"Categories error: {str(e)}")
-            return jsonify({'error': 'Failed to fetch categories'}), 500
-    
-    @app.route('/api/search', methods=['POST'])
-    def search_videos():
-        """Search for videos on YouTube"""
-        try:
-            data = request.get_json()
-            query = data.get('query', '').strip()
-            platform = data.get('platform', 'youtube').lower()
-            max_results = min(int(data.get('max_results', 10)), 50)
-            
-            if not query:
-                return jsonify({'error': 'Search query is required'}), 400
-            
-            if platform != 'youtube':
-                return jsonify({'error': 'Only YouTube search is currently supported'}), 400
-            
-            # For demo purposes, return sample search results
-            sample_results = [
-                {
-                    'id': f'search_{query}_1',
-                    'title': f'{query} - Tutorial Video',
-                    'description': f'Learn about {query} in this comprehensive tutorial',
-                    'thumbnail': 'https://img.youtube.com/vi/dQw4w9WgXcQ/mqdefault.jpg',
-                    'url': 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
-                    'channel': 'Educational Channel',
-                    'views': '250000',
-                    'duration': '10:30',
-                    'published': '2 days ago'
-                },
-                {
-                    'id': f'search_{query}_2',
-                    'title': f'Top 10 {query} Tips',
-                    'description': f'Discover the best tips for {query}',
-                    'thumbnail': 'https://img.youtube.com/vi/example123/mqdefault.jpg',
-                    'url': 'https://www.youtube.com/watch?v=example123',
-                    'channel': 'Tips & Tricks',
-                    'views': '150000',
-                    'duration': '8:45',
-                    'published': '1 week ago'
-                }
-            ]
-            
-            return jsonify({
-                'success': True,
-                'platform': platform,
-                'videos': sample_results[:max_results],
-                'total': len(sample_results),
-                'query': query
-            })
-            
-        except Exception as e:
-            app_logger.error(f"Video search error: {str(e)}")
-            return jsonify({'error': f'Failed to search videos: {str(e)}'}), 500
-    
-    @app.route('/api/create-short', methods=['POST'])
-    def create_short_video():
-        """Create a short video from a longer video"""
-        try:
-            data = request.get_json()
-            
-            if not isinstance(data, dict):
-                return jsonify({'error': f'Invalid request data type: {type(data)}'}), 400
-            
-            url = data.get('url', '').strip()
-            start_time = data.get('start_time', 0)  # in seconds
-            duration = data.get('duration', 30)  # default 30 seconds
-            
-            # Validate required fields
-            if not url:
-                return jsonify({'error': 'URL is required'}), 400
-            
-            # Validate URL
-            is_valid_url, platform, url_error = validator.validate_url(url)
-            if not is_valid_url:
-                return jsonify({'error': f'Invalid URL: {url_error or "URL must be from a supported platform"}'}), 400
-            
-            # Parse start_time if it's a string (e.g., "1:30")
-            if isinstance(start_time, str):
-                try:
-                    if ':' in start_time:
-                        parts = start_time.split(':')
-                        if len(parts) == 2:
-                            start_time = int(parts[0]) * 60 + int(parts[1])
-                        else:
-                            start_time = int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2])
-                    else:
-                        start_time = float(start_time)
-                except ValueError:
-                    return jsonify({'error': 'Invalid start_time format. Use seconds or MM:SS format'}), 400
-            
-            # Validate duration
-            if duration <= 0 or duration > 300:  # Max 5 minutes for shorts
-                return jsonify({'error': 'Duration must be between 1 and 300 seconds'}), 400
-            
-            # Options for video creation
-            options = {
-                'resize_to_vertical': data.get('vertical_format', False),
-                'quality': data.get('quality', 'medium'),  # low, medium, high
-                'text_overlay': data.get('text_overlay'),  # Optional text overlay
-            }
-            
-            with LogContext(api_logger, "Short video creation"):
-                # Download video using the enhanced video processor
-                try:
-                    video_path, video_title, metadata = extractor.download_video(url)
-                except Exception as e:
-                    app_logger.error(f"Failed to download video: {str(e)}")
-                    return jsonify({'error': 'Failed to download video'}), 500
-                
-                if not video_path:
-                    return jsonify({'error': 'Failed to download video'}), 500
-                
-                # Generate unique filename
-                import uuid
-                unique_id = str(uuid.uuid4())[:8]
-                safe_title = "".join(c for c in (video_title or "short")[:50] if c.isalnum() or c in (' ', '-', '_')).strip()
-                output_name = f"{safe_title}_{unique_id}_short"
-                
-                # Create short video using moviepy
-                try:
-                    from moviepy.editor import VideoFileClip, TextClip, CompositeVideoClip
-                    
-                    config = get_config()
-                    output_path = config.SHORTS_FOLDER / f"{output_name}.mp4"
-                    
-                    # Load video
-                    video = VideoFileClip(video_path)
-                    
-                    # Validate start_time against video duration
-                    if start_time >= video.duration:
-                        video.close()
-                        return jsonify({'error': f'Start time ({start_time}s) exceeds video duration ({video.duration:.1f}s)'}), 400
-                    
-                    # Adjust duration if it exceeds video length
-                    if start_time + duration > video.duration:
-                        duration = video.duration - start_time
-                    
-                    # Extract the clip
-                    short_clip = video.subclip(start_time, start_time + duration)
-                    
-                    # Apply resize for vertical format if requested
-                    if options.get('resize_to_vertical', False):
-                        w, h = short_clip.size
-                        if w/h > 9/16:  # Too wide, crop sides
-                            new_w = int(h * 9/16)
-                            short_clip = short_clip.crop(x1=(w-new_w)//2, x2=(w+new_w)//2)
-                        # Resize to standard shorts resolution
-                        short_clip = short_clip.resize((1080, 1920))
-                    
-                    # Add text overlay if specified
-                    if options.get('text_overlay') and options['text_overlay'].get('text'):
-                        text_config = options['text_overlay']
-                        txt_clip = TextClip(text_config.get('text', ''), 
-                                          fontsize=text_config.get('fontsize', 50),
-                                          color=text_config.get('color', 'white'),
-                                          stroke_color=text_config.get('stroke_color', 'black'),
-                                          stroke_width=text_config.get('stroke_width', 2))
-                        
-                        position = text_config.get('position', 'bottom')
-                        if position == 'bottom':
-                            txt_clip = txt_clip.set_position(('center', 'bottom')).set_margin(50)
-                        elif position == 'top':
-                            txt_clip = txt_clip.set_position(('center', 'top')).set_margin(50)
-                        else:
-                            txt_clip = txt_clip.set_position('center')
-                        
-                        txt_clip = txt_clip.set_duration(short_clip.duration)
-                        short_clip = CompositeVideoClip([short_clip, txt_clip])
-                    
-                    # Write video file with quality settings
-                    quality = options.get('quality', 'medium')
-                    if quality == 'high':
-                        short_clip.write_videofile(str(output_path), codec='libx264', bitrate='5000k', verbose=False, logger=None)
-                    elif quality == 'low':
-                        short_clip.write_videofile(str(output_path), codec='libx264', bitrate='1000k', verbose=False, logger=None)
-                    else:  # medium
-                        short_clip.write_videofile(str(output_path), codec='libx264', bitrate='2000k', verbose=False, logger=None)
-                    
-                    # Clean up
-                    video.close()
-                    short_clip.close()
-                    
-                    return jsonify({
-                        'success': True,
-                        'message': 'Short video created successfully',
-                        'filename': f"{output_name}.mp4",
-                        'title': video_title,
-                        'duration': duration,
-                        'start_time': start_time,
-                        'download_url': f'/shorts/{output_name}.mp4'
-                    })
-                    
-                except Exception as e:
-                    app_logger.error(f"Failed to create short video: {str(e)}")
-                    return jsonify({'error': f'Failed to create short video: {str(e)}'}), 500
-        
-        except Exception as e:
-            app_logger.error(f"Short video creation error: {str(e)}")
-            return jsonify({'error': f'Short video creation failed: {str(e)}'}), 500
-    
-    @app.route('/shorts/<filename>')
-    def serve_short_video(filename):
-        """Serve generated short videos"""
-        config = get_config()
-        return send_from_directory(str(config.SHORTS_FOLDER), filename)
-    
-    @app.route('/api/youtube-auth', methods=['GET'])
-    def youtube_auth():
-        """Start YouTube OAuth2 authentication"""
-        try:
-            success, auth_url = youtube_uploader.authenticate()
-            if success:
-                return jsonify({'authenticated': True, 'message': 'Already authenticated'})
-            else:
-                return jsonify({'authenticated': False, 'auth_url': auth_url})
-        except Exception as e:
-            app_logger.error(f"YouTube auth error: {str(e)}")
-            return jsonify({'error': str(e)}), 500
-    
-    @app.route('/api/youtube-callback', methods=['POST'])
-    def youtube_callback():
-        """Handle YouTube OAuth2 callback"""
-        try:
-            data = request.get_json()
-            auth_code = data.get('code')
-            
-            if not auth_code:
-                return jsonify({'error': 'Authorization code required'}), 400
-            
-            success, message = youtube_uploader.complete_auth(
-                auth_code, 
-                "http://localhost:8080/oauth2callback"
-            )
-            
-            if success:
-                return jsonify({'success': True, 'message': message})
-            else:
-                return jsonify({'error': message}), 400
-                
-        except Exception as e:
-            app_logger.error(f"YouTube callback error: {str(e)}")
-            return jsonify({'error': str(e)}), 500
-    
+            return jsonify({'authenticated': False, 'auth_url': youtube_uploader.begin_auth()})
+        except YouTubeUploaderError as error:
+            return jsonify({'authenticated': False, 'error': str(error)}), 400
+
+    @app.route('/oauth2callback')
+    @limiter.limit("10 per minute")
+    def oauth2_callback():
+        """Where Google sends the user back after the consent screen."""
+        if request.args.get('error'):
+            return render_template_string(
+                OAUTH_RESULT_PAGE, heading='Sign-in cancelled',
+                message='YouTube access was not granted.'), 400
+
+        code, state = request.args.get('code'), request.args.get('state')
+        if not code or not state:
+            return render_template_string(
+                OAUTH_RESULT_PAGE, heading='Sign-in failed',
+                message='The response from Google was incomplete.'), 400
+
+        success, message = youtube_uploader.complete_auth(code, state)
+        heading = 'YouTube connected' if success else 'Sign-in failed'
+        return render_template_string(
+            OAUTH_RESULT_PAGE, heading=heading, message=message), (200 if success else 400)
+
     @app.route('/api/upload-to-youtube', methods=['POST'])
+    @limiter.limit("5 per minute")
     def upload_to_youtube():
-        """Upload short video to YouTube"""
-        try:
-            data = request.get_json()
-            video_path = data.get('video_path')
-            title = data.get('title', 'Viral Short Video - Created with VideoExtract')
-            description = data.get('description', 'Created with VideoExtract - AI-powered short video generator\n\n#Shorts #VideoExtract #Viral')
-            tags = data.get('tags', ['Shorts', 'VideoExtract', 'AI', 'viral', 'trending'])
-            privacy = data.get('privacy', 'private')  # private, public, unlisted
-            
-            if not video_path:
-                return jsonify({'error': 'Video path required'}), 400
-            
-            if not os.path.exists(video_path):
-                return jsonify({'error': 'Video file not found'}), 404
-            
-            # Validate video for YouTube Shorts
-            is_valid, validation_msg = youtube_uploader.validate_short_video(video_path)
-            if not is_valid:
-                return jsonify({'error': f'Video validation failed: {validation_msg}'}), 400
-            
-            # Upload to YouTube
-            success, message, video_id = youtube_uploader.upload_video(
-                video_path=video_path,
-                title=title,
-                description=description,
-                tags=tags,
-                privacy_status=privacy,
-                is_short=True
-            )
-            
-            if success:
-                return jsonify({
-                    'success': True,
-                    'message': message,
-                    'video_id': video_id,
-                    'youtube_url': f'https://www.youtube.com/watch?v={video_id}',
-                    'studio_url': f'https://studio.youtube.com/video/{video_id}/edit'
-                })
-            else:
-                return jsonify({'error': message}), 500
-                
-        except Exception as e:
-            app_logger.error(f"YouTube upload error: {str(e)}")
-            return jsonify({'error': str(e)}), 500
-    
-    @app.route('/api/youtube-quota', methods=['GET'])
+        data = get_json_body()
+        if data is None:
+            return json_error('JSON body required', 400)
+
+        # Only the name of a short created by this app is accepted, never a path
+        filename = data.get('filename')
+        if not isinstance(filename, str) or not filename:
+            return json_error('filename is required', 400)
+
+        title = data.get('title', '')
+        description = data.get('description', '')
+        tags = data.get('tags')
+        privacy = data.get('privacy', 'private')
+        if not isinstance(title, str) or not isinstance(description, str):
+            return json_error('title and description must be text', 400)
+        if tags is not None and not isinstance(tags, list):
+            return json_error('tags must be a list', 400)
+        if privacy not in PRIVACY_STATUSES:
+            return json_error(f"privacy must be one of: {', '.join(PRIVACY_STATUSES)}", 400)
+
+        video_path = resolve_in_folder(config.SHORTS_FOLDER, filename, ('.mp4',))
+        if video_path is None:
+            return json_error('Video not found', 404)
+
+        if not youtube_uploader.is_authenticated():
+            return json_error('Please sign in to YouTube first', 401)
+
+        is_valid, validation_message = youtube_uploader.validate_short_video(str(video_path))
+        if not is_valid:
+            return json_error(f'Video validation failed: {validation_message}', 400)
+
+        success, message, video_id = youtube_uploader.upload_video(
+            video_path=str(video_path), title=title, description=description,
+            tags=tags, privacy_status=privacy, is_short=True)
+        if not success:
+            return json_error(message, 502)
+
+        return jsonify({
+            'success': True,
+            'message': message,
+            'privacy': privacy,
+            'video_id': video_id,
+            'youtube_url': f'https://www.youtube.com/watch?v={video_id}',
+            'studio_url': f'https://studio.youtube.com/video/{video_id}/edit',
+        })
+
+    @app.route('/api/youtube-quota')
     def youtube_quota():
-        """Get YouTube API quota information"""
-        try:
-            quota_info = youtube_uploader.get_upload_quota_info()
-            return jsonify(quota_info)
-        except Exception as e:
-            app_logger.error(f"YouTube quota error: {str(e)}")
-            return jsonify({'error': str(e)}), 500
-    
-    # Import uuid here to avoid circular imports
-    import uuid
-    
+        return jsonify(youtube_uploader.get_upload_quota_info())
+
+    # Done here, not in main(), so gunicorn and tests get it too
+    run_startup_cleanup()
     return app
+
+
+def run_startup_cleanup() -> None:
+    """Sweep files older than AUTO_CLEANUP_HOURS, and renders cut off when the app last stopped."""
+    try:
+        deleted, freed_mb, _ = extractor.cleanup_old_files()
+        partial = remove_partial_renders(get_config().SHORTS_FOLDER)
+        app_logger.info("Startup cleanup finished", files_deleted=deleted, space_freed_mb=freed_mb,
+                        partial_renders_removed=partial)
+    except (OSError, ValueError) as error:
+        app_logger.warning(f"Startup cleanup failed ({type(error).__name__})")
+
 
 def main():
     """Main entry point"""
     config = get_config()
     app = create_app()
-    
-    app_logger.info(
-        "Starting Video Frame Extractor",
-        environment=config.FLASK_ENV,
-        debug=config.DEBUG
-    )
-    
-    app.run(
-        host='0.0.0.0',
-        port=5000,
-        debug=config.DEBUG,
-        threaded=True
-    )
+
+    if config.HOST not in LOOPBACK_HOSTS:
+        app_logger.warning(
+            "Listening on a non-loopback address: this app has no login. "
+            "Only do this on a trusted network and set ALLOWED_HOSTS.",
+            host=config.HOST)
+    app_logger.info("Starting Video Frame Extractor", environment=config.FLASK_ENV,
+                    host=config.HOST, port=config.PORT, debug=config.DEBUG)
+
+    app.run(host=config.HOST, port=config.PORT, debug=config.DEBUG, threaded=True)
+
 
 if __name__ == '__main__':
     main()

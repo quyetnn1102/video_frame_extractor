@@ -6,11 +6,21 @@ import logging
 import logging.handlers
 from datetime import datetime
 import json
+import re
 import traceback
 from typing import Optional
 import sys
 
 from config import get_config
+
+# Newlines and escape sequences in remote text could forge or hide log lines.
+CONTROL_CHARACTERS = re.compile(r'[\x00-\x1f\x7f]')
+
+
+def parse_log_level(value) -> int:
+    """Map a LOG_LEVEL setting to a logging level; unknown values mean INFO."""
+    level = getattr(logging, str(value or '').strip().upper(), None)
+    return level if isinstance(level, int) and level in logging._levelToName else logging.INFO
 
 class CustomFormatter(logging.Formatter):
     """Custom formatter with color coding for console output"""
@@ -36,8 +46,9 @@ class StructuredLogger:
     def __init__(self, name: str):
         self.config = get_config()
         self.logger = logging.getLogger(name)
-        self.logger.setLevel(getattr(logging, self.config.LOG_LEVEL))
-        
+        self.level = parse_log_level(self.config.LOG_LEVEL)
+        self.logger.setLevel(self.level)
+
         # Prevent duplicate handlers
         if not self.logger.handlers:
             self._setup_handlers()
@@ -50,13 +61,13 @@ class StructuredLogger:
             maxBytes=10*1024*1024,  # 10MB
             backupCount=5
         )
-        file_handler.setLevel(logging.DEBUG)
+        file_handler.setLevel(self.level)
         file_formatter = logging.Formatter(self.config.LOG_FORMAT)
         file_handler.setFormatter(file_formatter)
         
         # Console handler with colors
         console_handler = logging.StreamHandler(sys.stdout)
-        console_handler.setLevel(getattr(logging, self.config.LOG_LEVEL))
+        console_handler.setLevel(self.level)
         console_formatter = CustomFormatter(self.config.LOG_FORMAT)
         console_handler.setFormatter(console_formatter)
         
@@ -66,13 +77,19 @@ class StructuredLogger:
     
     def _log_with_context(self, level: int, message: str, **context):
         """Log message with additional context"""
+        # handle() below skips the level check, so apply it here
+        if not self.logger.isEnabledFor(level):
+            return
+
         context_str = ""
         if context:
+            # json.dumps escapes control characters in the context values
             context_str = f" | Context: {json.dumps(context, default=str)}"
-        
+        message = CONTROL_CHARACTERS.sub(' ', str(message))
+
         # Add color to record for console output
         record = self.logger.makeRecord(
-            self.logger.name, level, __file__, 0, 
+            self.logger.name, level, __file__, 0,
             f"{message}{context_str}", (), None
         )
         record.color = True
@@ -132,29 +149,6 @@ class StructuredLogger:
 app_logger = StructuredLogger('app')
 video_logger = StructuredLogger('video_processing')
 api_logger = StructuredLogger('api')
-
-def log_function_call(func):
-    """Decorator to log function calls"""
-    def wrapper(*args, **kwargs):
-        start_time = datetime.now()
-        try:
-            result = func(*args, **kwargs)
-            duration = (datetime.now() - start_time).total_seconds() * 1000
-            app_logger.debug(
-                f"Function call: {func.__name__}",
-                duration_ms=duration,
-                success=True
-            )
-            return result
-        except Exception as e:
-            duration = (datetime.now() - start_time).total_seconds() * 1000
-            app_logger.error(
-                f"Function call failed: {func.__name__}",
-                duration_ms=duration,
-                error=str(e)
-            )
-            raise
-    return wrapper
 
 class LogContext:
     """Context manager for logging operations"""
