@@ -52,6 +52,12 @@ class TestTemplates(unittest.TestCase):
         self.assertNotIn('video_path', text, 'the upload API takes a file name, not a server path')
         self.assertNotIn('type="file"', text, 'the API takes a URL, not an uploaded file')
 
+    def test_extraction_warnings_are_shown_to_the_user(self):
+        """/api/extract reports timestamps it could not extract; the page must not drop them."""
+        text = (TEMPLATES_DIR / 'index.html').read_text(encoding='utf-8')
+        self.assertIn('result.warnings', text)
+        self.assertIn('id="extractWarnings"', text)
+
     def test_youtube_sign_in_flow_is_robust(self):
         text = (TEMPLATES_DIR / 'create_short.html').read_text(encoding='utf-8')
         self.assertIn("'/api/youtube-auth/start'", text)
@@ -75,6 +81,18 @@ class TestTemplates(unittest.TestCase):
         for path in TEMPLATE_FILES:
             with self.subTest(template=path.name):
                 self.assertNotIn('Reliability', path.read_text(encoding='utf-8'))
+
+    def test_every_third_party_asset_has_a_subresource_integrity_hash(self):
+        """A compromised CDN file would otherwise run in the origin that can publish to YouTube."""
+        tag = re.compile(r'<(?:script|link)\b[^>]*\b(?:src|href)="https?://[^"]+"[^>]*>')
+        checked = 0
+        for path in TEMPLATE_FILES:
+            for element in tag.findall(path.read_text(encoding='utf-8')):
+                checked += 1
+                with self.subTest(template=path.name, element=element[:90]):
+                    self.assertRegex(element, r'integrity="sha384-[A-Za-z0-9+/]{64}"')
+                    self.assertIn('crossorigin="anonymous"', element)
+        self.assertEqual(checked, 12)  # three assets in each of the four pages
 
     def test_external_assets_come_from_hosts_allowed_by_the_csp(self):
         import app_enhanced
