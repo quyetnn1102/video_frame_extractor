@@ -278,6 +278,47 @@ class TestTemplates(unittest.TestCase):
             with self.subTest(file=path.name):
                 self.assertLess(len(path.read_text(encoding='utf-8').splitlines()), 800)
 
+    def test_every_page_has_a_favicon(self):
+        self.assertTrue((STATIC_DIR / 'favicon.svg').is_file())
+        for path in TEMPLATE_FILES:
+            with self.subTest(template=path.name):
+                self.assertIn('<link rel="icon" href="/static/favicon.svg"', path.read_text(encoding='utf-8'))
+
+    def test_page_level_improvements(self):
+        home = page_source(TEMPLATES_DIR / 'index.html')
+        self.assertIn("'/create-short?short=' + encodeURIComponent(item.filename)", home, 'a recent short opens itself')
+        self.assertIn("$('startSection').hidden", home, 'the first-visit steps go once there are shorts')
+
+        trending = page_source(TEMPLATES_DIR / 'trending.html')
+        self.assertNotIn('platformSelect', trending, 'only YouTube exists: no dead select')
+        self.assertNotIn('setInterval', trending, 'no list rebuilt under the user; Refresh is manual')
+        self.assertIn("$('categorySelect').addEventListener('change'", trending)
+        self.assertIn("openWith('/create-short'", trending)
+        self.assertIn('data.sample', trending, 'sample data is called sample data')
+
+        create = page_source(TEMPLATES_DIR / 'create_short.html')
+        self.assertNotIn('resetFormBtn', create, 'no Reset beside the main action')
+        self.assertIn('function reviewUpload', create, 'title, description and privacy are reviewed first')
+        self.assertIn("privacy: details.privacy", create)
+
+        extract = page_source(TEMPLATES_DIR / 'extract.html')
+        self.assertIn("'/api/frames/archive'", extract)
+        self.assertIn('id="startOverBtn"', extract)
+
+        dashboard = page_source(TEMPLATES_DIR / 'dashboard.html')
+        self.assertIn('id="requestRows"', dashboard)
+        self.assertIn("'/api/cleanup'", dashboard)
+        self.assertIn('document.hidden', dashboard, 'no polling in a background tab')
+        cleanup = dashboard.split('function confirmCleanup')[1].split("addEventListener('click', confirmCleanup)")[0]
+        self.assertIn('showModal()', cleanup, 'deleting shorts is confirmed first')
+        self.assertIn('Shorts, frames and downloads', dashboard, 'the button says what it deletes')
+        self.assertIn('reloadWhenDone', trending, 'a filter changed while loading is not dropped')
+        self.assertIn('if (busy) return;  // an extraction is running', extract)
+
+    def test_touch_screens_get_44px_targets(self):
+        self.assertRegex(STYLESHEET.read_text(encoding='utf-8'), r'@media \(pointer: coarse\) \{\s*\.btn-sm')
+        self.assertIn('@media (pointer: coarse)', SHELL_STYLESHEET.read_text(encoding='utf-8'))
+
     def test_no_invented_reliability_percentages_are_shown(self):
         for path in TEMPLATE_FILES:
             with self.subTest(template=path.name):

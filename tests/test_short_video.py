@@ -1,4 +1,5 @@
 """Tests for short_video.py: request validation, crop geometry and rendering."""
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -128,6 +129,21 @@ def ffmpeg_available():
         return True
     except Exception:
         return False
+
+
+class TestTextOverlayAvailable(unittest.TestCase):
+    def tearDown(self):
+        short_video.text_overlay_available.cache_clear()
+
+    def check(self, binary):
+        short_video.text_overlay_available.cache_clear()
+        with patch('moviepy.config.get_setting', return_value=binary):
+            return short_video.text_overlay_available()
+
+    def test_imagemagick_must_be_found_and_exist(self):
+        self.assertFalse(self.check('unset'))
+        self.assertFalse(self.check(r'C:\Program Files\ImageMagick-7\convert.exe'), 'registry path, no file')
+        self.assertTrue(self.check(sys.executable), 'an existing program')
 
 
 @unittest.skipUnless(ffmpeg_available(), 'bundled ffmpeg binary not available')

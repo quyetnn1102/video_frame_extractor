@@ -5,9 +5,11 @@ Extracted from the /api/create-short route so request parsing and rendering
 can be tested separately. All user-controlled values (start time, duration,
 quality and the text overlay) are validated here before MoviePy sees them.
 """
+import functools
 import math
 import os
 import re
+import shutil
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -189,6 +191,24 @@ RENDERING_FOLDER = '.rendering'  # inside the shorts folder; holds shorts until 
 VIDEO_FRAMES_BAR = 't'  # MoviePy's progress bar for the video pass; 'chunk' is the audio pass
 # proglog reports the first frame, then at most once per interval, then the end (1.0)
 PROGRESS_INTERVAL_SECONDS = 0.1
+
+
+@functools.lru_cache(maxsize=1)
+def text_overlay_available() -> bool:
+    """
+    True when MoviePy found ImageMagick, which it needs to draw caption text. MoviePy decides
+    this once at import (IMAGEMAGICK_BINARY, or auto-detection); 'unset' means not found.
+    """
+    try:
+        from moviepy.config import get_setting
+        binary = get_setting('IMAGEMAGICK_BINARY')
+    except Exception as error:  # a broken MoviePy setup: report "no captions", not a crash
+        app_logger.warning(f"Could not check for ImageMagick ({type(error).__name__})")
+        return False
+    if not binary or binary == 'unset':
+        return False
+    # On Windows MoviePy builds the path from the registry without checking that the file exists
+    return os.path.isfile(binary) or shutil.which(binary) is not None
 
 
 def remove_partial_renders(shorts_folder: Path) -> int:

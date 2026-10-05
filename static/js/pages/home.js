@@ -1,7 +1,7 @@
 (function () {
     'use strict';
 
-    const MAX_RECENT = 4;
+    const MAX_RECENT = 6;
     const SECONDS_PER_MINUTE = 60;
     const $ = (id) => document.getElementById(id);
 
@@ -57,7 +57,8 @@
         body.append(element('p', 'recent-title clamp', item.title), element('p', 'recent-meta', relativeTime(item.created)));
 
         const card = element('a', 'card card-flush recent-card');
-        card.href = '/create-short#resultsSection';
+        // Opens this short in the list (create-short.js highlights it), not just the list
+        card.href = '/create-short?short=' + encodeURIComponent(item.filename) + '#resultsSection';
         card.append(thumb, body);
 
         const entry = element('li');
@@ -73,6 +74,7 @@
             const items = data.shorts.slice(0, MAX_RECENT);
             $('recentShorts').replaceChildren(...items.map(recentCard));
             $('recentEmpty').hidden = items.length > 0;
+            $('startSection').hidden = items.length > 0;  // the steps are for a first visit
         } catch (error) {
             console.error('Could not load the recent shorts:', error);
             $('recentEmpty').hidden = false;

@@ -72,6 +72,16 @@ class TestDatabaseManager(unittest.TestCase):
         )
         self.assertGreater(request_id, 0)
 
+    def test_a_finished_request_keeps_its_title_and_reason(self):
+        import database
+        request_id = self.db_manager.log_video_request(url_hash='h', platform='youtube')
+        self.db_manager.update_video_request(request_id, 'failed', 'Video unavailable', 12, title='My video')
+        with patch.object(database, 'db_manager', self.db_manager):
+            row = database.get_recent_requests(limit=1)[0]
+        self.assertEqual((row['title'], row['status'], row['error']), ('My video', 'failed', 'Video unavailable'))
+        self.assertRegex(row['created_at'], r'^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$', 'UTC, readable by browsers')
+        self.assertNotIn('user_ip', row)
+
     def test_get_platform_statistics(self):
         stats = self.db_manager.get_platform_statistics(days=7)
         self.assertIn('period_days', stats)

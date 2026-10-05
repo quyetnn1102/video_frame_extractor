@@ -127,18 +127,18 @@ class DatabaseManager:
             app_logger.error(f"Failed to log video request: {str(e)}")
             return 0
     
-    def update_video_request(self, request_id: int, status: str, error_message: str = None, 
-                           processing_time_ms: int = None):
-        """Update video request status"""
+    def update_video_request(self, request_id: int, status: str, error_message: str = None,
+                           processing_time_ms: int = None, title: str = None):
+        """Update video request status (and its title, known only once the video is downloaded)"""
         try:
             with self.connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute('''
-                    UPDATE video_requests 
-                    SET status = ?, error_message = ?, processing_time_ms = ?, 
-                        completed_at = CURRENT_TIMESTAMP
+                    UPDATE video_requests
+                    SET status = ?, error_message = ?, processing_time_ms = ?,
+                        completed_at = CURRENT_TIMESTAMP, title = COALESCE(?, title)
                     WHERE id = ?
-                ''', (status, error_message, processing_time_ms, request_id))
+                ''', (status, error_message, processing_time_ms, title, request_id))
                 conn.commit()
         except Exception as e:
             app_logger.error(f"Failed to update video request: {str(e)}")
@@ -378,26 +378,33 @@ def get_analytics() -> Dict[str, Any]:
             'total_frames_extracted': 0
         }
 
+def sqlite_time_to_iso(value):
+    """CURRENT_TIMESTAMP is UTC without a zone ('2026-10-05 15:44:30'); browsers need the 'Z'."""
+    if isinstance(value, str) and len(value) == len('YYYY-MM-DD HH:MM:SS'):
+        return value.replace(' ', 'T') + 'Z'
+    return value
+
+
 def get_recent_requests(limit: int = 10) -> list:
     """Get recent video processing requests"""
     try:
         with db_manager.connection() as conn:
             cursor = conn.cursor()
             cursor.execute('''
-                SELECT platform, title, status, created_at, processing_time_ms, user_ip
-                FROM video_requests 
-                ORDER BY created_at DESC 
+                SELECT platform, title, status, created_at, processing_time_ms, error_message
+                FROM video_requests
+                ORDER BY created_at DESC, id DESC
                 LIMIT ?
             ''', (limit,))
-            
+
             rows = cursor.fetchall()
             return [{
                 'platform': row[0],
                 'title': row[1] or 'Unknown',
                 'status': row[2],
-                'created_at': row[3],
+                'created_at': sqlite_time_to_iso(row[3]),
                 'processing_time_ms': row[4],
-                'user_ip': row[5]
+                'error': row[5],  # why it failed; the messages are written to be shown
             } for row in rows]
             
     except Exception as e:

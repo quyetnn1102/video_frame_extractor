@@ -204,6 +204,45 @@ td.when {
 .status-cancelled { color: var(--ink-soft); }
 .status-cancelled::before { background: transparent; }
 
+td.details {
+    max-width: 22rem;
+    color: var(--ink-soft);
+}
+
+.storage {
+    margin-top: var(--space-5);
+    padding-top: var(--space-4);
+    border-top: 1px solid var(--rule);
+}
+
+.storage h3 {
+    font-size: var(--text-sm);
+    font-weight: 600;
+}
+
+.storage-list {
+    display: grid;
+    gap: var(--space-1);
+    margin: var(--space-2) 0 var(--space-4);
+    font-size: var(--text-sm);
+}
+
+.storage-list div {
+    display: flex;
+    justify-content: space-between;
+    gap: var(--space-4);
+}
+
+.storage-list dd {
+    margin: 0;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+}
+
+.cleanup-status:not(:empty) {
+    margin-top: var(--space-3);
+}
+
 .empty-row {
     padding: 1.5rem 0;
     color: var(--ink-soft);

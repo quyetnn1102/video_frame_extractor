@@ -6,15 +6,18 @@ youtube_uploader); this module validates requests, calls them, and shapes the
 responses. It is built for local use: it listens on loopback by default and
 only answers requests whose Host header is on the allow-list.
 """
+import io
+import os
 import re
 import time
+import zipfile
 import uuid
 from datetime import datetime
 from typing import Any, Dict, Optional
 from urllib.parse import urlsplit
 
 from flask import (Flask, jsonify, render_template, render_template_string, request,
-                   send_from_directory)
+                   send_file, send_from_directory)
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from werkzeug.exceptions import HTTPException
@@ -24,13 +27,13 @@ import media_jobs
 from config import get_config
 from database import db_manager, get_analytics, get_recent_requests
 from jobs import JobFailed, JobQueueFull, JobRegistry, NullReporter
-from library import list_shorts
+from library import folder_size_bytes, list_shorts
 from logger import LogContext, api_logger, app_logger
 from media_jobs import (EXTRACT_STAGES, SHORT_STAGES, finish_request_record, parse_extract_request,
                         parse_short_request, run_recorded)
-from short_video import remove_partial_renders
+from short_video import remove_partial_renders, text_overlay_available
 from trending import VIDEO_CATEGORIES, get_youtube_trending
-from validators import resolve_in_folder, validator
+from validators import MAX_TIMESTAMPS, resolve_in_folder, validator
 from video_processor import extractor
 from youtube_uploader import PRIVACY_STATUSES, YouTubeUploaderError, youtube_uploader
 
@@ -40,6 +43,7 @@ HOST_HEADER = re.compile(r'(?P<host>\[[0-9a-f:.]+\]|[a-z0-9.-]+)(?::(?P<port>\d{
 MAX_PORT = 65535
 CROSS_SITE_VALUES = ('cross-site', 'same-site')
 JOB_ID_PATTERN = re.compile(r'[0-9a-f]{32}')
+RECENT_REQUESTS_SHOWN = 10
 MAX_TRENDING_RESULTS = 50
 
 # One registry per process: deploy.py runs a single worker, so every request sees the same jobs
@@ -145,6 +149,15 @@ def origin_is_allowed(origin: str, allowed_hosts) -> bool:
         return False
     return (parsed.scheme in ('http', 'https') and bool(parsed.netloc)
             and host_is_allowed(parsed.netloc, allowed_hosts))
+
+
+def storage_usage(config) -> Dict[str, int]:
+    """Bytes kept by this app in its working folders (shown on the dashboard)."""
+    return {
+        'frames': folder_size_bytes(config.FRAMES_FOLDER),
+        'shorts': folder_size_bytes(config.SHORTS_FOLDER),
+        'downloads': folder_size_bytes(config.DOWNLOAD_FOLDER),
+    }
 
 
 def collect_system_info(base_dir, include_uptime: bool = False) -> Dict[str, Any]:
@@ -258,7 +271,8 @@ def create_app() -> Flask:
 
     @app.route('/create-short')
     def create_short_page():
-        return render_template('create_short.html')
+        # Captions need ImageMagick; without it the field is disabled and says why
+        return render_template('create_short.html', text_overlay_available=text_overlay_available())
 
     @app.route('/dashboard')
     def dashboard():
@@ -266,11 +280,12 @@ def create_app() -> Flask:
             system_info = collect_system_info(config.BASE_DIR)
             return render_template('dashboard.html', analytics=get_analytics(),
                                    system_info=system_info,
-                                   recent_requests=get_recent_requests(limit=10))
+                                   recent_requests=get_recent_requests(limit=RECENT_REQUESTS_SHOWN),
+                                   storage=storage_usage(config), cleanup_hours=config.AUTO_CLEANUP_HOURS)
         except Exception as error:  # the page should still load without metrics
             app_logger.error(f"Dashboard error ({type(error).__name__})")
             return render_template('dashboard.html', analytics={}, system_info={},
-                                   recent_requests=[])
+                                   recent_requests=[], storage={}, cleanup_hours=config.AUTO_CLEANUP_HOURS)
 
     # -- API: validation and information --------------------------------------
 
@@ -285,7 +300,8 @@ def create_app() -> Flask:
             return jsonify({
                 'analytics': get_analytics(),
                 'system_info': collect_system_info(config.BASE_DIR, include_uptime=True),
-                'recent_requests': get_recent_requests(limit=5),
+                'recent_requests': get_recent_requests(limit=RECENT_REQUESTS_SHOWN),
+                'storage': storage_usage(config),
                 'timestamp': datetime.now().isoformat(),
             })
         except Exception as error:
@@ -382,6 +398,9 @@ def create_app() -> Flask:
         region = request.args.get('region', 'US')
         videos = get_youtube_trending(category, region, max_results)
         return jsonify({
+            # Sample data stands in when YouTube cannot be reached; the page must say so
+            'sample': bool(videos) and all(str(video.get('id', '')).startswith('fallback') for video in videos),
+            'api_key_configured': bool(os.getenv('YOUTUBE_API_KEY')),
             'platform': platform,
             'category': category,
             'region': region,
@@ -416,6 +435,29 @@ def create_app() -> Flask:
         if path is None:
             return json_error('Not found', 404)
         return send_from_directory(config.FRAMES_FOLDER, path.name)
+
+    @app.route('/api/frames/archive', methods=['POST'])
+    @limiter.limit("10 per minute")
+    def download_frames_archive():
+        """Several frames as one zip file. Takes frame file names, never paths."""
+        data = get_json_body()
+        names = data.get('filenames') if data else None
+        if (not isinstance(names, list) or not names or len(names) > MAX_TIMESTAMPS
+                or not all(isinstance(name, str) for name in names)):
+            return json_error('filenames must be a list of frame file names', 400)
+        paths = [path for path in (resolve_in_folder(config.FRAMES_FOLDER, name, ('.jpg',))
+                                   for name in dict.fromkeys(names)) if path is not None]
+        if not paths:
+            return json_error('These frames are no longer on disk', 404)
+        buffer = io.BytesIO()
+        with zipfile.ZipFile(buffer, 'w', zipfile.ZIP_STORED) as archive:  # JPEGs do not compress further
+            for path in paths:
+                try:
+                    archive.write(path, arcname=path.name)
+                except OSError:
+                    continue  # removed meanwhile (cleanup): the zip has the others
+        buffer.seek(0)
+        return send_file(buffer, mimetype='application/zip', as_attachment=True, download_name='frames.zip')
 
     # -- API: short videos --------------------------------------------------------
 

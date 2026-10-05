@@ -121,10 +121,10 @@ def parse_short_request(data: Optional[Dict[str, Any]]) -> Tuple[Optional[ShortR
 # -- the work -----------------------------------------------------------------------
 
 def finish_request_record(request_id: int, status: str, started: float,
-                          error: Optional[str] = None) -> None:
+                          error: Optional[str] = None, title: Optional[str] = None) -> None:
     if request_id:
         db_manager.update_video_request(
-            request_id, status, error, int((time.time() - started) * 1000))
+            request_id, status, error, int((time.time() - started) * 1000), title=title)
 
 
 def run_recorded(record_id: int, crash_message: str, work: Callable[[], Dict[str, Any]]) -> Dict[str, Any]:
@@ -141,7 +141,7 @@ def run_recorded(record_id: int, crash_message: str, work: Callable[[], Dict[str
     except Exception:
         finish_request_record(record_id, 'failed', started, crash_message)
         raise
-    finish_request_record(record_id, 'completed', started)
+    finish_request_record(record_id, 'completed', started, title=result.get('title'))
     return result
 
 

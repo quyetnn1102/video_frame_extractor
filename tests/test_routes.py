@@ -287,7 +287,7 @@ class TestAppShell(RouteTestCase):
         for path, label in self.PAGES[1:]:
             with self.subTest(path=path):
                 self.assertIn(f'<h1>{label}</h1>', self.get_page(path))
-        self.assertIn('<h1>Hey, let&#39;s get started!</h1>', self.get_page('/'))
+        self.assertIn('<h1>Home</h1>', self.get_page('/'))
 
     def test_every_page_links_to_every_tool(self):
         for path, _ in self.PAGES:
@@ -877,6 +877,64 @@ class TestJobPollingIsNotRateLimited(RouteTestCase):
         statuses = {self.client.get('/api/jobs').status_code for _ in range(60)}
         statuses |= {self.client.get(f'/api/jobs/{"0" * 32}').status_code for _ in range(60)}
         self.assertEqual(statuses, {200, 404})
+
+
+class TestPhaseFourRoutes(RouteTestCase):
+    """Page-level improvements: frame archive, dashboard data, trending sample flag, captions."""
+
+    def test_frames_can_be_downloaded_as_one_zip(self):
+        import io
+        import zipfile
+        for name in ['frame_5s_aaaa1111.jpg', 'frame_70s_bbbb2222.jpg']:
+            (self.frames / name).write_bytes(b'jpeg-' + name.encode())
+        response = self.client.post('/api/frames/archive', json={
+            'filenames': ['frame_5s_aaaa1111.jpg', 'frame_70s_bbbb2222.jpg', 'frame_5s_aaaa1111.jpg']})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.mimetype, 'application/zip')
+        with zipfile.ZipFile(io.BytesIO(response.data)) as archive:
+            self.assertEqual(sorted(archive.namelist()), ['frame_5s_aaaa1111.jpg', 'frame_70s_bbbb2222.jpg'])
+
+    def test_the_archive_takes_only_frame_names_from_the_frames_folder(self):
+        (self.frames.parent / 'secret.jpg').write_bytes(b'x')
+        for body in [{}, {'filenames': []}, {'filenames': 'a.jpg'}, {'filenames': [5]},
+                     {'filenames': ['x.jpg'] * 51}]:
+            with self.subTest(body=body):
+                self.assertEqual(self.client.post('/api/frames/archive', json=body).status_code, 400)
+        for names in [['../secret.jpg'], ['..\\secret.jpg'], ['missing.jpg']]:
+            with self.subTest(names=names):
+                self.assertEqual(self.client.post('/api/frames/archive', json={'filenames': names}).status_code, 404)
+
+    def test_dashboard_data_reports_storage_and_why_requests_failed(self):
+        (self.shorts / 'a_short.mp4').write_bytes(b'x' * 10)
+        (self.frames / 'f.jpg').write_bytes(b'x' * 3)
+        failed = {'platform': 'youtube', 'title': 'T', 'status': 'failed', 'created_at': '2026-10-05T15:00:00Z',
+                  'processing_time_ms': 5, 'error': 'Video unavailable'}
+        with patch.object(app_enhanced, 'get_analytics', return_value={}), \
+                patch.object(app_enhanced, 'get_recent_requests', return_value=[failed]), \
+                patch.object(app_enhanced, 'collect_system_info', return_value={}):
+            data = self.client.get('/api/dashboard-data').get_json()
+            page = self.client.get('/dashboard').get_data(as_text=True)
+        self.assertEqual(data['storage'], {'frames': 3, 'shorts': 10, 'downloads': 0})
+        self.assertEqual(data['recent_requests'][0]['error'], 'Video unavailable')
+        self.assertIn('Video unavailable', page)
+        self.assertNotIn('IP address', page, 'the app only serves this computer')
+
+    def test_trending_says_when_it_shows_sample_data(self):
+        from trending import get_fallback_trending_data
+        with patch.object(app_enhanced, 'get_youtube_trending', return_value=get_fallback_trending_data()):
+            data = self.client.get('/api/trending').get_json()
+        self.assertTrue(data['sample'])
+        self.assertIn('api_key_configured', data)
+        with patch.object(app_enhanced, 'get_youtube_trending', return_value=[{'id': 'abc'}]):
+            self.assertFalse(self.client.get('/api/trending').get_json()['sample'])
+
+    def test_the_caption_field_says_when_imagemagick_is_missing(self):
+        for available, expected in [(True, 'Shown at the bottom of the clip'), (False, 'Captions need ImageMagick')]:
+            with self.subTest(available=available):
+                with patch.object(app_enhanced, 'text_overlay_available', return_value=available):
+                    page = self.client.get('/create-short').get_data(as_text=True)
+                self.assertIn(expected, page)
+                self.assertEqual('id="overlayText" maxlength="100" autocomplete="off" disabled' in page, not available)
 
 
 class TestStartupCleanup(RouteTestCase):

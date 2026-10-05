@@ -6,9 +6,11 @@
     const SAFE_FILE_NAME = /^[\w.-]+$/;
     const MAX_GHOST_FRAMES = 12;
     const MAX_TIMECODES = 50;  // MAX_TIMESTAMPS in validators.py
+    const ARCHIVE_URL_LIFETIME_MS = 60000;  // the zip's object URL is released after the download starts
     const SAMPLE_TIMECODES = ['0:05', '0:30', '1:15'];
     const $ = (id) => document.getElementById(id);
     let hasResults = false;   // real frames replace the preview until the next extraction
+    let shownFrames = [];     // the frames on screen, for "Download all"
     let busy = false;
 
     // Server text (platform names, warnings, file names) is untrusted for display:
@@ -94,6 +96,9 @@
         $('framesContainer').replaceChildren(...items);
         $('framesContainer').removeAttribute('aria-hidden');
         hasResults = true;
+        shownFrames = frames;
+        $('resultActions').hidden = frames.length === 0;
+        $('archiveStatus').replaceChildren();
         const count = frames.length === 1 ? '1 frame' : frames.length + ' frames';
         $('stripSummary').textContent = restored ? count + ' from your last extraction.' : count + ' extracted.';
         if (!restored) $('resultsSection').scrollIntoView({ behavior: scrollBehavior() });
@@ -157,6 +162,58 @@
         return errors.length === 0;
     }
 
+    // ---- the frames on screen: all of them as one zip, or start again ---------------
+
+    async function downloadAll() {
+        const status = $('archiveStatus');
+        status.replaceChildren();
+        let response;
+        try {
+            response = await fetch('/api/frames/archive', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ filenames: shownFrames.map((frame) => frame.filename) }),
+            });
+        } catch (error) {
+            status.replaceChildren(notice('error', 'Could not make the zip file.', 'The app did not answer.'));
+            return;
+        }
+        if (!response.ok) {
+            const data = await response.json().catch(() => ({}));
+            status.replaceChildren(notice('error', 'Could not make the zip file.', data.error || 'Try again in a moment.'));
+            return;
+        }
+        const link = element('a');
+        link.href = URL.createObjectURL(await response.blob());
+        link.download = 'frames.zip';
+        document.body.append(link);
+        link.click();
+        link.remove();
+        setTimeout(() => URL.revokeObjectURL(link.href), ARCHIVE_URL_LIFETIME_MS);
+        status.replaceChildren(notice('ok', 'Downloaded.', 'frames.zip has every frame shown here.'));
+    }
+
+    function startOver() {
+        if (busy) return;  // an extraction is running; its frames would land in the cleared page
+        try {
+            localStorage.removeItem(STORAGE_KEY);
+        } catch (error) {
+            // storage can be blocked; the page is cleared anyway
+        }
+        $('extractForm').reset();
+        ui.clearErrors($('errorSummary'), checks.map(([input]) => input));
+        ['formStatus', 'linkStatus', 'linkPreview', 'archiveStatus', 'extractWarnings']
+            .forEach((id) => $(id).replaceChildren());
+        shownFrames = [];
+        hasResults = false;
+        $('resultActions').hidden = true;
+        renderPreview();
+        $('videoUrl').focus();
+    }
+
+    $('downloadAllBtn').addEventListener('click', () => ui.whileWorking($('downloadAllBtn'), 'Preparing...', downloadAll));
+    $('startOverBtn').addEventListener('click', startOver);
+
     // ---- extract: a background job, followed in a progress card ---------------
 
     function rememberShown(jobId) {
@@ -179,6 +236,7 @@
         busy = isWorking;
         const submit = $('extractSubmit');
         submit.textContent = isWorking ? 'Extracting...' : 'Extract frames';
+        $('resultActions').hidden = isWorking || !hasResults;
         if (isWorking) submit.setAttribute('aria-disabled', 'true');
         else submit.removeAttribute('aria-disabled');
     }

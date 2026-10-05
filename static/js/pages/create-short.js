@@ -2,10 +2,11 @@
     'use strict';
 
     const MAX_DURATION_SECONDS = 300;
-    const DEFAULT_DURATION = '30';
     const AUTH_TIMEOUT_MS = 300000;
     const AUTH_POLL_MS = 1000;
     const BYTES_PER_MB = 1024 * 1024;
+    const UPLOAD_TITLE_LIMIT = 100;          // TITLE_LIMIT in youtube_uploader.py
+    const UPLOAD_DESCRIPTION_LIMIT = 5000;   // DESCRIPTION_LIMIT
     const $ = (id) => document.getElementById(id);
     let busy = false;              // the YouTube sign-in/upload overlay is open
     let rendering = false;         // a short is being made (a background job)
@@ -252,7 +253,7 @@
         const upload = element('button', 'btn btn-sm', 'Upload to YouTube');
         upload.type = 'button';
         upload.setAttribute('aria-label', `Upload ${item.title} to YouTube`);
-        upload.addEventListener('click', () => startYouTubeUpload(item.filename, item.title));
+        upload.addEventListener('click', () => reviewUpload(item));
 
         const remove = element('button', 'btn btn-sm btn-quiet', 'Delete');
         remove.type = 'button';
@@ -264,7 +265,9 @@
 
         const card = element('li', isNew ? 'card card-flush short-card is-new' : 'card card-flush short-card');
         const body = element('div', 'short-body');
-        body.append(element('h3', 'short-title clamp', item.title), meta, actions);
+        const title = element('h3', 'short-title clamp', item.title);
+        title.tabIndex = -1;  // focused when this short is opened from the Home page
+        body.append(title, meta, actions);
         card.append(video, body);
         return card;
     }
@@ -298,18 +301,6 @@
         if (cards.length) cards[0].scrollIntoView({ behavior: scrollBehavior(), block: 'center' });
     }
 
-    function resetForm() {
-        $('shortVideoForm').reset();
-        ui.clearErrors($('errorSummary'), checks.map(([input]) => input));
-        $('formStatus').replaceChildren();
-        $('shortLinkStatus').replaceChildren();
-        $('shortLinkPreview').replaceChildren();
-        selectDuration(document.querySelector(`.duration-option[data-duration="${DEFAULT_DURATION}"]`));
-        updateCropDiagram();
-        $('shortVideoUrl').focus();
-    }
-
-    $('resetFormBtn').addEventListener('click', resetForm);
 
     // ---- YouTube upload ---------------------------------------------------
 
@@ -363,12 +354,77 @@
         throw new Error('Sign-in timed out');
     }
 
-    function startYouTubeUpload(filename, title) {
-        const popup = signedIn ? null : openSignInWindow();  // synchronous: see above
-        uploadToYouTube(filename, title, popup);
+    // Review before anything is published: title, description and who can see it
+    function reviewUpload(item) {
+        const dialog = element('dialog', 'dialog upload-dialog');
+        dialog.setAttribute('aria-labelledby', 'uploadReviewHeading');
+        dialog.addEventListener('close', () => dialog.remove());
+
+        const heading = element('h2', undefined, 'Upload to YouTube');
+        heading.id = 'uploadReviewHeading';
+        const form = element('form', 'stack');
+        form.noValidate = true;
+
+        function field(label, control, hint) {
+            const wrapper = element('div', 'field');
+            const caption = element('label', undefined, label);
+            caption.htmlFor = control.id;
+            wrapper.append(caption, control);
+            if (hint) wrapper.append(element('p', 'hint', hint));
+            return wrapper;
+        }
+
+        const title = element('input');
+        Object.assign(title, { id: 'uploadTitle', type: 'text', maxLength: UPLOAD_TITLE_LIMIT, value: item.title || '' });
+        const description = element('textarea');
+        Object.assign(description, { id: 'uploadDescription', rows: 3, maxLength: UPLOAD_DESCRIPTION_LIMIT,
+                                     value: 'Created with VideoExtract' });
+        const privacy = element('select');
+        privacy.id = 'uploadPrivacy';
+        [['private', 'Private: only you'], ['unlisted', 'Unlisted: anyone with the link'],
+         ['public', 'Public: everyone']].forEach(([value, label]) => {
+            const option = element('option', undefined, label);
+            option.value = value;
+            privacy.append(option);
+        });
+
+        const upload = element('button', 'btn btn-primary', 'Upload');
+        upload.type = 'submit';
+        const keep = element('button', 'btn', 'Not now');
+        keep.type = 'button';
+        keep.addEventListener('click', () => dialog.close());
+        const actions = element('div', 'actions');
+        actions.append(upload, keep);
+
+        form.append(field('Title', title, `Up to ${UPLOAD_TITLE_LIMIT} characters.`),
+                    field('Description', description),
+                    field('Who can watch it', privacy, 'You can change this later in YouTube Studio.'),
+                    actions);
+        title.addEventListener('input', () => ui.clearFieldError(title));
+        form.addEventListener('submit', (event) => {
+            event.preventDefault();
+            if (!title.value.trim()) {
+                ui.setFieldError(title, 'Enter a title');
+                title.focus();
+                return;
+            }
+            const details = { title: title.value.trim(), description: description.value.trim(), privacy: privacy.value };
+            dialog.close();
+            startYouTubeUpload(item.filename, details);  // still inside the click: the sign-in popup may open
+        });
+
+        dialog.append(heading, form);
+        document.body.append(dialog);
+        dialog.showModal();
+        title.focus();
     }
 
-    async function uploadToYouTube(filename, title, popup) {
+    function startYouTubeUpload(filename, details) {
+        const popup = signedIn ? null : openSignInWindow();  // synchronous: see above
+        uploadToYouTube(filename, details, popup);
+    }
+
+    async function uploadToYouTube(filename, details, popup) {
         if (busy) {
             if (popup) popup.close();
             return;
@@ -387,10 +443,10 @@
             showLoading('Uploading to YouTube...');
             const { ok, data } = await postJson('/api/upload-to-youtube', {
                 filename: filename,
-                title: title || 'Short video',
-                description: 'Created with VideoExtract',
+                title: details.title,
+                description: details.description,
                 tags: ['Shorts'],
-                privacy: 'private',  // change it in YouTube Studio when you are ready
+                privacy: details.privacy,
             });
             if (!ok || !data.success) throw new Error(data.error || 'Upload failed');
             uploaded = data;
@@ -440,12 +496,22 @@
 
     $('libraryStart').addEventListener('click', () => $('shortVideoUrl').focus());
 
+    // Opened from a short on the Home page (?short=<file name>): highlight it and take focus there
+    async function showRequestedShort() {
+        const requested = new URLSearchParams(window.location.search).get('short');
+        const cards = await loadLibrary(requested || undefined);
+        const card = requested && cards.find((item) => item.classList.contains('is-new'));
+        if (!card) return;
+        card.scrollIntoView({ behavior: scrollBehavior(), block: 'center' });
+        card.querySelector('.short-title').focus({ preventScroll: true });
+    }
+
     // ---- prefill from ?url= -----------------------------------------------
 
     const prefill = new URLSearchParams(window.location.search).get('url');
     if (prefill) $('shortVideoUrl').value = prefill;
     window.attachLinkPreview($('shortVideoUrl'), $('shortLinkPreview'));
     updateCropDiagram();
-    loadLibrary();
+    showRequestedShort();
     resumeRunningJob();
 })();

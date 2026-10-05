@@ -293,6 +293,15 @@
     }
 }
 
+/* Touch screens: the sidebar and menu buttons get a 44px target */
+@media (pointer: coarse) {
+    .side-toggle,
+    .menu-button {
+        width: 2.75rem;
+        height: 2.75rem;
+    }
+}
+
 @media (max-width: 36rem) {
     /* Hidden from sight only: the link still needs its name for screen readers */
     .topbar-actions .btn-label {

@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Dashboard - VideoExtract</title>
+    <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
     <link rel="stylesheet" href="/static/css/app.css">
     <link rel="stylesheet" href="/static/css/shell.css">
     <script src="/static/js/shell.js"></script>
@@ -94,6 +95,18 @@
                             <dt>average time to process a request</dt>
                             <dd id="avgProcessingTime">{{ (analytics.avg_processing_time_ms or 0)|round|int }}ms</dd>
                         </dl>
+
+                        <section class="storage" aria-labelledby="storageHeading">
+                            <h3 id="storageHeading">Kept on this computer</h3>
+                            <dl class="storage-list">
+                                <div><dt>Shorts</dt><dd id="storageShorts" data-bytes="{{ storage.shorts or 0 }}"></dd></div>
+                                <div><dt>Frames</dt><dd id="storageFrames" data-bytes="{{ storage.frames or 0 }}"></dd></div>
+                                <div><dt>Downloads in progress</dt><dd id="storageDownloads" data-bytes="{{ storage.downloads or 0 }}"></dd></div>
+                            </dl>
+                            <button type="button" class="btn btn-sm" id="cleanupBtn" data-hours="{{ cleanup_hours }}">Delete files older than {{ cleanup_hours }} hours...</button>
+                            <p class="hint">Shorts, frames and downloads. The app also does this each time it starts.</p>
+                            <div class="cleanup-status" id="cleanupStatus" role="status"></div>
+                        </section>
                     </section>
                 </div>
 
@@ -108,21 +121,22 @@
                                     <th scope="col">Platform</th>
                                     <th scope="col">Title</th>
                                     <th scope="col">Status</th>
-                                    <th scope="col">Time</th>
-                                    <th scope="col">Processing time</th>
-                                    <th scope="col">IP address</th>
+                                    <th scope="col">When</th>
+                                    <th scope="col">Took</th>
+                                    <th scope="col">Details</th>
                                 </tr>
                             </thead>
-                            <tbody>
+                            {# Rebuilt by dashboard.js on every update; this is the first view #}
+                            <tbody id="requestRows">
                                 {% for request in recent_requests %}
                                 {% set title = request.title or '' %}
                                 <tr>
                                     <td class="platform">{{ request.platform }}</td>
                                     <td>{{ title[:50] }}{% if title|length > 50 %}...{% endif %}</td>
                                     <td><span class="state status-{{ request.status }}">{{ request.status }}</span></td>
-                                    <td class="when">{{ request.created_at }}</td>
+                                    <td class="when"><time datetime="{{ request.created_at }}">{{ request.created_at }}</time></td>
                                     <td class="when">{% if request.processing_time_ms %}{{ request.processing_time_ms }}ms{% else %}-{% endif %}</td>
-                                    <td class="when">{{ request.user_ip }}</td>
+                                    <td class="details">{{ (request.error or '')[:120] }}</td>
                                 </tr>
                                 {% endfor %}
                                 {% if not recent_requests %}
@@ -138,6 +152,7 @@
         </div>
     </div>
 
+    <script src="/static/js/ui.js"></script>
     <script src="/static/js/pages/dashboard.js"></script>
 </body>
 </html>

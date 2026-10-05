@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Create short - VideoExtract</title>
+    <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
     <link rel="stylesheet" href="/static/css/app.css">
     <link rel="stylesheet" href="/static/css/shell.css">
     <link rel="stylesheet" href="/static/css/jobs.css">
@@ -81,9 +82,15 @@
 
                         <div class="field">
                             <label for="overlayText">Caption <span class="optional">(optional)</span></label>
+                            {% if text_overlay_available %}
                             <input type="text" id="overlayText" maxlength="100" autocomplete="off"
                                    placeholder="Text shown at the bottom of the clip">
-                            <p class="hint">Needs ImageMagick installed. Without it the clip is made without text.</p>
+                            <p class="hint">Shown at the bottom of the clip.</p>
+                            {% else %}
+                            <input type="text" id="overlayText" maxlength="100" autocomplete="off" disabled
+                                   aria-describedby="overlayUnavailable" placeholder="Not available on this computer">
+                            <p class="hint" id="overlayUnavailable">Captions need ImageMagick, which was not found. See "Quick start" in the README, then restart the app.</p>
+                            {% endif %}
                         </div>
 
                         <label class="check" for="verticalFormat">
@@ -93,7 +100,6 @@
 
                         <div class="form-end">
                             <button type="submit" class="btn btn-primary" id="createSubmit">Create short</button>
-                            <button type="button" class="btn" id="resetFormBtn">Reset</button>
                             <p class="hint render-note">Downloading and rendering happen on your computer, so long clips can take a few minutes.</p>
                         </div>
                         <div id="formStatus" role="alert"></div>

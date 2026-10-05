@@ -1,12 +1,12 @@
 (function () {
     'use strict';
 
-    const SUPPORTED_PLATFORMS = ['youtube'];
     const MAX_RESULTS = '12';
-    const AUTO_REFRESH_MS = 300000;
     const MILLION = 1000000;
     const THOUSAND = 1000;
     const $ = (id) => document.getElementById(id);
+    let loading = false;
+    let reloadWhenDone = false;
 
     // Video titles, descriptions and channel names come from YouTube and are
     // untrusted. Everything below is built with textContent and addEventListener,
@@ -60,10 +60,14 @@
         const extractButton = element('button', 'btn', 'Extract frames');
         extractButton.type = 'button';
         extractButton.setAttribute('aria-label', `Extract frames from ${video.title}`);
-        extractButton.addEventListener('click', () => extractFromVideo(videoUrl));
+        extractButton.addEventListener('click', () => openWith('/extract', videoUrl));
+        const shortButton = element('button', 'btn', 'Create short');
+        shortButton.type = 'button';
+        shortButton.setAttribute('aria-label', `Create a short from ${video.title}`);
+        shortButton.addEventListener('click', () => openWith('/create-short', videoUrl));
 
         const actions = element('div', 'actions');
-        actions.append(extractButton);
+        actions.append(extractButton, shortButton);
         if (videoUrl) {
             const watch = element('a', undefined, 'Watch on YouTube');
             watch.setAttribute('aria-label', `Watch ${video.title} on YouTube (opens a new tab)`);
@@ -82,15 +86,28 @@
         return entry;
     }
 
-    function showMessage(kind, lead, text) {
-        $('trendMessage').replaceChildren(notice(kind, lead, text));
+    // A notice, with a "Try again" button when another attempt can help
+    function showMessage(kind, lead, text, canRetry) {
+        const message = notice(kind, lead, text);
+        if (canRetry) {
+            const retry = element('button', 'btn btn-sm notice-action', 'Try again');
+            retry.type = 'button';
+            retry.addEventListener('click', loadTrendingVideos);
+            message.append(retry);
+        }
+        $('trendMessage').replaceChildren(message);
     }
 
     function clearMessage() {
         $('trendMessage').replaceChildren();
     }
 
+    function selectedText(select) {
+        return select.options[select.selectedIndex].textContent;
+    }
+
     function setLoading(isLoading) {
+        loading = isLoading;
         $('videosGrid').setAttribute('aria-busy', String(isLoading));
         // aria-disabled, not disabled: a disabled button drops keyboard focus to the page
         $('refreshBtn').setAttribute('aria-disabled', String(isLoading));
@@ -110,17 +127,39 @@
         $('noResults').hidden = videos.length > 0;
     }
 
+    // Says what the list is, so a changed filter is never mistaken for the old list
+    function describeList(data, requested) {
+        const category = requested.category === '0' ? 'all categories' : requested.categoryText;
+        $('chartHeading').textContent = data.sample
+            ? 'Sample videos (not live)'
+            : `Trending in ${requested.regionText}, ${category}`;
+        $('updatedAt').textContent = 'Updated ' + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    }
+
+    function explainSample(data) {
+        if (!data.sample) return;
+        if (data.api_key_configured) {
+            showMessage('warn', 'YouTube did not answer.', 'These are sample videos, not what is trending now.', true);
+        } else {
+            showMessage('warn', 'No YouTube API key.',
+                'These are sample videos. Add YOUTUBE_API_KEY to the .env file (see the README) and restart the app.');
+        }
+    }
+
     function loadTrendingVideos() {
-        const platform = $('platformSelect').value;
-        if (!SUPPORTED_PLATFORMS.includes(platform)) {
-            showMessage('warn', 'Not available yet.', `${platform} is not supported. Only YouTube is available.`);
+        if (loading) {
+            reloadWhenDone = true;  // a filter changed mid-load: load again with the new choice
             return;
         }
-
         setLoading(true);
-        const params = new URLSearchParams({
-            platform: platform,
+        // What this request is for, read now: the selects may change before the answer arrives
+        const requested = {
             category: $('categorySelect').value,
+            categoryText: selectedText($('categorySelect')),
+            regionText: selectedText($('regionSelect')),
+        };
+        const params = new URLSearchParams({
+            category: requested.category,
             region: $('regionSelect').value,
             max_results: MAX_RESULTS,
         });
@@ -135,43 +174,40 @@
             .then((data) => {
                 setLoading(false);
                 displayVideos(data.videos || []);
+                describeList(data, requested);
+                explainSample(data);
             })
             .catch((error) => {
                 console.error('Error loading trending videos:', error);
                 setLoading(false);
-                showMessage('error', 'Could not load trending videos.', error.message || 'Try again in a moment.');
+                showMessage('error', 'Could not load trending videos.', error.message || 'Try again in a moment.', true);
+            })
+            .finally(() => {
+                if (!reloadWhenDone) return;
+                reloadWhenDone = false;
+                loadTrendingVideos();
             });
     }
 
-    function extractFromVideo(videoUrl) {
-        // The Extract frames page reads ?url= and fills in its link field
-        const mainPageUrl = new URL('/extract', window.location.origin);
-        mainPageUrl.searchParams.set('url', videoUrl);
-        window.location.href = mainPageUrl.toString();
+    // Both pages read ?url= and fill in their link field
+    function openWith(path, videoUrl) {
+        const target = new URL(path, window.location.origin);
+        target.searchParams.set('url', videoUrl);
+        window.location.href = target.toString();
     }
 
     $('queryForm').addEventListener('submit', (event) => {
         event.preventDefault();
-        if ($('refreshBtn').getAttribute('aria-disabled') === 'true') return;  // already loading
         loadTrendingVideos();
     });
-
-    $('platformSelect').addEventListener('change', () => {
-        if (SUPPORTED_PLATFORMS.includes($('platformSelect').value)) return;
-        // A disabled option should not be selectable; switch back if it somehow is
-        $('platformSelect').value = SUPPORTED_PLATFORMS[0];
-        showMessage('warn', 'Not available yet.', 'That platform is not supported. Switched back to YouTube.');
-    });
+    $('categorySelect').addEventListener('change', loadTrendingVideos);
+    $('regionSelect').addEventListener('change', loadTrendingVideos);
 
     $('showAllBtn').addEventListener('click', () => {
         $('categorySelect').value = '0';
         loadTrendingVideos();
     });
 
+    // Loaded once; "Refresh" asks again (every request costs YouTube API quota)
     loadTrendingVideos();
-
-    // Auto-refresh, but not in a background tab (each refresh costs API quota)
-    setInterval(() => {
-        if (!document.hidden) loadTrendingVideos();
-    }, AUTO_REFRESH_MS);
 })();

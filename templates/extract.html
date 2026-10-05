@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Extract frames - VideoExtract</title>
+    <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
     <link rel="stylesheet" href="/static/css/app.css">
     <link rel="stylesheet" href="/static/css/shell.css">
     <link rel="stylesheet" href="/static/css/jobs.css">
@@ -59,7 +60,12 @@
                     <div class="section-head">
                         <h2 id="stripHeading" tabindex="-1">Frames</h2>
                         <p id="stripSummary"></p>
+                        <div class="actions result-actions" id="resultActions" hidden>
+                            <button type="button" class="btn btn-sm" id="downloadAllBtn">Download all (.zip)</button>
+                            <button type="button" class="btn btn-sm btn-quiet" id="startOverBtn">Start over</button>
+                        </div>
                     </div>
+                    <div id="archiveStatus" role="status"></div>
                     <div id="extractWarnings"></div>
                     <ul id="framesContainer" class="strip"></ul>
                 </section>

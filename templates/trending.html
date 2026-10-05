@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Trending - VideoExtract</title>
+    <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
     <link rel="stylesheet" href="/static/css/app.css">
     <link rel="stylesheet" href="/static/css/shell.css">
     <script src="/static/js/shell.js"></script>
@@ -48,22 +49,18 @@
                             <option value="IN">India</option>
                         </select>
                     </div>
-                    <div class="field">
-                        <label for="platformSelect">Platform</label>
-                        <select id="platformSelect">
-                            <option value="youtube">YouTube</option>
-                            <option value="tiktok" disabled>TikTok (not available yet)</option>
-                            <option value="instagram" disabled>Instagram (not available yet)</option>
-                        </select>
-                    </div>
-                    <button type="submit" class="btn" id="refreshBtn">Update list</button>
-                    <p class="hint">Only YouTube is available for now. The list refreshes itself every 5 minutes while this tab is open.</p>
+                    <button type="submit" class="btn" id="refreshBtn">Refresh</button>
+                    <p class="hint">The list changes as soon as you pick a category or region.</p>
                 </form>
 
+                <div class="section-head chart-head">
+                    <h2 id="chartHeading">Trending on YouTube</h2>
+                    <p id="updatedAt"></p>
+                </div>
                 <div class="inline-loading trend-status" id="trendStatus" role="status"></div>
                 <div class="trend-message" id="trendMessage" role="alert"></div>
 
-                <ol class="chart" id="videosGrid" aria-label="Trending videos"></ol>
+                <ol class="chart" id="videosGrid" aria-labelledby="chartHeading"></ol>
 
                 <div class="empty-state" id="noResults" hidden>
                     <div>

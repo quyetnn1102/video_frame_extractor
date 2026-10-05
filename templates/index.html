@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Home - VideoExtract</title>
+    <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
     <link rel="stylesheet" href="/static/css/app.css">
     <link rel="stylesheet" href="/static/css/shell.css">
     <script src="/static/js/shell.js"></script>
@@ -13,7 +14,7 @@
     <a class="skip-link" href="#main">Skip to content</a>
     {% include 'partials/icons.html' %}
     {% set active_page = 'home' %}
-    {% set page_title = "Hey, let's get started!" %}
+    {% set page_title = 'Home' %}
     <div class="app">
         {% include 'partials/sidebar.html' %}
         <div class="workspace">
@@ -64,7 +65,7 @@
                     </div>
                 </section>
 
-                <section class="home-section" aria-labelledby="startHeading">
+                <section class="home-section" id="startSection" aria-labelledby="startHeading">
                     <div class="section-head">
                         <h2 id="startHeading">Get started</h2>
                     </div>

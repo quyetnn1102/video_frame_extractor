@@ -568,6 +568,12 @@ select {
 .notice-warn { border-left-color: var(--warn); background: var(--warn-soft); }
 .notice-ok { border-left-color: var(--ok); background: var(--ok-soft); }
 
+/* An action inside a notice, such as "Try again" */
+.notice .notice-action {
+    margin-left: var(--space-3);
+    vertical-align: middle;
+}
+
 .notice + .notice {
     margin-top: 0.6rem;
 }
@@ -729,6 +735,13 @@ dialog.dialog .actions {
 @media (max-width: 36rem) {
     .input-row {
         flex-direction: column;
+    }
+}
+
+/* Touch screens: small buttons still get a 44px target (WCAG 2.5.5) */
+@media (pointer: coarse) {
+    .btn-sm {
+        min-height: 2.75rem;
     }
 }
 

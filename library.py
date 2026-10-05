@@ -33,6 +33,22 @@ def video_duration(path: Path) -> Optional[float]:
         capture.release()
 
 
+def folder_size_bytes(folder: Path) -> int:
+    """Total size of the files directly in `folder` (0 when it does not exist)."""
+    total = 0
+    try:
+        entries = list(Path(folder).iterdir())
+    except OSError:
+        return 0
+    for entry in entries:
+        try:
+            if entry.is_file():
+                total += entry.stat().st_size
+        except OSError:
+            continue  # removed while counting
+    return total
+
+
 def list_shorts(folder: Path, limit: int = DEFAULT_LIMIT) -> List[Dict[str, Any]]:
     """The newest shorts in `folder`, newest first."""
     folder = Path(folder)
