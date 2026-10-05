@@ -5,17 +5,18 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Create short - VideoExtract</title>
     <link rel="stylesheet" href="/static/css/app.css">
+    <script src="/static/js/shell.js"></script>
     <style>
         .workbench {
             display: grid;
             grid-template-columns: minmax(0, 1.7fr) minmax(16rem, 1fr);
-            gap: clamp(1.5rem, 4vw, 3rem);
+            gap: clamp(1.25rem, 3vw, 2rem);
             align-items: start;
         }
 
         .aside {
             position: sticky;
-            top: 1.5rem;
+            top: calc(var(--topbar-h) + 1.25rem);
         }
 
         /* Length presets: pressed state is the selection */
@@ -30,12 +31,12 @@
             flex-direction: column;
             align-items: center;
             gap: 0.1rem;
-            padding: 0.6rem 0.4rem 0.5rem;
+            padding: 0.6rem 0.4rem 0.55rem;
             font: inherit;
             color: var(--ink);
             background: #fff;
-            border: 1.5px solid var(--field-edge);
-            border-radius: 4px;
+            border: 1px solid var(--field-edge);
+            border-radius: var(--radius-sm);
             cursor: pointer;
             transition: background-color var(--quick), color var(--quick), border-color var(--quick);
         }
@@ -45,25 +46,24 @@
         }
 
         .duration-option strong {
-            font-size: var(--text-xl);
-            font-weight: 800;
-            font-stretch: 75%;
-            line-height: 1.1;
+            font-size: var(--text-lg);
+            font-weight: 700;
+            line-height: 1.2;
         }
 
         .duration-option small {
-            font-size: var(--text-sm);
+            font-size: var(--text-xs);
             color: var(--ink-soft);
         }
 
         .duration-option[aria-pressed="true"] {
             color: #fff;
-            background: var(--ink);
-            border-color: var(--ink);
+            background: var(--primary);
+            border-color: var(--primary);
         }
 
         .duration-option[aria-pressed="true"] small {
-            color: #c9d0da;
+            color: #d4d4d2;
         }
 
         .two-up {
@@ -93,7 +93,7 @@
             aspect-ratio: 16 / 9;
             overflow: hidden;
             background: repeating-linear-gradient(135deg, #2b3139 0 7px, #252a31 7px 14px);
-            border-radius: 2px;
+            border-radius: var(--radius-sm);
         }
 
         .crop-keep {
@@ -103,8 +103,8 @@
             left: 50%;
             width: 31.64%;
             transform: translateX(-50%);
-            border: 2px solid var(--mark);
-            background: rgba(244, 246, 242, 0.14);
+            border: 2px solid var(--lime);
+            background: rgba(255, 255, 255, 0.14);
             box-shadow: 0 0 0 100vmax rgba(14, 17, 21, 0.6);
         }
 
@@ -121,15 +121,14 @@
         }
 
         .aside-note {
-            margin-top: 2rem;
+            margin-top: 1.5rem;
             padding-top: 1.25rem;
-            border-top: 2px solid var(--ink);
+            border-top: 1px solid var(--rule);
         }
 
         .aside-note h2 {
-            font-size: var(--text-lg);
-            font-weight: 750;
-            font-stretch: 80%;
+            font-size: var(--text-base);
+            font-weight: 600;
         }
 
         .aside-note p {
@@ -138,9 +137,9 @@
             color: var(--ink-soft);
         }
 
-        /* Your shorts: a shelf of 9:16 tiles that is rebuilt from the server on every visit */
+        /* Your shorts: bordered cards that are rebuilt from the server on every visit */
         .library {
-            margin-top: clamp(2.5rem, 6vw, 4.5rem);
+            margin-top: clamp(2rem, 5vw, 3rem);
         }
 
         .library .notice {
@@ -150,10 +149,18 @@
         .shelf {
             display: grid;
             grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
-            gap: 2.25rem 1.5rem;
+            gap: 1.5rem;
             margin: 0;
             padding: 0;
             list-style: none;
+        }
+
+        .short-card {
+            overflow: hidden;
+            background: #fff;
+            border: 1px solid var(--rule);
+            border-radius: var(--radius);
+            box-shadow: var(--card-shadow);
         }
 
         .short-video {
@@ -162,13 +169,15 @@
             aspect-ratio: 9 / 16;
             object-fit: contain;
             background: var(--strip);
-            border-radius: 2px;
-            box-shadow: var(--lift);
         }
 
-        .short-card.is-new .short-video {
-            outline: 3px solid var(--mark);
-            outline-offset: 3px;
+        .short-card.is-new {
+            border-color: var(--ink);
+            box-shadow: 0 0 0 2px var(--lime), var(--card-shadow);
+        }
+
+        .short-body {
+            padding: 0.85rem 1rem 1rem;
         }
 
         .short-title {
@@ -177,11 +186,9 @@
             line-clamp: 2;
             -webkit-box-orient: vertical;
             overflow: hidden;
-            margin-top: 0.75rem;
             font-size: var(--text-base);
-            font-weight: 750;
-            font-stretch: 80%;
-            line-height: 1.2;
+            font-weight: 600;
+            line-height: 1.3;
             overflow-wrap: anywhere;
         }
 
@@ -198,23 +205,14 @@
             display: flex;
             flex-wrap: wrap;
             gap: 0.5rem;
-            margin-top: 0.75rem;
-        }
-
-        .short-actions .btn {
-            padding: 0.4rem 0.75rem;
-            font-size: var(--text-sm);
-        }
-
-        .short-actions .btn-quiet {
-            border-color: transparent;
-            text-decoration: underline;
+            margin-top: 0.8rem;
         }
 
         .short-actions .btn.is-armed {
             color: #fff;
-            background: var(--mark);
-            border-color: var(--mark-deep);
+            background: var(--danger);
+            border-color: var(--danger);
+            text-decoration: none;
         }
 
         @media (max-width: 60rem) {
@@ -240,120 +238,117 @@
 </head>
 <body>
     <a class="skip-link" href="#main">Skip to content</a>
-    <header class="bar">
-        <a class="wordmark" href="/"><span class="mark" aria-hidden="true"></span>VideoExtract</a>
-        <nav aria-label="Main">
-            <a href="/">Extract frames</a>
-            <a href="/create-short" aria-current="page">Create short</a>
-            <a href="/trending">Trending</a>
-            <a href="/dashboard">Dashboard</a>
-        </nav>
-    </header>
+    {% include 'partials/icons.html' %}
+    {% set active_page = 'create' %}
+    {% set page_title = 'Create short' %}
+    <div class="app">
+        {% include 'partials/sidebar.html' %}
+        <div class="workspace">
+            {% include 'partials/topbar.html' %}
 
-    <main id="main" class="page">
-        <div class="page-head">
-            <h1>Cut a vertical short.</h1>
-            <p>Pick a moment in a video and get a 9:16 clip for TikTok, YouTube Shorts or Instagram Reels. Download it, or upload it to your own YouTube channel.</p>
+            <main id="main" class="page">
+                <p class="intro">Pick a moment in a video and get a 9:16 clip for TikTok, YouTube Shorts or Instagram Reels. Download it, or upload it to your own YouTube channel.</p>
+
+                <div class="workbench">
+                    <form id="shortVideoForm" class="card stack" novalidate>
+                        <div class="field">
+                            <label for="shortVideoUrl">Video link</label>
+                            <div class="input-row">
+                                <input type="url" id="shortVideoUrl" required autocomplete="off"
+                                       placeholder="https://www.youtube.com/watch?v=...">
+                                <button type="button" class="btn" id="validateShortBtn">Check link</button>
+                            </div>
+                            <p class="hint">YouTube, TikTok, Instagram, Facebook or Douyin. Only use videos you own or have permission to use.</p>
+                            <div id="shortLinkStatus" role="status"></div>
+                            <div class="preview-slot" id="shortLinkPreview" aria-live="polite"></div>
+                        </div>
+
+                        <div class="field">
+                            <span class="label" id="durationLabel">Length</span>
+                            <div class="durations" role="group" aria-labelledby="durationLabel">
+                                <button type="button" class="duration-option" data-duration="15" aria-pressed="false">
+                                    <strong>15 s</strong><small>TikTok</small>
+                                </button>
+                                <button type="button" class="duration-option" data-duration="30" aria-pressed="true">
+                                    <strong>30 s</strong><small>Reels</small>
+                                </button>
+                                <button type="button" class="duration-option" data-duration="60" aria-pressed="false">
+                                    <strong>60 s</strong><small>Shorts</small>
+                                </button>
+                                <button type="button" class="duration-option" data-duration="custom" aria-pressed="false">
+                                    <strong>Other</strong><small>1 to 300 s</small>
+                                </button>
+                            </div>
+                            <input type="hidden" id="selectedDuration" value="30">
+                        </div>
+
+                        <div class="field" id="customDurationDiv" hidden>
+                            <label for="customDuration">Length in seconds</label>
+                            <input type="number" id="customDuration" min="1" max="300" placeholder="1 to 300">
+                            <p class="hint">Only clips of up to 60 seconds can be uploaded to YouTube from here.</p>
+                        </div>
+
+                        <div class="two-up">
+                            <div class="field">
+                                <label for="startTime">Start at <span class="optional">(optional)</span></label>
+                                <input type="text" id="startTime" autocomplete="off" placeholder="1:30 or 90 (seconds)">
+                                <p class="hint">Leave blank to start from the beginning.</p>
+                            </div>
+                            <div class="field">
+                                <label for="quality">Quality</label>
+                                <select id="quality">
+                                    <option value="low">Low (smaller file)</option>
+                                    <option value="medium" selected>Medium</option>
+                                    <option value="high">High (larger file)</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div class="field">
+                            <label for="overlayText">Caption <span class="optional">(optional)</span></label>
+                            <input type="text" id="overlayText" maxlength="100" autocomplete="off"
+                                   placeholder="Text shown at the bottom of the clip">
+                            <p class="hint">Needs ImageMagick installed. Without it the clip is made without text.</p>
+                        </div>
+
+                        <label class="check" for="verticalFormat">
+                            <input type="checkbox" id="verticalFormat" checked>
+                            Crop to vertical 9:16 (1080 x 1920)
+                        </label>
+
+                        <div class="form-end">
+                            <button type="submit" class="btn btn-primary">Create short</button>
+                            <button type="button" class="btn" id="resetFormBtn">Reset</button>
+                            <p class="hint render-note">Downloading and rendering happen on your computer, so long clips can take a few minutes.</p>
+                        </div>
+                        <div id="formStatus" role="alert"></div>
+                    </form>
+
+                    <aside class="aside card" aria-label="About the crop and YouTube upload">
+                        <figure class="crop" id="cropFigure">
+                            <div class="crop-frame"><div class="crop-keep"></div></div>
+                            <figcaption id="cropCaption">The outlined area is what you keep. Wide videos are cropped around the center.</figcaption>
+                        </figure>
+
+                        <div class="aside-note">
+                            <h2>Uploading to YouTube is optional</h2>
+                            <p>To upload a finished short to your own channel, set up Google API credentials first (see "YouTube upload" in the README). Uploads start as private.</p>
+                        </div>
+                    </aside>
+                </div>
+
+                <section class="library" id="resultsSection" aria-labelledby="resultHeading">
+                    <div class="section-head">
+                        <h2 id="resultHeading">Your shorts</h2>
+                        <p id="libraryCount"></p>
+                    </div>
+                    <div id="resultsStatus" role="alert"></div>
+                    <ul class="shelf" id="resultsContent"></ul>
+                    <p class="muted" id="libraryEmpty" hidden>Shorts you make appear here and stay after you leave or refresh this page.</p>
+                </section>
+            </main>
         </div>
-
-        <div class="workbench">
-            <form id="shortVideoForm" class="sheet stack" novalidate>
-                <div class="field">
-                    <label for="shortVideoUrl">Video link</label>
-                    <div class="input-row">
-                        <input type="url" id="shortVideoUrl" required autocomplete="off"
-                               placeholder="https://www.youtube.com/watch?v=...">
-                        <button type="button" class="btn" id="validateShortBtn">Check link</button>
-                    </div>
-                    <p class="hint">YouTube, TikTok, Instagram, Facebook or Douyin. Only use videos you own or have permission to use.</p>
-                    <div id="shortLinkStatus" role="status"></div>
-                    <div class="preview-slot" id="shortLinkPreview" aria-live="polite"></div>
-                </div>
-
-                <div class="field">
-                    <span class="label" id="durationLabel">Length</span>
-                    <div class="durations" role="group" aria-labelledby="durationLabel">
-                        <button type="button" class="duration-option" data-duration="15" aria-pressed="false">
-                            <strong>15 s</strong><small>TikTok</small>
-                        </button>
-                        <button type="button" class="duration-option" data-duration="30" aria-pressed="true">
-                            <strong>30 s</strong><small>Reels</small>
-                        </button>
-                        <button type="button" class="duration-option" data-duration="60" aria-pressed="false">
-                            <strong>60 s</strong><small>Shorts</small>
-                        </button>
-                        <button type="button" class="duration-option" data-duration="custom" aria-pressed="false">
-                            <strong>Other</strong><small>1 to 300 s</small>
-                        </button>
-                    </div>
-                    <input type="hidden" id="selectedDuration" value="30">
-                </div>
-
-                <div class="field" id="customDurationDiv" hidden>
-                    <label for="customDuration">Length in seconds</label>
-                    <input type="number" id="customDuration" min="1" max="300" placeholder="1 to 300">
-                    <p class="hint">Only clips of up to 60 seconds can be uploaded to YouTube from here.</p>
-                </div>
-
-                <div class="two-up">
-                    <div class="field">
-                        <label for="startTime">Start at <span class="optional">(optional)</span></label>
-                        <input type="text" id="startTime" autocomplete="off" placeholder="1:30 or 90 (seconds)">
-                        <p class="hint">Leave blank to start from the beginning.</p>
-                    </div>
-                    <div class="field">
-                        <label for="quality">Quality</label>
-                        <select id="quality">
-                            <option value="low">Low (smaller file)</option>
-                            <option value="medium" selected>Medium</option>
-                            <option value="high">High (larger file)</option>
-                        </select>
-                    </div>
-                </div>
-
-                <div class="field">
-                    <label for="overlayText">Caption <span class="optional">(optional)</span></label>
-                    <input type="text" id="overlayText" maxlength="100" autocomplete="off"
-                           placeholder="Text shown at the bottom of the clip">
-                    <p class="hint">Needs ImageMagick installed. Without it the clip is made without text.</p>
-                </div>
-
-                <label class="check" for="verticalFormat">
-                    <input type="checkbox" id="verticalFormat" checked>
-                    Crop to vertical 9:16 (1080 x 1920)
-                </label>
-
-                <div class="form-end">
-                    <button type="submit" class="btn btn-primary">Create short</button>
-                    <button type="button" class="btn" id="resetFormBtn">Reset</button>
-                    <p class="hint render-note">Downloading and rendering happen on your computer, so long clips can take a few minutes.</p>
-                </div>
-                <div id="formStatus" role="alert"></div>
-            </form>
-
-            <aside class="aside" aria-label="About the crop and YouTube upload">
-                <figure class="crop" id="cropFigure">
-                    <div class="crop-frame"><div class="crop-keep"></div></div>
-                    <figcaption id="cropCaption">The red frame is what you keep. Wide videos are cropped around the center.</figcaption>
-                </figure>
-
-                <div class="aside-note">
-                    <h2>Uploading to YouTube is optional</h2>
-                    <p>To upload a finished short to your own channel, set up Google API credentials first (see "YouTube upload" in the README). Uploads start as private.</p>
-                </div>
-            </aside>
-        </div>
-
-        <section class="library" id="resultsSection" aria-labelledby="resultHeading">
-            <div class="section-head">
-                <h2 id="resultHeading">Your shorts</h2>
-                <p id="libraryCount"></p>
-            </div>
-            <div id="resultsStatus" role="alert"></div>
-            <ul class="shelf" id="resultsContent"></ul>
-            <p class="muted" id="libraryEmpty" hidden>Shorts you make appear here and stay after you leave or refresh this page.</p>
-        </section>
-    </main>
+    </div>
 
     <div class="loading-overlay" id="loadingOverlay" role="status" aria-live="polite">
         <div class="loading-box">
@@ -465,7 +460,7 @@
                 const vertical = $('verticalFormat').checked;
                 $('cropFigure').classList.toggle('is-full', !vertical);
                 $('cropCaption').textContent = vertical
-                    ? 'The red frame is what you keep. Wide videos are cropped around the center.'
+                    ? 'The outlined area is what you keep. Wide videos are cropped around the center.'
                     : 'The whole picture is kept. Nothing is cropped.';
             }
 
@@ -599,15 +594,15 @@
                 if (item.size) meta.append(element('span', undefined, (item.size / BYTES_PER_MB).toFixed(1) + ' MB'));
                 meta.append(element('span', undefined, relativeTime(item.created)));
 
-                const download = element('a', 'btn', 'Download');
+                const download = element('a', 'btn btn-sm', 'Download');
                 download.href = source;
                 download.download = item.filename;
 
-                const upload = element('button', 'btn', 'Upload to YouTube');
+                const upload = element('button', 'btn btn-sm', 'Upload to YouTube');
                 upload.type = 'button';
                 upload.addEventListener('click', () => startYouTubeUpload(item.filename, item.title));
 
-                const remove = element('button', 'btn btn-quiet', 'Delete');
+                const remove = element('button', 'btn btn-sm btn-quiet', 'Delete');
                 remove.type = 'button';
                 remove.addEventListener('click', () => armDelete(remove, item));
 
@@ -615,7 +610,9 @@
                 actions.append(download, upload, remove);
 
                 const card = element('li', isNew ? 'short-card is-new' : 'short-card');
-                card.append(video, element('h3', 'short-title', item.title), meta, actions);
+                const body = element('div', 'short-body');
+                body.append(element('h3', 'short-title', item.title), meta, actions);
+                card.append(video, body);
                 return card;
             }
 

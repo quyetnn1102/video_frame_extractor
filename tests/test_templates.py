@@ -17,7 +17,19 @@ INTERPOLATED_INLINE_HANDLER = re.compile(r'\bon\w+\s*=\s*"[^"]*\$\{')
 class TestTemplates(unittest.TestCase):
     def test_templates_were_found(self):
         names = {path.name for path in TEMPLATE_FILES}
-        self.assertEqual(names, {'index.html', 'create_short.html', 'trending.html', 'dashboard.html'})
+        self.assertEqual(names, {'index.html', 'extract.html', 'create_short.html', 'trending.html',
+                                 'dashboard.html'})
+
+    def test_pages_share_the_sidebar_and_top_bar_instead_of_copying_them(self):
+        for path in TEMPLATE_FILES:
+            with self.subTest(template=path.name):
+                text = path.read_text(encoding='utf-8')
+                for include in ['partials/icons.html', 'partials/sidebar.html', 'partials/topbar.html']:
+                    self.assertIn(f"{{% include '{include}' %}}", text)
+                self.assertRegex(text, r"\{% set active_page = '(home|extract|create|trending|dashboard)' %\}")
+                self.assertIn('src="/static/js/shell.js"', text)
+        for partial in ['icons', 'sidebar', 'topbar']:
+            self.assertTrue((TEMPLATES_DIR / 'partials' / f'{partial}.html').is_file())
 
     def test_nothing_follows_the_closing_html_tag(self):
         for path in TEMPLATE_FILES:
@@ -63,15 +75,16 @@ class TestTemplates(unittest.TestCase):
         section = re.search(r'<section[^>]*id="resultsSection"[^>]*>', text).group(0)
         self.assertNotIn('hidden', section, 'the list of shorts must be visible on a fresh page')
 
-    def test_the_last_extraction_is_remembered_by_the_home_page(self):
-        text = (TEMPLATES_DIR / 'index.html').read_text(encoding='utf-8')
+    def test_the_last_extraction_is_remembered_by_the_extract_page(self):
+        text = (TEMPLATES_DIR / 'extract.html').read_text(encoding='utf-8')
         self.assertIn('localStorage.setItem', text)
         self.assertIn('savedExtraction()', text)
 
     def test_link_fields_show_a_preview_from_the_shared_script(self):
         script = STATIC_DIR / 'js' / 'link-preview.js'
         self.assertTrue(script.is_file())
-        for page, slot in [('index.html', 'linkPreview'), ('create_short.html', 'shortLinkPreview')]:
+        for page, slot in [('index.html', 'launchPreview'), ('extract.html', 'linkPreview'),
+                           ('create_short.html', 'shortLinkPreview')]:
             with self.subTest(template=page):
                 text = (TEMPLATES_DIR / page).read_text(encoding='utf-8')
                 self.assertIn('src="/static/js/link-preview.js"', text)
@@ -82,7 +95,7 @@ class TestTemplates(unittest.TestCase):
 
     def test_extraction_warnings_are_shown_to_the_user(self):
         """/api/extract reports timestamps it could not extract; the page must not drop them."""
-        text = (TEMPLATES_DIR / 'index.html').read_text(encoding='utf-8')
+        text = (TEMPLATES_DIR / 'extract.html').read_text(encoding='utf-8')
         self.assertIn('result.warnings', text)
         self.assertIn('id="extractWarnings"', text)
 

@@ -65,7 +65,9 @@ Open <http://localhost:5000>. Downloads, frames and shorts are stored in `downlo
 
 ## Usage
 
-**Extract frames** (`/`): paste a video link and enter timestamps, one per line, as seconds (`90`), `MM:SS` (`1:30`) or `H:MM:SS` (`1:02:03`). Seconds must be 00-59 (and minutes too in `H:MM:SS`), a timestamp cannot exceed `MAX_VIDEO_DURATION`, and at most 50 are accepted. The video is deleted after the frames are extracted.
+**Home** (`/`): paste a link and choose **Create short** or **Extract frames**; the link is carried over to that page. Your most recent shorts and a short guide are shown below.
+
+**Extract frames** (`/extract`): paste a video link and enter timestamps, one per line, as seconds (`90`), `MM:SS` (`1:30`) or `H:MM:SS` (`1:02:03`). Seconds must be 00-59 (and minutes too in `H:MM:SS`), a timestamp cannot exceed `MAX_VIDEO_DURATION`, and at most 50 are accepted. The video is deleted after the frames are extracted.
 
 **Create a short** (`/create-short`): paste a link, choose the length and an optional start time (`90` or `1:30`; blank starts at the beginning), quality, vertical crop and caption. Wide or tall sources are cropped around the center to 9:16 and scaled to 1080x1920. Then download the MP4 or upload it to YouTube.
 
@@ -131,7 +133,7 @@ All endpoints return JSON (errors as `{"success": false, "error": "..."}`) and r
 
 | Method and path | Purpose | Limit |
 |---|---|---|
-| `GET /`, `/create-short`, `/trending`, `/dashboard` | Pages | default |
+| `GET /`, `/extract`, `/create-short`, `/trending`, `/dashboard` | Pages | default |
 | `POST /api/validate-url` `{url}` | Validate a link and fetch title/duration | 30/min |
 | `POST /api/video-info` `{url}` | Video details without downloading | 20/min |
 | `POST /api/test-platform` `{url}` | Platform guidance for a link | 30/min |
@@ -174,8 +176,8 @@ youtube_uploader.py  OAuth sign-in and upload
 database.py          SQLite request log used by the dashboard (app_data.db)
 logger.py            Logging
 deploy.py            Production helper (Linux): checks, systemd and nginx config
-templates/           index, create_short, trending, dashboard pages
-static/              Shared stylesheet (css/app.css) and self-hosted fonts (fonts/, SIL OFL)
+templates/           index (home), extract, create_short, trending, dashboard pages; partials/ holds the shared sidebar and top bar
+static/              Shared stylesheet (css/app.css), scripts (js/) and the self-hosted font (fonts/, SIL OFL)
 tests/               Offline unit tests
 scripts/smoke_test.py  Manual check against a running server
 ```
@@ -272,4 +274,4 @@ Licensed under the [Apache License 2.0](LICENSE).
 
 ## Acknowledgments
 
-[yt-dlp](https://github.com/yt-dlp/yt-dlp), [OpenCV](https://opencv.org/), [MoviePy](https://zulko.github.io/moviepy/), [Flask](https://flask.palletsprojects.com/), [Flask-Limiter](https://flask-limiter.readthedocs.io/), the Google API client libraries, and the fonts [Bricolage Grotesque](https://github.com/ateliertriay/bricolage) and [Martian Mono](https://github.com/evilmartians/mono) (SIL Open Font License, copies in `static/fonts/`).
+[yt-dlp](https://github.com/yt-dlp/yt-dlp), [OpenCV](https://opencv.org/), [MoviePy](https://zulko.github.io/moviepy/), [Flask](https://flask.palletsprojects.com/), [Flask-Limiter](https://flask-limiter.readthedocs.io/), the Google API client libraries, and the typeface [Inter](https://rsms.me/inter/) (SIL Open Font License, copy in `static/fonts/`).

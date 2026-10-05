@@ -264,6 +264,10 @@ def create_app() -> Flask:
     def index():
         return render_template('index.html')
 
+    @app.route('/extract')
+    def extract_page():
+        return render_template('extract.html')
+
     @app.route('/trending')
     def trending_page():
         return render_template('trending.html')

@@ -191,7 +191,7 @@ class TestErrorHandling(RouteTestCase):
 
 class TestPagesAndInfo(RouteTestCase):
     def test_pages_render(self):
-        for path in ['/', '/trending', '/create-short']:
+        for path in ['/', '/extract', '/trending', '/create-short']:
             with self.subTest(path=path):
                 self.assertEqual(self.client.get(path).status_code, 200)
 
@@ -248,6 +248,46 @@ class TestPagesAndInfo(RouteTestCase):
         self.extractor.cleanup_old_files.return_value = (3, 5, [])
         data = self.client.post('/api/cleanup').get_json()
         self.assertEqual((data['files_deleted'], data['space_freed_mb']), (3, 5))
+
+
+class TestAppShell(RouteTestCase):
+    """Every page shares one sidebar and top bar, and the sidebar marks the page you are on."""
+    PAGES = [('/', 'Home'), ('/extract', 'Extract frames'), ('/create-short', 'Create short'),
+             ('/trending', 'Trending'), ('/dashboard', 'Dashboard')]
+
+    def get_page(self, path):
+        with patch.object(app_enhanced, 'get_analytics', return_value={}), \
+                patch.object(app_enhanced, 'get_recent_requests', return_value=[]):
+            response = self.client.get(path)
+        self.assertEqual(response.status_code, 200)
+        return response.get_data(as_text=True)
+
+    def test_each_page_marks_only_its_own_link_as_current(self):
+        for path, label in self.PAGES:
+            with self.subTest(path=path):
+                html = self.get_page(path)
+                self.assertEqual(html.count('aria-current="page"'), 1)
+                self.assertIn(f'aria-current="page" title="{label}"', html)
+
+    def test_each_page_names_itself_in_the_top_bar(self):
+        for path, label in self.PAGES[1:]:
+            with self.subTest(path=path):
+                self.assertIn(f'<h1>{label}</h1>', self.get_page(path))
+        self.assertIn('<h1>Hey, let&#39;s get started!</h1>', self.get_page('/'))
+
+    def test_every_page_links_to_every_tool(self):
+        for path, _ in self.PAGES:
+            with self.subTest(path=path):
+                html = self.get_page(path)
+                for target in ['href="/"', 'href="/extract"', 'href="/create-short"',
+                               'href="/trending"', 'href="/dashboard"']:
+                    self.assertIn(target, html)
+
+    def test_the_frame_form_lives_on_extract_and_the_home_page_is_a_launcher(self):
+        self.assertIn('id="extractForm"', self.get_page('/extract'))
+        home = self.get_page('/')
+        self.assertNotIn('id="extractForm"', home)
+        self.assertIn('id="launchForm"', home)
 
 
 class TestValidateAndVideoInfo(RouteTestCase):

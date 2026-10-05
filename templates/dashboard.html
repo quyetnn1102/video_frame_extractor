@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Dashboard - VideoExtract</title>
     <link rel="stylesheet" href="/static/css/app.css">
+    <script src="/static/js/shell.js"></script>
     <style>
         .live {
             display: flex;
@@ -19,44 +20,45 @@
             margin: 0;
         }
 
-        /* The headline numbers, read out like a running tally */
+        /* The headline numbers */
         .readout {
             display: grid;
             grid-template-columns: repeat(4, minmax(0, 1fr));
-            gap: 1.5rem;
-            margin: 0 0 clamp(2.5rem, 6vw, 4rem);
+            gap: 1rem;
+            margin: 0 0 1.5rem;
         }
 
         .readout > div {
-            display: flex;
-            flex-direction: column;
-            padding-top: 0.6rem;
-            border-top: 5px solid var(--ink);
+            padding: 1.1rem 1.25rem;
+            background: #fff;
+            border: 1px solid var(--rule);
+            border-radius: var(--radius);
+            box-shadow: var(--card-shadow);
         }
 
         .readout dd {
             margin: 0;
-            font-size: clamp(2.5rem, 1.2rem + 4.5vw, 4.5rem);
-            font-weight: 800;
-            font-stretch: 75%;
-            line-height: 1;
-            letter-spacing: -0.025em;
+            font-size: clamp(1.75rem, 1.2rem + 1.6vw, 2.5rem);
+            font-weight: 700;
+            line-height: 1.1;
+            letter-spacing: -0.02em;
             font-variant-numeric: tabular-nums;
         }
 
         .readout dt {
-            margin-top: 0.4rem;
+            margin-top: 0.3rem;
+            font-size: var(--text-sm);
             color: var(--ink-soft);
         }
 
         .panels {
             display: grid;
             grid-template-columns: repeat(2, minmax(0, 1fr));
-            gap: clamp(2rem, 5vw, 4rem);
+            gap: 1.5rem;
         }
 
         .log {
-            margin-top: clamp(2.5rem, 6vw, 4rem);
+            margin-top: 1.5rem;
         }
 
         /* Platform usage: lengths are the counts, scaled to the busiest platform */
@@ -86,23 +88,26 @@
         }
 
         .tally .track {
-            height: 1.1rem;
-            background: rgba(26, 36, 51, 0.1);
+            height: 0.8rem;
+            background: var(--soft);
+            border-radius: 999px;
+            overflow: hidden;
         }
 
         .tally .fill {
             display: block;
             height: 100%;
-            background: var(--ink);
+            background: var(--primary);
+            border-radius: 999px;
         }
 
         .tally .count {
             text-align: right;
-            font-weight: 700;
+            font-weight: 600;
             font-variant-numeric: tabular-nums;
         }
 
-        /* Level meters for this computer: ticks every 10 percent, red when nearly full */
+        /* Level meters for this computer: red when nearly full */
         .meters {
             display: grid;
             gap: 1.25rem;
@@ -112,49 +117,46 @@
             display: flex;
             justify-content: space-between;
             align-items: baseline;
-            margin-bottom: 0.3rem;
+            margin-bottom: 0.35rem;
+            font-size: var(--text-sm);
             font-weight: 600;
         }
 
         .meter-track {
-            position: relative;
-            height: 0.9rem;
-            background: rgba(26, 36, 51, 0.1);
+            height: 0.8rem;
+            background: var(--soft);
+            border-radius: 999px;
+            overflow: hidden;
         }
 
         .meter-fill {
             height: 100%;
             width: 0;
-            background: var(--ink);
+            background: var(--primary);
+            border-radius: 999px;
             transition: width 0.6s ease-out;
         }
 
         .meter-fill.is-high {
-            background: var(--mark);
-        }
-
-        .meter-track::after {
-            content: "";
-            position: absolute;
-            inset: 0;
-            background: repeating-linear-gradient(90deg, transparent 0 calc(10% - 1px), var(--table) calc(10% - 1px) 10%);
+            background: var(--danger);
         }
 
         .average {
-            margin: 1.75rem 0 0;
-            display: flex;
-            flex-direction: column;
+            margin: 1.5rem 0 0;
+            padding-top: 1.1rem;
+            border-top: 1px solid var(--rule);
         }
 
         .average dd {
             margin: 0;
             font-size: var(--text-2xl);
-            font-weight: 800;
-            font-stretch: 75%;
+            font-weight: 700;
+            letter-spacing: -0.02em;
             font-variant-numeric: tabular-nums;
         }
 
         .average dt {
+            font-size: var(--text-sm);
             color: var(--ink-soft);
         }
 
@@ -166,7 +168,7 @@
         table {
             width: 100%;
             border-collapse: collapse;
-            font-size: 0.95rem;
+            font-size: var(--text-sm);
         }
 
         th,
@@ -178,9 +180,9 @@
         }
 
         th {
-            font-weight: 700;
+            font-weight: 600;
             white-space: nowrap;
-            border-bottom: 2px solid var(--ink);
+            color: var(--ink-soft);
         }
 
         td.platform {
@@ -190,6 +192,7 @@
 
         td.when {
             white-space: nowrap;
+            font-variant-numeric: tabular-nums;
         }
 
         .state::before {
@@ -204,7 +207,7 @@
 
         .status-completed { color: var(--ok); }
         .status-completed::before { border-radius: 50%; }
-        .status-failed { color: var(--mark-deep); }
+        .status-failed { color: var(--danger); }
         .status-processing { color: var(--warn); }
         .status-processing::before { border-radius: 50%; background: transparent; }
 
@@ -226,139 +229,136 @@
 </head>
 <body>
     <a class="skip-link" href="#main">Skip to content</a>
-    <header class="bar">
-        <a class="wordmark" href="/"><span class="mark" aria-hidden="true"></span>VideoExtract</a>
-        <nav aria-label="Main">
-            <a href="/">Extract frames</a>
-            <a href="/create-short">Create short</a>
-            <a href="/trending">Trending</a>
-            <a href="/dashboard" aria-current="page">Dashboard</a>
-        </nav>
-    </header>
+    {% include 'partials/icons.html' %}
+    {% set active_page = 'dashboard' %}
+    {% set page_title = 'Dashboard' %}
+    <div class="app">
+        {% include 'partials/sidebar.html' %}
+        <div class="workspace">
+            {% include 'partials/topbar.html' %}
 
-    <main id="main" class="page">
-        <div class="page-head">
-            <h1>How it is going.</h1>
-            <p>Requests this app has handled, which platforms they came from, and how hard your computer is working.</p>
-        </div>
+            <main id="main" class="page">
+                <p class="intro">Requests this app has handled, which platforms they came from, and how hard your computer is working.</p>
 
-        <div class="live">
-            <label class="check" for="autoRefresh">
-                <input type="checkbox" id="autoRefresh" checked>
-                Update every 5 seconds
-            </label>
-            <p class="hint" id="lastUpdated" role="status">Showing the numbers from when the page loaded.</p>
-        </div>
-
-        <dl class="readout" id="metricsRow">
-            <div>
-                <dd id="totalRequests">{{ analytics.total_requests or 0 }}</dd>
-                <dt>requests in total</dt>
-            </div>
-            <div>
-                <dd id="successRate">{{ "%.1f"|format(analytics.success_rate or 0) }}%</dd>
-                <dt>succeeded</dt>
-            </div>
-            <div>
-                <dd id="recentRequests">{{ analytics.recent_requests_24h or 0 }}</dd>
-                <dt>in the last 24 hours</dt>
-            </div>
-            <div>
-                <dd id="totalFrames">{{ analytics.total_frames_extracted or 0 }}</dd>
-                <dt>frames extracted</dt>
-            </div>
-        </dl>
-
-        <div class="panels">
-            <section class="panel" aria-labelledby="platformHeading">
-                <div class="section-head">
-                    <h2 id="platformHeading">Platforms</h2>
+                <div class="live">
+                    <label class="check" for="autoRefresh">
+                        <input type="checkbox" id="autoRefresh" checked>
+                        Update every 5 seconds
+                    </label>
+                    <p class="hint" id="lastUpdated" role="status">Showing the numbers from when the page loaded.</p>
                 </div>
-                <ul class="tally" id="platformStats">
-                    {% if analytics.platform_stats %}
-                        {% set busiest = analytics.platform_stats.values()|max or 1 %}
-                        {% for platform, count in analytics.platform_stats.items() %}
-                        <li>
-                            <span class="name">{{ platform }}</span>
-                            <span class="track"><span class="fill" style="width: {{ (count / busiest * 100)|round(1) }}%"></span></span>
-                            <span class="count">{{ count }}</span>
-                        </li>
-                        {% endfor %}
-                    {% else %}
-                        <li class="muted">No requests yet.</li>
-                    {% endif %}
-                </ul>
-            </section>
 
-            <section class="panel" aria-labelledby="systemHeading">
-                <div class="section-head">
-                    <h2 id="systemHeading">This computer</h2>
-                </div>
-                <div class="meters" id="systemInfo">
-                    <div class="meter">
-                        <div class="meter-head"><span>Processor</span><span class="time" id="cpuPercent">{{ "%.1f"|format(system_info.cpu_percent or 0) }}%</span></div>
-                        <div class="meter-track" aria-hidden="true">
-                            <div class="meter-fill{% if (system_info.cpu_percent or 0) >= 85 %} is-high{% endif %}" id="cpuProgressBar" style="width: {{ system_info.cpu_percent or 0 }}%"></div>
-                        </div>
+                <dl class="readout" id="metricsRow">
+                    <div>
+                        <dd id="totalRequests">{{ analytics.total_requests or 0 }}</dd>
+                        <dt>requests in total</dt>
                     </div>
-                    <div class="meter">
-                        <div class="meter-head"><span>Memory</span><span class="time" id="memoryPercent">{{ "%.1f"|format(system_info.memory_percent or 0) }}%</span></div>
-                        <div class="meter-track" aria-hidden="true">
-                            <div class="meter-fill{% if (system_info.memory_percent or 0) >= 85 %} is-high{% endif %}" id="memoryProgressBar" style="width: {{ system_info.memory_percent or 0 }}%"></div>
-                        </div>
+                    <div>
+                        <dd id="successRate">{{ "%.1f"|format(analytics.success_rate or 0) }}%</dd>
+                        <dt>succeeded</dt>
                     </div>
-                    <div class="meter">
-                        <div class="meter-head"><span>Disk</span><span class="time" id="diskPercent">{{ "%.1f"|format(system_info.disk_usage or 0) }}%</span></div>
-                        <div class="meter-track" aria-hidden="true">
-                            <div class="meter-fill{% if (system_info.disk_usage or 0) >= 85 %} is-high{% endif %}" id="diskProgressBar" style="width: {{ system_info.disk_usage or 0 }}%"></div>
-                        </div>
+                    <div>
+                        <dd id="recentRequests">{{ analytics.recent_requests_24h or 0 }}</dd>
+                        <dt>in the last 24 hours</dt>
                     </div>
-                </div>
-                <dl class="average">
-                    <dd id="avgProcessingTime">{{ (analytics.avg_processing_time_ms or 0)|round|int }}ms</dd>
-                    <dt>average time to process a request</dt>
+                    <div>
+                        <dd id="totalFrames">{{ analytics.total_frames_extracted or 0 }}</dd>
+                        <dt>frames extracted</dt>
+                    </div>
                 </dl>
-            </section>
-        </div>
 
-        <section class="log" aria-labelledby="logHeading">
-            <div class="section-head">
-                <h2 id="logHeading">Recent requests</h2>
-            </div>
-            <div class="log-scroll" id="recentRequestsTable" tabindex="0" role="region" aria-labelledby="logHeading">
-                <table>
-                    <thead>
-                        <tr>
-                            <th scope="col">Platform</th>
-                            <th scope="col">Title</th>
-                            <th scope="col">Status</th>
-                            <th scope="col">Time</th>
-                            <th scope="col">Processing time</th>
-                            <th scope="col">IP address</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for request in recent_requests %}
-                        {% set title = request.title or '' %}
-                        <tr>
-                            <td class="platform">{{ request.platform }}</td>
-                            <td>{{ title[:50] }}{% if title|length > 50 %}...{% endif %}</td>
-                            <td><span class="state status-{{ request.status }}">{{ request.status }}</span></td>
-                            <td class="when time">{{ request.created_at }}</td>
-                            <td class="when time">{% if request.processing_time_ms %}{{ request.processing_time_ms }}ms{% else %}-{% endif %}</td>
-                            <td class="when time">{{ request.user_ip }}</td>
-                        </tr>
-                        {% endfor %}
-                        {% if not recent_requests %}
-                        <tr>
-                            <td colspan="6" class="empty-row">No requests yet. Extract frames or create a short and they will show up here.</td>
-                        </tr>
-                        {% endif %}
-                    </tbody>
-                </table>
-            </div>
-        </section>
-    </main>
+                <div class="panels">
+                    <section class="card" aria-labelledby="platformHeading">
+                        <div class="section-head">
+                            <h2 id="platformHeading">Platforms</h2>
+                        </div>
+                        <ul class="tally" id="platformStats">
+                            {% if analytics.platform_stats %}
+                                {% set busiest = analytics.platform_stats.values()|max or 1 %}
+                                {% for platform, count in analytics.platform_stats.items() %}
+                                <li>
+                                    <span class="name">{{ platform }}</span>
+                                    <span class="track"><span class="fill" style="width: {{ (count / busiest * 100)|round(1) }}%"></span></span>
+                                    <span class="count">{{ count }}</span>
+                                </li>
+                                {% endfor %}
+                            {% else %}
+                                <li class="muted">No requests yet.</li>
+                            {% endif %}
+                        </ul>
+                    </section>
+
+                    <section class="card" aria-labelledby="systemHeading">
+                        <div class="section-head">
+                            <h2 id="systemHeading">This computer</h2>
+                        </div>
+                        <div class="meters" id="systemInfo">
+                            <div class="meter">
+                                <div class="meter-head"><span>Processor</span><span class="time" id="cpuPercent">{{ "%.1f"|format(system_info.cpu_percent or 0) }}%</span></div>
+                                <div class="meter-track" aria-hidden="true">
+                                    <div class="meter-fill{% if (system_info.cpu_percent or 0) >= 85 %} is-high{% endif %}" id="cpuProgressBar" style="width: {{ system_info.cpu_percent or 0 }}%"></div>
+                                </div>
+                            </div>
+                            <div class="meter">
+                                <div class="meter-head"><span>Memory</span><span class="time" id="memoryPercent">{{ "%.1f"|format(system_info.memory_percent or 0) }}%</span></div>
+                                <div class="meter-track" aria-hidden="true">
+                                    <div class="meter-fill{% if (system_info.memory_percent or 0) >= 85 %} is-high{% endif %}" id="memoryProgressBar" style="width: {{ system_info.memory_percent or 0 }}%"></div>
+                                </div>
+                            </div>
+                            <div class="meter">
+                                <div class="meter-head"><span>Disk</span><span class="time" id="diskPercent">{{ "%.1f"|format(system_info.disk_usage or 0) }}%</span></div>
+                                <div class="meter-track" aria-hidden="true">
+                                    <div class="meter-fill{% if (system_info.disk_usage or 0) >= 85 %} is-high{% endif %}" id="diskProgressBar" style="width: {{ system_info.disk_usage or 0 }}%"></div>
+                                </div>
+                            </div>
+                        </div>
+                        <dl class="average">
+                            <dd id="avgProcessingTime">{{ (analytics.avg_processing_time_ms or 0)|round|int }}ms</dd>
+                            <dt>average time to process a request</dt>
+                        </dl>
+                    </section>
+                </div>
+
+                <section class="card log" aria-labelledby="logHeading">
+                    <div class="section-head">
+                        <h2 id="logHeading">Recent requests</h2>
+                    </div>
+                    <div class="log-scroll" id="recentRequestsTable" tabindex="0" role="region" aria-labelledby="logHeading">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th scope="col">Platform</th>
+                                    <th scope="col">Title</th>
+                                    <th scope="col">Status</th>
+                                    <th scope="col">Time</th>
+                                    <th scope="col">Processing time</th>
+                                    <th scope="col">IP address</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for request in recent_requests %}
+                                {% set title = request.title or '' %}
+                                <tr>
+                                    <td class="platform">{{ request.platform }}</td>
+                                    <td>{{ title[:50] }}{% if title|length > 50 %}...{% endif %}</td>
+                                    <td><span class="state status-{{ request.status }}">{{ request.status }}</span></td>
+                                    <td class="when">{{ request.created_at }}</td>
+                                    <td class="when">{% if request.processing_time_ms %}{{ request.processing_time_ms }}ms{% else %}-{% endif %}</td>
+                                    <td class="when">{{ request.user_ip }}</td>
+                                </tr>
+                                {% endfor %}
+                                {% if not recent_requests %}
+                                <tr>
+                                    <td colspan="6" class="empty-row">No requests yet. Extract frames or create a short and they will show up here.</td>
+                                </tr>
+                                {% endif %}
+                            </tbody>
+                        </table>
+                    </div>
+                </section>
+            </main>
+        </div>
+    </div>
 
     <script>
         (function () {
