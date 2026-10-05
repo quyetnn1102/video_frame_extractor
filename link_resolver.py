@@ -8,7 +8,7 @@ and every redirect target must pass the normal URL validation before it is
 handed to yt-dlp.
 """
 from typing import Optional, Tuple
-from urllib.parse import urljoin, urlparse
+from urllib.parse import urljoin, urlparse, urlsplit, urlunsplit
 
 import requests
 
@@ -29,6 +29,12 @@ def _host(url: str) -> str:
         return ''
 
 
+def _https(url: str) -> str:
+    """The short-link host is only ever requested over TLS."""
+    parts = urlsplit(url)
+    return urlunsplit(parts._replace(scheme='https')) if parts.scheme == 'http' else url
+
+
 def resolve_short_url(url: str) -> Tuple[Optional[str], Optional[str]]:
     """
     Resolve a short share link to the platform's canonical video URL.
@@ -40,7 +46,7 @@ def resolve_short_url(url: str) -> Tuple[Optional[str], Optional[str]]:
     if _host(url) not in SHORT_LINK_HOSTS:
         return url, None
 
-    current = url
+    current = _https(url)
     for _ in range(MAX_REDIRECT_HOPS):
         try:
             response = requests.get(
@@ -69,5 +75,6 @@ def resolve_short_url(url: str) -> Tuple[Optional[str], Optional[str]]:
 
         if _host(current) not in SHORT_LINK_HOSTS:
             return current, None
+        current = _https(current)  # the next request goes to the short-link host
 
     return None, "The short link redirected too many times"

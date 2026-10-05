@@ -31,6 +31,20 @@ class TestResolveShortUrl(unittest.TestCase):
         self.assertIs(get.call_args.kwargs['allow_redirects'], False)
         self.assertEqual(get.call_args.args[0], 'https://fb.watch/abc123/')
 
+    def test_short_links_are_always_requested_over_https(self):
+        target = 'https://www.facebook.com/someone/videos/1234567890/'
+        with patch('link_resolver.requests.get', return_value=redirect(target)) as get:
+            resolve_short_url('http://fb.watch/abc123/')
+        self.assertEqual(get.call_args.args[0], 'https://fb.watch/abc123/')
+
+    def test_a_redirect_back_to_plain_http_is_requested_over_https(self):
+        responses = [redirect('http://fb.watch/next/'),
+                     redirect('https://www.facebook.com/someone/videos/1234567890/')]
+        with patch('link_resolver.requests.get', side_effect=responses) as get:
+            resolve_short_url('https://fb.watch/abc123/')
+        self.assertEqual([call.args[0] for call in get.call_args_list],
+                         ['https://fb.watch/abc123/', 'https://fb.watch/next/'])
+
     def test_relative_redirects_are_resolved_against_the_current_url(self):
         responses = [redirect('/redirected/path'), redirect(
             'https://www.facebook.com/someone/videos/1234567890/')]
