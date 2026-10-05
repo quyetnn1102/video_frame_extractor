@@ -88,6 +88,11 @@ class Config:
     YOUTUBE_API_SERVICE_NAME = 'youtube'
     YOUTUBE_API_VERSION = 'v3'
 
+    # YouTube upload (OAuth). Credentials are stored as JSON, never pickled.
+    YOUTUBE_CLIENT_SECRETS_FILE = BASE_DIR / 'client_secrets.json'
+    YOUTUBE_CREDENTIALS_FILE = BASE_DIR / 'youtube_credentials.json'
+    YOUTUBE_REDIRECT_URI = env_str('YOUTUBE_REDIRECT_URI', f'http://localhost:{PORT}/oauth2callback')
+
     # Rate limiting
     RATE_LIMIT_PER_MINUTE = env_int('RATE_LIMIT_PER_MINUTE', 30)
 
