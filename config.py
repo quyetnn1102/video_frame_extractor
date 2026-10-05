@@ -95,6 +95,7 @@ class Config:
 
     # Rate limiting
     RATE_LIMIT_PER_MINUTE = env_int('RATE_LIMIT_PER_MINUTE', 30)
+    RATELIMIT_ENABLED = env_bool('RATE_LIMIT_ENABLED', True)  # Flask-Limiter switch
 
     # Platform configuration
     SUPPORTED_PLATFORMS = [

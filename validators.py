@@ -50,6 +50,31 @@ def _host_matches(host: str, domain: str) -> bool:
     return host == domain or host.endswith('.' + domain)
 
 
+# Characters that make a "file name" something else: path separators, drive or
+# stream markers (C:, name.mp4:stream) and control characters.
+_UNSAFE_FILENAME_CHARS = re.compile(r'[/\\:\x00-\x1f\x7f]')
+
+
+def resolve_in_folder(folder: Path, filename: str, extensions: Tuple[str, ...]) -> Optional[Path]:
+    """
+    Resolve a client-supplied file name to an existing file directly inside
+    `folder`, or return None. Rejects separators, traversal, drive/stream
+    markers, other extensions, directories and symlinks that leave the folder.
+    """
+    if not isinstance(filename, str) or filename in ('', '.', '..'):
+        return None
+    if _UNSAFE_FILENAME_CHARS.search(filename):
+        return None
+
+    base = Path(folder).resolve()
+    candidate = (base / filename).resolve()
+    if candidate.parent != base:
+        return None
+    if candidate.suffix.lower() not in extensions or not candidate.is_file():
+        return None
+    return candidate
+
+
 class SecurityValidator:
     """Comprehensive input validation and security checks"""
 

@@ -1,8 +1,11 @@
 """Tests for validators.SecurityValidator: URLs, timestamps and filenames."""
+import os
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
-from validators import SecurityValidator
+from validators import SecurityValidator, resolve_in_folder
 
 
 class TestUrlAcceptance(unittest.TestCase):
@@ -188,6 +191,50 @@ class TestSanitizeFilename(unittest.TestCase):
         self.assertLessEqual(len(self.validator.sanitize_filename('x' * 500)), 100)
         self.assertTrue(self.validator.sanitize_filename('...'))
         self.assertTrue(self.validator.sanitize_filename(''))
+
+
+class TestResolveInFolder(unittest.TestCase):
+    """Client-supplied file names may only ever point at files inside one folder."""
+
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.folder = Path(tmp.name) / 'shorts'
+        self.folder.mkdir()
+        (self.folder / 'clip.mp4').write_bytes(b'x')
+        (self.folder / 'notes.txt').write_bytes(b'x')
+        (self.folder / 'sub').mkdir()
+        (self.folder / 'sub' / 'inner.mp4').write_bytes(b'x')
+        (Path(tmp.name) / 'secret.mp4').write_bytes(b'x')
+
+    def resolve(self, name, extensions=('.mp4',)):
+        return resolve_in_folder(self.folder, name, extensions)
+
+    def test_returns_existing_files_inside_the_folder(self):
+        self.assertEqual(self.resolve('clip.mp4'), (self.folder / 'clip.mp4').resolve())
+
+    def test_rejects_traversal_and_nested_paths(self):
+        for name in ['../secret.mp4', '..\\secret.mp4', 'sub/inner.mp4', 'sub\\inner.mp4',
+                     '/etc/passwd', 'C:\\Windows\\win.mp4', '....//secret.mp4',
+                     str(self.folder / 'clip.mp4'), 'clip.mp4:stream', 'clip.mp4\x00.txt']:
+            with self.subTest(name=name):
+                self.assertIsNone(self.resolve(name))
+
+    def test_rejects_other_extensions_and_missing_files(self):
+        self.assertIsNone(self.resolve('notes.txt'))
+        self.assertIsNone(self.resolve('missing.mp4'))
+        self.assertIsNone(self.resolve('sub'))
+        self.assertEqual(self.resolve('notes.txt', ('.txt',)).name, 'notes.txt')
+
+    def test_rejects_non_strings_and_empty_names(self):
+        for name in [None, '', '.', '..', 5, ['clip.mp4']]:
+            with self.subTest(name=name):
+                self.assertIsNone(self.resolve(name))
+
+    @unittest.skipIf(os.name == 'nt', 'creating symlinks needs elevated rights on Windows')
+    def test_rejects_symlinks_that_escape_the_folder(self):
+        (self.folder / 'link.mp4').symlink_to(Path(self.folder).parent / 'secret.mp4')
+        self.assertIsNone(self.resolve('link.mp4'))
 
 
 if __name__ == '__main__':
