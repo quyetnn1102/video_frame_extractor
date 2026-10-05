@@ -30,6 +30,7 @@ PRIVACY_STATUSES = ('private', 'unlisted', 'public')
 TITLE_LIMIT = 100
 DESCRIPTION_LIMIT = 5000
 TAGS_CHARACTER_LIMIT = 500
+SHORTS_TAG = "#Shorts"
 DEFAULT_TITLE = "Short video"
 DEFAULT_TAGS = ["Shorts"]
 AUTH_TIMEOUT_SECONDS = 600
@@ -134,6 +135,8 @@ class YouTubeUploader:
             str(self.client_secrets_file),
             scopes=self.YOUTUBE_UPLOAD_SCOPE,
             redirect_uri=redirect_uri or self.redirect_uri,
+            # PKCE is off unless requested here: the factory passes None to Flow, not its True default
+            autogenerate_code_verifier=True,
         )
         auth_url, state = flow.authorization_url(access_type='offline', prompt='consent')
 
@@ -143,15 +146,21 @@ class YouTubeUploader:
 
     def complete_auth(self, authorization_code: str, state: str) -> Tuple[bool, str]:
         """Finish sign-in with the code and state Google sent back to the callback."""
+        # Check and consume under one lock: only a callback carrying the right state can end
+        # the sign-in (a forged one must not cancel the user's), and when several arrive at
+        # once exactly one wins.
         with self._lock:
-            pending, self._pending = self._pending, None  # a sign-in attempt is single-use
-
-        if pending is None or time.monotonic() > pending.expires_at:
-            return False, "No sign-in is in progress or it has expired. Please start again."
-        if not isinstance(state, str) or not hmac.compare_digest(state, pending.state):
-            return False, "Sign-in state did not match. Please start again."
-        if not authorization_code:
-            return False, "Authorization code is missing."
+            pending = self._pending
+            if pending is None:
+                return False, "No sign-in is in progress. Please start again."
+            if time.monotonic() > pending.expires_at:
+                self._pending = None
+                return False, "The sign-in has expired. Please start again."
+            if not self._state_matches(state, pending.state):
+                return False, "Sign-in state did not match. Please start again."
+            if not authorization_code:
+                return False, "Authorization code is missing."
+            self._pending = None  # a sign-in attempt is single-use
 
         try:
             pending.flow.fetch_token(code=authorization_code)
@@ -163,6 +172,13 @@ class YouTubeUploader:
             return False, "Authentication failed. Please try again."
 
         return True, "Authentication completed successfully"
+
+    @staticmethod
+    def _state_matches(candidate, expected: str) -> bool:
+        """Constant-time comparison; bytes, because compare_digest rejects non-ASCII str."""
+        if not isinstance(candidate, str):
+            return False
+        return hmac.compare_digest(candidate.encode('utf-8'), expected.encode('utf-8'))
 
     def _build_service(self, credentials):
         return build(self.YOUTUBE_API_SERVICE_NAME, self.YOUTUBE_API_VERSION,
@@ -187,15 +203,25 @@ class YouTubeUploader:
             return None
 
     def _save_credentials(self, credentials: Credentials) -> None:
-        """Write credentials as JSON readable only by the current user."""
+        """
+        Write credentials as JSON, atomically: to a temporary file that replaces the old one,
+        so a crash half-way cannot leave a corrupt file. On Linux/macOS the file is created
+        owner-only (0600); on Windows it inherits the folder's permissions.
+        """
+        payload = credentials.to_json()
+        temp_path = self.credentials_file.with_name(self.credentials_file.name + '.tmp')
         try:
-            descriptor = os.open(self.credentials_file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            descriptor = os.open(temp_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
             with os.fdopen(descriptor, 'w', encoding='utf-8') as handle:
-                handle.write(credentials.to_json())
-            os.chmod(self.credentials_file, 0o600)
+                handle.write(payload)
+            os.replace(temp_path, self.credentials_file)
         except OSError as error:
+            temp_path.unlink(missing_ok=True)
             app_logger.error(f"Could not save YouTube credentials ({type(error).__name__})")
             raise YouTubeUploaderError("Could not save YouTube credentials") from error
+        except BaseException:
+            temp_path.unlink(missing_ok=True)
+            raise
 
     # -- upload -------------------------------------------------------------
 
@@ -225,9 +251,11 @@ class YouTubeUploader:
             return False, "Video file not found", None
 
         title = (title or '').strip()[:TITLE_LIMIT] or DEFAULT_TITLE
-        description = (description or '')[:DESCRIPTION_LIMIT]
-        if is_short and "#Shorts" not in description:
-            description = f"{description}\n\n#Shorts".strip()
+        description = description or ''
+        if is_short and SHORTS_TAG not in description:
+            # Truncate the text, not the tag: the tag is what marks the video as a Short
+            suffix = f"\n\n{SHORTS_TAG}"
+            description = (description[:DESCRIPTION_LIMIT - len(suffix)] + suffix).strip()
 
         body = {
             "snippet": {

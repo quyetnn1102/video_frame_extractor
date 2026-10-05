@@ -60,6 +60,24 @@ class TestCredentialStorage(UploaderTestCase):
         self.uploader._save_credentials(credentials)
         self.assertEqual(self.credentials_file.stat().st_mode & 0o777, 0o600)
 
+    def test_saving_leaves_no_temporary_files(self):
+        credentials = Mock()
+        credentials.to_json.return_value = json.dumps(CREDENTIALS_INFO)
+        self.uploader._save_credentials(credentials)
+        self.assertEqual([path.name for path in self.folder.iterdir()], [self.credentials_file.name])
+
+    def test_a_failed_save_keeps_the_previous_credentials(self):
+        """The write is atomic: a crash half-way must not leave a corrupt file behind."""
+        self.credentials_file.write_text(json.dumps(CREDENTIALS_INFO))
+        credentials = Mock()
+        credentials.to_json.side_effect = RuntimeError('serialisation failed')
+
+        with self.assertRaises(RuntimeError):
+            self.uploader._save_credentials(credentials)
+
+        self.assertEqual(json.loads(self.credentials_file.read_text()), CREDENTIALS_INFO)
+        self.assertEqual([path.name for path in self.folder.iterdir()], [self.credentials_file.name])
+
     def test_a_failed_save_is_reported(self):
         self.uploader.credentials_file = self.folder / 'missing-dir' / 'creds.json'
         with self.assertRaises(YouTubeUploaderError):
@@ -148,6 +166,16 @@ class TestOAuthFlow(UploaderTestCase):
         self.assertEqual(kwargs['redirect_uri'], 'http://localhost:5000/oauth2callback')
         self.assertEqual(kwargs['scopes'], YouTubeUploader.YOUTUBE_UPLOAD_SCOPE)
 
+    def test_pkce_is_requested_explicitly(self):
+        """
+        google-auth-oauthlib 1.2.2's from_client_secrets_file passes
+        autogenerate_code_verifier=None to Flow unless told otherwise (the True
+        default only applies to calling Flow() directly), which turns PKCE off.
+        """
+        self.uploader.begin_auth()
+        kwargs = self.flow_class.from_client_secrets_file.call_args.kwargs
+        self.assertIs(kwargs.get('autogenerate_code_verifier'), True)
+
     def test_complete_auth_with_the_right_state_saves_credentials(self):
         self.uploader.begin_auth()
 
@@ -157,15 +185,43 @@ class TestOAuthFlow(UploaderTestCase):
         self.flow.fetch_token.assert_called_once_with(code='the-code')
         self.assertEqual(json.loads(self.credentials_file.read_text()), CREDENTIALS_INFO)
 
-    def test_complete_auth_rejects_a_wrong_state_and_consumes_the_attempt(self):
+    def test_a_wrong_state_is_rejected_without_ending_the_real_sign_in(self):
+        """Anyone able to hit the callback must not be able to cancel the user's sign-in."""
         self.uploader.begin_auth()
 
-        ok, _ = self.uploader.complete_auth('the-code', 'FORGED')
-        self.assertFalse(ok)
+        for forged in ['FORGED', '', 'STATE-', 'STATE-1 ', 'é', 'état-1', None, 5]:
+            with self.subTest(state=forged):
+                ok, _ = self.uploader.complete_auth('the-code', forged)
+                self.assertFalse(ok)
         self.flow.fetch_token.assert_not_called()
 
-        ok, _ = self.uploader.complete_auth('the-code', 'STATE-1')  # attempt already used up
-        self.assertFalse(ok)
+        ok, message = self.uploader.complete_auth('the-code', 'STATE-1')  # the real one still works
+        self.assertTrue(ok, message)
+
+    def test_a_successful_sign_in_attempt_is_single_use(self):
+        self.uploader.begin_auth()
+        self.assertTrue(self.uploader.complete_auth('the-code', 'STATE-1')[0])
+        self.assertFalse(self.uploader.complete_auth('the-code', 'STATE-1')[0])
+        self.flow.fetch_token.assert_called_once()
+
+    def test_two_concurrent_callbacks_complete_the_sign_in_only_once(self):
+        import threading
+        self.uploader.begin_auth()
+        results = []
+        barrier = threading.Barrier(8)
+
+        def callback():
+            barrier.wait()
+            results.append(self.uploader.complete_auth('the-code', 'STATE-1')[0])
+
+        threads = [threading.Thread(target=callback) for _ in range(8)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+        self.assertEqual(results.count(True), 1)
+        self.flow.fetch_token.assert_called_once()
 
     def test_complete_auth_without_a_pending_sign_in_fails(self):
         ok, _ = self.uploader.complete_auth('the-code', 'STATE-1')
@@ -238,6 +294,17 @@ class TestUpload(UploaderTestCase):
         self.assertEqual(len(snippet['title']), module.TITLE_LIMIT)
         self.assertLessEqual(len(snippet['description']), module.DESCRIPTION_LIMIT)
         self.assertEqual(snippet['tags'], ['ok', 'bx/b'])
+
+    def test_the_shorts_tag_survives_a_very_long_description(self):
+        self.upload(description='d' * 9000)
+        description = self.insert.call_args.kwargs['body']['snippet']['description']
+        self.assertLessEqual(len(description), module.DESCRIPTION_LIMIT)
+        self.assertTrue(description.endswith('#Shorts'))
+
+    def test_an_existing_shorts_tag_is_not_duplicated(self):
+        self.upload(description='My clip #Shorts')
+        description = self.insert.call_args.kwargs['body']['snippet']['description']
+        self.assertEqual(description.count('#Shorts'), 1)
 
     def test_blank_title_gets_a_default(self):
         self.upload(title='   ')
