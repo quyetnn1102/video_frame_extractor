@@ -6,9 +6,12 @@ flask==2.3.3
 werkzeug==2.3.7
 flask-limiter==3.12
 limits>=3.13
-python-dotenv==1.0.0
-requests==2.31.0
-psutil==7.0.0
+# Ranges, not exact pins, for libraries that other tools commonly share an environment with:
+# the app only uses their stable APIs, and the test suite passes on both ends of each range
+# (requests 2.32.4+ fixes a netrc credential leak; psutil 6.1 through 7.2 tested).
+python-dotenv>=1.0.0,<2
+requests>=2.32.4,<3
+psutil>=6.1,<8
 
 # Video download (platform extractors change often: upgrade yt-dlp first when downloads break)
 yt-dlp==2026.8.19
@@ -24,7 +27,7 @@ pillow==10.0.1
 google-api-python-client==2.100.0
 google-auth-oauthlib==1.2.2
 google-auth-httplib2==0.2.0
-google-auth==2.38.0
+google-auth>=2.38,<3
 # Pinned: without these pip would pick oauthlib 4.x, which requests-oauthlib 2.0 was not tested with
 requests-oauthlib==2.0.0
 oauthlib==3.2.2

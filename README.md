@@ -34,6 +34,8 @@ Only the five platforms above are fetched: yt-dlp's generic extractor, which wou
 
 Requires Python 3.10 or newer (CI runs 3.10 and 3.11). FFmpeg is bundled with MoviePy (`imageio-ffmpeg`), so you do not need to install it.
 
+**Always install into the project's own virtual environment** (the `.venv` steps below), never into your global Python: the pinned versions can downgrade packages that other tools in a shared environment depend on.
+
 **Windows (PowerShell)**
 
 ```powershell
@@ -216,6 +218,7 @@ The suite is offline and fast: it covers validation, the Flask routes (with the 
 | "Text overlay was skipped" | Install ImageMagick (see [Quick start](#quick-start)) |
 | YouTube sign-in fails | Check that `client_secrets.json` exists, your account is a test user, and the redirect URI matches `http://localhost:5000/oauth2callback` |
 | YouTube upload is private | Expected for API projects that have not passed Google's audit |
+| pip prints dependency conflicts for tools like `fastmcp` or `dbt` after installing | You installed into a shared environment. Create the `.venv` as in [Quick start](#quick-start) and install there; to repair the shared one, reinstall the versions it had before |
 | `ModuleNotFoundError: google_auth_oauthlib` | Run `pip install -r requirements.txt`; the app starts without it but cannot sign in to YouTube |
 
 Logs are in `logs/app.log`.
