@@ -3,63 +3,125 @@ Configuration management for Video Frame Extractor
 Centralizes all configuration settings with environment-based overrides
 """
 import os
+import secrets
 from pathlib import Path
+from typing import Mapping, Optional, Tuple
+
 from dotenv import load_dotenv
 
 # Load environment variables
 load_dotenv()
 
+TRUTHY_VALUES = frozenset({'1', 'true', 'yes', 'on'})
+KNOWN_ENVIRONMENTS = ('development', 'production', 'testing')
+MIN_PRODUCTION_SECRET_LENGTH = 32
+DEV_PLACEHOLDER_SECRET = 'dev-key-change-in-production'
+
+
+def env_bool(name: str, default: bool = False, environ: Optional[Mapping[str, str]] = None) -> bool:
+    """Read a boolean flag from the environment ('1', 'true', 'yes', 'on')."""
+    environ = os.environ if environ is None else environ
+    value = (environ.get(name) or '').strip().lower()
+    if not value:
+        return default
+    return value in TRUTHY_VALUES
+
+
+def env_int(name: str, default: int) -> int:
+    """Read an integer from the environment; blank or unset uses the default."""
+    return int(os.getenv(name) or default)
+
+
+def env_str(name: str, default: str) -> str:
+    """Read a string from the environment; blank or unset uses the default."""
+    return (os.getenv(name) or default).strip()
+
+
+def env_list(name: str, default: str) -> Tuple[str, ...]:
+    """Read a comma-separated list (lower-cased); blank or unset uses the default."""
+    raw = os.getenv(name) or default
+    return tuple(item.strip().lower() for item in raw.split(',') if item.strip())
+
+
+def resolve_environment(environ: Optional[Mapping[str, str]] = None) -> str:
+    """
+    Return the configured environment name.
+
+    Unset or blank means 'development'. An unknown value (for example the typo
+    'prod') raises instead of silently falling back to development settings.
+    """
+    environ = os.environ if environ is None else environ
+    name = environ.get('FLASK_ENV') or 'development'
+    if name not in KNOWN_ENVIRONMENTS:
+        raise ValueError(
+            f"Unknown FLASK_ENV {name!r}. Use one of: {', '.join(KNOWN_ENVIRONMENTS)}")
+    return name
+
+
 class Config:
     """Base configuration class"""
-    
+
     # Base directories
     BASE_DIR = Path(__file__).parent
     DOWNLOAD_FOLDER = BASE_DIR / 'downloads'
     FRAMES_FOLDER = BASE_DIR / 'extracted_frames'
     SHORTS_FOLDER = BASE_DIR / 'generated_shorts'
     LOGS_FOLDER = BASE_DIR / 'logs'
-    
+
     # Flask configuration
-    FLASK_ENV = os.getenv('FLASK_ENV', 'development')
-    DEBUG = FLASK_ENV == 'development'
-    SECRET_KEY = os.getenv('SECRET_KEY', 'dev-key-change-in-production')
-    MAX_CONTENT_LENGTH = 100 * 1024 * 1024  # 100MB max upload
-    
+    FLASK_ENV = env_str('FLASK_ENV', 'development')
+    # The interactive Werkzeug debugger is opt-in, never implied by the environment.
+    DEBUG = env_bool('FLASK_DEBUG')
+    # Without SECRET_KEY, development gets a random per-process key, not a published constant.
+    SECRET_KEY = os.getenv('SECRET_KEY') or secrets.token_hex(32)
+    MAX_CONTENT_LENGTH = 100 * 1024 * 1024  # 100MB max request body
+
+    # Network exposure: loopback only unless explicitly changed
+    HOST = env_str('HOST', '127.0.0.1')
+    PORT = env_int('PORT', 5000)
+    ALLOWED_HOSTS = env_list('ALLOWED_HOSTS', 'localhost,127.0.0.1,[::1]')
+    # Number of reverse proxies in front of the app (0 = none, X-Forwarded-* is ignored)
+    TRUSTED_PROXY_COUNT = env_int('TRUSTED_PROXY_COUNT', 0)
+
     # API Configuration
     YOUTUBE_API_KEY = os.getenv('YOUTUBE_API_KEY', '')
     YOUTUBE_API_SERVICE_NAME = 'youtube'
     YOUTUBE_API_VERSION = 'v3'
-    
+
     # Rate limiting
-    RATE_LIMIT_PER_MINUTE = int(os.getenv('RATE_LIMIT_PER_MINUTE', '30'))
-    
+    RATE_LIMIT_PER_MINUTE = env_int('RATE_LIMIT_PER_MINUTE', 30)
+
     # Platform configuration
     SUPPORTED_PLATFORMS = [
         'youtube.com', 'youtu.be',
         'tiktok.com', 'vm.tiktok.com',
-        'facebook.com', 'fb.com', 'm.facebook.com', 'www.facebook.com',
-        'douyin.com', 'v.douyin.com',
+        'facebook.com', 'fb.com', 'fb.watch', 'm.facebook.com', 'www.facebook.com',
+        'douyin.com',
         'instagram.com', 'www.instagram.com'
     ]
-    
+
     # Video processing settings
     DEFAULT_VIDEO_QUALITY = '720'
-    MAX_VIDEO_DURATION = int(os.getenv('MAX_VIDEO_DURATION', '3600'))  # 1 hour
-    FRAME_EXTRACTION_TIMEOUT = int(os.getenv('FRAME_EXTRACTION_TIMEOUT', '300'))  # 5 minutes
-    
-    # Cookie settings
+    MAX_VIDEO_DURATION = env_int('MAX_VIDEO_DURATION', 3600)  # 1 hour
+    MAX_DOWNLOAD_MB = env_int('MAX_DOWNLOAD_MB', 500)
+    SOCKET_TIMEOUT = env_int('SOCKET_TIMEOUT', 30)  # seconds
+    DOWNLOAD_RETRIES = env_int('DOWNLOAD_RETRIES', 2)
+
+    # Cookie settings. A manual cookie file is used when present; reading the
+    # cookies of local browsers is opt-in because it exposes the whole profile.
     COOKIE_BROWSERS = ['chrome', 'firefox', 'edge', 'safari']
+    USE_BROWSER_COOKIES = env_bool('USE_BROWSER_COOKIES')
     COOKIE_FILE_PATH = BASE_DIR / 'instagram_cookies.txt'
-    
+
     # Cleanup settings
-    AUTO_CLEANUP_HOURS = int(os.getenv('AUTO_CLEANUP_HOURS', '24'))
-    MAX_STORAGE_MB = int(os.getenv('MAX_STORAGE_MB', '1024'))  # 1GB
-    
+    AUTO_CLEANUP_HOURS = env_int('AUTO_CLEANUP_HOURS', 24)
+    MAX_STORAGE_MB = env_int('MAX_STORAGE_MB', 1024)  # 1GB
+
     # Logging configuration
     LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO')
     LOG_FORMAT = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     LOG_FILE = LOGS_FOLDER / 'app.log'
-    
+
     @classmethod
     def ensure_directories(cls):
         """Ensure all required directories exist"""
@@ -74,7 +136,6 @@ class Config:
 
 class DevelopmentConfig(Config):
     """Development configuration"""
-    DEBUG = True
     FLASK_ENV = 'development'
 
 class ProductionConfig(Config):
@@ -82,19 +143,22 @@ class ProductionConfig(Config):
     DEBUG = False
     FLASK_ENV = 'production'
     SECRET_KEY = os.getenv('SECRET_KEY')  # Must be set in production
-    
-    # Enhanced security settings
-    RATE_LIMIT_PER_MINUTE = 10
-    MAX_VIDEO_DURATION = 1800  # 30 minutes
-    AUTO_CLEANUP_HOURS = 4
-    
+
+    # Stricter defaults, still overridable through the environment
+    RATE_LIMIT_PER_MINUTE = env_int('RATE_LIMIT_PER_MINUTE', 10)
+    MAX_VIDEO_DURATION = env_int('MAX_VIDEO_DURATION', 1800)  # 30 minutes
+    AUTO_CLEANUP_HOURS = env_int('AUTO_CLEANUP_HOURS', 4)
+
     @classmethod
     def validate_production_config(cls):
         """Validate required production settings"""
-        required_vars = ['SECRET_KEY']
-        missing = [var for var in required_vars if not os.getenv(var)]
-        if missing:
-            raise ValueError(f"Missing required environment variables: {missing}")
+        secret = os.getenv('SECRET_KEY') or ''
+        if not secret:
+            raise ValueError("Missing required environment variables: ['SECRET_KEY']")
+        if len(secret) < MIN_PRODUCTION_SECRET_LENGTH or secret == DEV_PLACEHOLDER_SECRET:
+            raise ValueError(
+                f"SECRET_KEY must be a random value of at least "
+                f"{MIN_PRODUCTION_SECRET_LENGTH} characters")
 
 class TestConfig(Config):
     """Testing configuration"""
@@ -109,16 +173,15 @@ config = {
     'development': DevelopmentConfig,
     'production': ProductionConfig,
     'testing': TestConfig,
-    'default': DevelopmentConfig
 }
 
 def get_config() -> Config:
-    """Get configuration based on environment"""
-    env = os.getenv('FLASK_ENV', 'development')
-    config_class = config.get(env, config['default'])
-    
+    """Get configuration based on environment (unknown FLASK_ENV values raise)"""
+    env = resolve_environment()
+    config_class = config[env]
+
     if env == 'production':
         config_class.validate_production_config()
-    
+
     config_class.ensure_directories()
     return config_class
