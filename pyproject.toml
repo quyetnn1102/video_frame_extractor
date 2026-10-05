@@ -1,0 +1,59 @@
+[project]
+name = "video-frame-extractor"
+version = "2.1.0"
+description = "Local web app that downloads a video, extracts frames and cuts vertical shorts"
+readme = "README.md"
+license = { text = "Apache-2.0" }
+requires-python = ">=3.10"
+
+# Manage dependencies with uv:  uv add <package>  /  uv remove <package>  /  uv lock --upgrade-package <package>
+dependencies = [
+    # Web app
+    "flask==2.3.3",
+    "werkzeug==2.3.7",
+    "flask-limiter==3.12",
+    "limits>=3.13",
+    # Ranges, not exact pins, for libraries that other tools commonly share an environment
+    # with: the app only uses their stable APIs, and the test suite passes on both ends of
+    # each range (requests 2.32.4+ fixes a netrc credential leak; psutil 6.1 through 7.2).
+    "python-dotenv>=1.0.0,<2",
+    "requests>=2.32.4,<3",
+    "psutil>=6.1,<8",
+
+    # Video download. Platform extractors change often: upgrade yt-dlp first when downloads
+    # break (uv lock --upgrade-package yt-dlp).
+    "yt-dlp==2026.8.19",
+
+    # Frame extraction and short-video rendering. MoviePy bundles its own FFmpeg through
+    # imageio-ffmpeg, which the app also uses directly to merge downloaded streams.
+    "opencv-python==4.8.1.78",
+    # opencv-python 4.8 is built against NumPy 1.x and fails to import under NumPy 2
+    "numpy==1.26.4",
+    "moviepy==1.0.3",
+    "imageio-ffmpeg>=0.4",
+    "pillow==10.0.1",
+
+    # YouTube upload (optional feature)
+    "google-api-python-client==2.100.0",
+    "google-auth-oauthlib==1.2.2",
+    "google-auth-httplib2==0.2.0",
+    "google-auth>=2.38,<3",
+    # Pinned: without these the resolver would pick oauthlib 4.x, which requests-oauthlib 2.0
+    # was not tested with
+    "requests-oauthlib==2.0.0",
+    "oauthlib==3.2.2",
+
+    # Production server (Linux/macOS only; use `uv run python app_enhanced.py` on Windows)
+    "gunicorn==23.0.0; sys_platform != 'win32'",
+]
+
+[dependency-groups]
+# Installed by `uv sync` by default; leave out with --no-dev (production)
+dev = [
+    "httplib2",   # imported by the YouTube upload tests (also a dependency of google-api-python-client)
+    "pip-audit",
+]
+
+[tool.uv]
+# An application, not a library: the modules live in the project root and are not built or installed
+package = false

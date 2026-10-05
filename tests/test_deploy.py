@@ -112,6 +112,36 @@ class TestChecks(QuietTestCase):
                 deploy.validate_environment()
 
 
+class TestUvInstall(QuietTestCase):
+    def test_production_install_uses_the_lock_without_dev_tools(self):
+        self.assertEqual(deploy.INSTALL_COMMAND, 'uv sync --frozen --no-dev')
+        self.assertIn('--frozen', deploy.DEPLOY_COMMAND)
+        self.assertIn('--no-dev', deploy.DEPLOY_COMMAND)
+
+    def test_the_service_runs_gunicorn_from_the_uv_environment(self):
+        text = deploy.render_systemd_service()
+        self.assertIn(f'ExecStart={deploy.VENV_BIN}/gunicorn', text)
+        self.assertIn(f'Environment=PATH={deploy.VENV_BIN}', text)
+        self.assertTrue(deploy.VENV_BIN.endswith('/.venv/bin'))
+
+    def test_missing_dependencies_stop_with_the_uv_command(self):
+        output = io.StringIO()
+        with patch.dict('sys.modules', {'dotenv': None}), contextlib.redirect_stdout(output):
+            with self.assertRaises(SystemExit):
+                deploy.require_project_environment()
+        self.assertIn(deploy.DEPLOY_COMMAND, output.getvalue())
+
+    def test_nothing_is_installed_into_the_running_python(self):
+        with patch('subprocess.run') as run:
+            deploy.require_project_environment()
+        run.assert_not_called()
+
+    def test_the_readme_documents_the_commands_deploy_prints(self):
+        readme = (ROOT / 'README.md').read_text(encoding='utf-8')
+        self.assertIn(deploy.INSTALL_COMMAND, readme)
+        self.assertIn(deploy.DEPLOY_COMMAND, readme)
+
+
 class TestWritingFiles(QuietTestCase):
     def test_both_files_are_written(self):
         previous = os.getcwd()

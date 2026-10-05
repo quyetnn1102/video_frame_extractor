@@ -12,6 +12,10 @@ from pathlib import Path
 
 MIN_PYTHON = (3, 10)
 MIN_SECRET_KEY_LENGTH = 32
+# `uv sync --frozen --no-dev` is the production install: exactly uv.lock, no dev tools
+INSTALL_COMMAND = "uv sync --frozen --no-dev"
+DEPLOY_COMMAND = "uv run --frozen --no-dev python deploy.py"
+VENV_BIN = "/path/to/video_frame_extractor/.venv/bin"
 # One worker with threads: the sign-in state for YouTube and the rate-limit
 # counters live in process memory, so several workers would not share them.
 GUNICORN_COMMAND = (
@@ -39,23 +43,25 @@ def check_python_version():
     print(f"✅ Python {sys.version_info.major}.{sys.version_info.minor} is compatible")
 
 
-def install_dependencies():
-    """Install production dependencies"""
-    print("📦 Installing dependencies...")
+def require_project_environment():
+    """
+    The dependencies come from uv.lock: `uv run` installs exactly those (without the dev
+    group) before starting this script. Stop with the right command instead of installing
+    anything into whatever Python happens to run the script.
+    """
     try:
-        subprocess.run([sys.executable, "-m", "pip", "install", "-r", "requirements.txt"],
-                       check=True, capture_output=True, text=True)
-        print("✅ Dependencies installed successfully")
-    except subprocess.CalledProcessError as e:
-        print(f"❌ Failed to install dependencies: {e}")
-        print(f"Output: {e.stdout}")
-        print(f"Error: {e.stderr}")
+        import dotenv  # noqa: F401
+        import flask  # noqa: F401
+    except ImportError:
+        print("❌ The project's dependencies are not installed in this Python")
+        print(f"   Run: {DEPLOY_COMMAND}")
         sys.exit(1)
+    print("✅ Dependencies are installed")
 
 
 def load_dotenv_file():
     """Read .env like the app does, so validate_environment sees the same settings"""
-    from dotenv import load_dotenv  # installed by install_dependencies()
+    from dotenv import load_dotenv
     load_dotenv()
 
 
@@ -167,12 +173,12 @@ Type=simple
 User=www-data
 Group=www-data
 WorkingDirectory=/path/to/video_frame_extractor
-Environment=PATH=/path/to/video_frame_extractor/venv/bin
+Environment=PATH={VENV_BIN}
 Environment=FLASK_ENV=production
 Environment=ALLOWED_HOSTS=your-domain.com
 Environment=TRUSTED_PROXY_COUNT=1
 EnvironmentFile=/path/to/video_frame_extractor/.env
-ExecStart=/path/to/video_frame_extractor/venv/bin/{GUNICORN_COMMAND}
+ExecStart={VENV_BIN}/{GUNICORN_COMMAND}
 Restart=always
 
 # Sandboxing
@@ -249,7 +255,7 @@ def main():
 
     check_python_version()
     setup_directories()
-    install_dependencies()
+    require_project_environment()
     load_dotenv_file()
     validate_environment()
     check_external_dependencies()

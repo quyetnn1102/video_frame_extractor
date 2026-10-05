@@ -56,7 +56,7 @@ def _flow_class():
         from google_auth_oauthlib.flow import Flow
     except ImportError as error:
         raise YouTubeUploaderError(
-            "google-auth-oauthlib is not installed. Run: pip install -r requirements.txt"
+            "google-auth-oauthlib is not installed. Run: uv sync"
         ) from error
     return Flow
 

@@ -32,19 +32,17 @@ Only the five platforms above are fetched: yt-dlp's generic extractor, which wou
 
 ## Quick start
 
-Requires Python 3.10 or newer (CI runs 3.10 and 3.11). FFmpeg is bundled with MoviePy (`imageio-ffmpeg`), so you do not need to install it.
+Requires Python 3.10 or newer (CI runs 3.10 and 3.11) and [uv](https://docs.astral.sh/uv/getting-started/installation/), which manages the dependencies. FFmpeg is bundled with MoviePy (`imageio-ffmpeg`), so you do not need to install it.
 
-**Always install into the project's own virtual environment** (the `.venv` steps below), never into your global Python: the pinned versions can downgrade packages that other tools in a shared environment depend on.
+`uv sync` creates the project's own `.venv` from the exact versions in `uv.lock` (and downloads a matching Python if needed). Dependencies never go into your global Python, where the pinned versions could downgrade packages other tools rely on.
 
 **Windows (PowerShell)**
 
 ```powershell
 git clone https://github.com/quyetnn1102/video_frame_extractor.git
 cd video_frame_extractor
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-python app_enhanced.py
+uv sync
+uv run python app_enhanced.py
 ```
 
 **Linux / macOS**
@@ -52,11 +50,11 @@ python app_enhanced.py
 ```bash
 git clone https://github.com/quyetnn1102/video_frame_extractor.git
 cd video_frame_extractor
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-python app_enhanced.py
+uv sync
+uv run python app_enhanced.py
 ```
+
+`uv run` always uses the project's `.venv`, so you never need to activate it; in an editor, select `.venv\Scripts\python.exe` (Windows) or `.venv/bin/python` as the interpreter. To change dependencies, use `uv add <package>` / `uv remove <package>` (they are declared in `pyproject.toml`) and commit both `pyproject.toml` and `uv.lock`.
 
 Open <http://localhost:5000>. Downloads, frames and shorts are stored in `downloads/`, `extracted_frames/` and `generated_shorts/`; files older than `AUTO_CLEANUP_HOURS` are removed at startup (and by `POST /api/cleanup`).
 
@@ -185,7 +183,7 @@ Processing runs inside the request, so a long clip can take minutes. There is no
 
 ## Deployment
 
-The app is meant for localhost. If you must expose it, put it behind a reverse proxy that **adds authentication** (the app has none) and TLS, set `FLASK_ENV=production`, a strong `SECRET_KEY`, `ALLOWED_HOSTS`, and `TRUSTED_PROXY_COUNT=1`. `python deploy.py` checks the environment, runs the tests and writes example systemd and nginx files to `production_configs/`.
+The app is meant for localhost. If you must expose it, put it behind a reverse proxy that **adds authentication** (the app has none) and TLS, set `FLASK_ENV=production`, a strong `SECRET_KEY`, `ALLOWED_HOSTS`, and `TRUSTED_PROXY_COUNT=1`. Install exactly the locked versions, without the dev tools, with `uv sync --frozen --no-dev`. Then `uv run --frozen --no-dev python deploy.py` checks the environment, runs the tests and writes example systemd and nginx files to `production_configs/`.
 
 On Linux, run it with one worker and threads, because the YouTube sign-in state and the rate-limit counters live in process memory:
 
@@ -198,7 +196,7 @@ Gunicorn does not run on Windows; use `python app_enhanced.py` there.
 ## Testing
 
 ```bash
-python -m unittest discover -s tests -t .
+uv run python -m unittest discover -s tests -t .
 ```
 
 The suite is offline and fast: it covers validation, the Flask routes (with the extractor and uploader mocked), the yt-dlp options, frame extraction and short rendering on a synthetic video, the YouTube OAuth and upload logic, and static checks on the templates. CI runs it on Ubuntu and Windows.
@@ -209,7 +207,7 @@ The suite is offline and fast: it covers validation, the Flask routes (with the 
 
 | Symptom | Fix |
 |---|---|
-| A platform stops working | Upgrade yt-dlp first: `pip install -U yt-dlp`, then update the pin in `requirements.txt` |
+| A platform stops working | Upgrade yt-dlp first: `uv lock --upgrade-package yt-dlp`, then set the new version in the `yt-dlp==` pin in `pyproject.toml` and run `uv sync` |
 | `No suitable extractor` | The link form is not supported (for example `v.douyin.com`); use the full video URL |
 | `Invalid Host header` | You opened the app under another name; add it to `ALLOWED_HOSTS` |
 | Instagram: login required / restricted | See [Platform authentication](#platform-authentication) |
@@ -218,8 +216,9 @@ The suite is offline and fast: it covers validation, the Flask routes (with the 
 | "Text overlay was skipped" | Install ImageMagick (see [Quick start](#quick-start)) |
 | YouTube sign-in fails | Check that `client_secrets.json` exists, your account is a test user, and the redirect URI matches `http://localhost:5000/oauth2callback` |
 | YouTube upload is private | Expected for API projects that have not passed Google's audit |
-| pip prints dependency conflicts for tools like `fastmcp` or `dbt` after installing | You installed into a shared environment. Create the `.venv` as in [Quick start](#quick-start) and install there; to repair the shared one, reinstall the versions it had before |
-| `ModuleNotFoundError: google_auth_oauthlib` | Run `pip install -r requirements.txt`; the app starts without it but cannot sign in to YouTube |
+| pip prints dependency conflicts for tools like `fastmcp` or `dbt` | Something was installed into a shared Python. Use `uv sync` / `uv run` as in [Quick start](#quick-start) so the project only touches its own `.venv`; to repair the shared one, reinstall the versions it had before |
+| `Fatal error in launcher: Unable to create process` or `uv sync` says access denied on `.venv` | A virtual environment was moved or is in use. Close editors and terminals that use it (VS Code language servers keep `.venv\Scripts\python.exe` open), delete `.venv`, run `uv sync`, and select the new interpreter in your editor |
+| `ModuleNotFoundError: google_auth_oauthlib` (or any other package) | You are not running in the project's environment: start the app with `uv run python app_enhanced.py`, or run `uv sync` first. Without that package the app starts but cannot sign in to YouTube |
 
 Logs are in `logs/app.log`.
 

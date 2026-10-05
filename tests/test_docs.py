@@ -90,7 +90,8 @@ class TestLinksAndFiles(unittest.TestCase):
         self.assertEqual(links - slugs, set(), 'README links to headings that do not exist')
 
     def test_files_mentioned_in_the_readme_exist(self):
-        for name in ['LICENSE', 'requirements.txt', 'deploy.py', 'scripts/smoke_test.py',
+        for name in ['LICENSE', 'pyproject.toml', 'uv.lock', '.python-version', 'deploy.py',
+                     'scripts/smoke_test.py',
                      'client_secrets.json.template', 'instagram_cookies_template.txt',
                      '.github/workflows/ci.yml']:
             with self.subTest(file=name):
@@ -99,10 +100,19 @@ class TestLinksAndFiles(unittest.TestCase):
             self.assertIn(name, README)
 
     def test_readme_documents_the_real_commands(self):
-        for command in ['python app_enhanced.py', 'python -m unittest discover -s tests -t .',
-                        'pip install -r requirements.txt', 'python -m venv .venv']:
+        for command in ['uv sync', 'uv run python app_enhanced.py',
+                        'uv run python -m unittest discover -s tests -t .',
+                        'uv lock --upgrade-package yt-dlp']:
             with self.subTest(command=command):
                 self.assertIn(command, README)
+
+    def test_no_document_tells_people_to_use_pip_or_a_requirements_file(self):
+        self.assertFalse((ROOT / 'requirements.txt').exists(), 'dependencies live in pyproject.toml + uv.lock')
+        for name in ['README.md', 'CLAUDE.md', 'youtube_uploader.py', 'deploy.py']:
+            text = (ROOT / name).read_text(encoding='utf-8')
+            with self.subTest(file=name):
+                self.assertNotIn('pip install -r', text)
+                self.assertNotIn('requirements.txt', text)
 
     def test_secret_files_the_readme_mentions_are_git_ignored(self):
         ignored = (ROOT / '.gitignore').read_text(encoding='utf-8')
