@@ -35,6 +35,9 @@ WINDOWS_RESERVED_NAMES = frozenset(
 
 MAX_TIMESTAMPS = 50
 MAX_FILENAME_LENGTH = 100
+# Real share links are far shorter; the cap keeps regex work on user input bounded.
+MAX_URL_LENGTH = 2048
+VIDEO_ID_PATTERN = re.compile(r'[\w-]{1,64}')
 
 # Seconds/minutes are bounded to 00-59 so "1:60" is rejected, not read as 120s.
 TIMESTAMP_PATTERNS = (
@@ -125,7 +128,9 @@ class SecurityValidator:
             return False, 'unknown', "URL is required and must be a string"
         
         url = url.strip()
-        
+        if len(url) > MAX_URL_LENGTH:
+            return False, 'unknown', "URL is too long"
+
         # Basic URL format validation
         try:
             parsed = urlparse.urlparse(url)
@@ -157,11 +162,6 @@ class SecurityValidator:
         if not is_valid:
             return False, platform, error
         
-        # Security checks
-        if self._is_suspicious_url(url):
-            app_logger.warning("Suspicious URL detected", url=url)
-            return False, platform, "URL appears suspicious"
-        
         return True, platform, None
     
     def _detect_platform(self, host: str) -> str:
@@ -182,25 +182,31 @@ class SecurityValidator:
         
         return False, f"Invalid {platform} URL format"
     
-    def _is_suspicious_url(self, url: str) -> bool:
-        """Check for suspicious URL patterns"""
-        suspicious_patterns = [
-            r'bit\.ly',  # URL shorteners (could hide malicious content)
-            r'tinyurl',
-            r'[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+',  # IP addresses
-            r'localhost',
-            r'127\.0\.0\.1',
-            r'\.\./\.\.',  # Path traversal
-            r'javascript:',
-            r'data:',
-            r'file:'
-        ]
-        
-        for pattern in suspicious_patterns:
-            if re.search(pattern, url, re.IGNORECASE):
-                return True
-        return False
-    
+    def canonicalize_url(self, url: str) -> str:
+        """
+        Reduce a YouTube link to its single-video form, https://www.youtube.com/watch?v=<id>.
+
+        Links copied from a playlist or mix carry list= / index= / start_radio=;
+        yt-dlp routes those to its playlist extractor, which is not allowed here,
+        so they would fail with a misleading "No suitable extractor". Other links
+        are returned unchanged.
+        """
+        try:
+            parsed = urlparse.urlparse(url)
+            host = (parsed.hostname or '').lower()
+            if host == 'youtu.be':
+                video_id = parsed.path.strip('/')
+            elif _host_matches(host, 'youtube.com') and parsed.path == '/watch':
+                video_id = (urlparse.parse_qs(parsed.query).get('v') or [''])[0]
+            else:
+                return url
+        except ValueError:
+            return url
+
+        if not VIDEO_ID_PATTERN.fullmatch(video_id):
+            return url
+        return f'https://www.youtube.com/watch?v={video_id}'
+
     def validate_timestamp(self, timestamp: str) -> Tuple[bool, Optional[str], Optional[int]]:
         """
         Validate timestamp format and convert to seconds

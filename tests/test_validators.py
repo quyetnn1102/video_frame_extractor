@@ -1,6 +1,7 @@
 """Tests for validators.SecurityValidator: URLs, timestamps and filenames."""
 import os
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -191,6 +192,57 @@ class TestSanitizeFilename(unittest.TestCase):
         self.assertLessEqual(len(self.validator.sanitize_filename('x' * 500)), 100)
         self.assertTrue(self.validator.sanitize_filename('...'))
         self.assertTrue(self.validator.sanitize_filename(''))
+
+
+class TestUrlLength(unittest.TestCase):
+    """A regex over an unbounded URL can stall the whole single-process server."""
+
+    def test_very_long_urls_are_rejected_immediately(self):
+        validator = SecurityValidator()
+        for url in ['https://youtu.be/' + '1' * 1_000_000,
+                    'https://www.youtube.com/watch?v=' + 'a' * 5000]:
+            with self.subTest(length=len(url)):
+                started = time.perf_counter()
+                is_valid, _, error = validator.validate_url(url)
+                self.assertFalse(is_valid)
+                self.assertIn('too long', error)
+                self.assertLess(time.perf_counter() - started, 0.5)
+
+    def test_urls_with_ip_like_text_in_the_query_are_not_rejected(self):
+        is_valid, _, error = SecurityValidator().validate_url(
+            'https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=1.2.3.4')
+        self.assertTrue(is_valid, error)
+
+
+class TestCanonicalizeUrl(unittest.TestCase):
+    """yt-dlp's `youtube:tab` extractor claims links with list=, and it is not allowed."""
+
+    def setUp(self):
+        self.validator = SecurityValidator()
+
+    def test_youtube_links_are_reduced_to_the_single_video(self):
+        canonical = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ'
+        for url in ['https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=PLabc123&index=2',
+                    'https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=RDdQw4w9WgXcQ&start_radio=1',
+                    'https://m.youtube.com/watch?feature=share&v=dQw4w9WgXcQ&t=30s',
+                    'https://youtu.be/dQw4w9WgXcQ?list=PLabc123',
+                    'https://youtu.be/dQw4w9WgXcQ?t=10',
+                    canonical]:
+            with self.subTest(url=url):
+                self.assertEqual(self.validator.canonicalize_url(url), canonical)
+
+    def test_other_links_are_left_alone(self):
+        for url in ['https://www.youtube.com/shorts/abcDEF12345',
+                    'https://www.tiktok.com/@some.user/video/7234567890123456789',
+                    'https://www.instagram.com/reel/Cabc123_x/?igsh=abc',
+                    'https://www.facebook.com/watch/?v=1234567890']:
+            with self.subTest(url=url):
+                self.assertEqual(self.validator.canonicalize_url(url), url)
+
+    def test_unparseable_youtube_links_are_returned_unchanged(self):
+        for url in ['https://www.youtube.com/watch', 'https://youtu.be/', 'not a url']:
+            with self.subTest(url=url):
+                self.assertEqual(self.validator.canonicalize_url(url), url)
 
 
 class TestResolveInFolder(unittest.TestCase):

@@ -1,5 +1,7 @@
 """Tests for video_processor.py: yt-dlp hardening, cookies and frame extraction."""
+import os
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
@@ -8,9 +10,10 @@ import cv2
 import numpy as np
 import yt_dlp
 
+import video_processor
 from config import get_config
 from video_processor import (ALLOWED_VIDEO_EXTENSIONS, EnhancedVideoFrameExtractor,
-                             InstagramProcessor, escape_template_text, find_downloaded_file)
+                             InstagramProcessor, download_with_ytdlp, find_downloaded_file)
 
 
 class TestYtdlpOptions(unittest.TestCase):
@@ -129,11 +132,185 @@ class TestVideoInfo(unittest.TestCase):
         self.assertEqual(len(info['description']), 500)
 
 
-class TestHelpers(unittest.TestCase):
-    def test_template_text_escapes_percent(self):
-        self.assertEqual(escape_template_text('100% %(id)s'), '100%% %%(id)s')
-        self.assertEqual(escape_template_text('plain'), 'plain')
+class FakeYoutubeDL:
+    """Stands in for yt_dlp.YoutubeDL: writes the file the output template asks for."""
+    instances = []
 
+    def __init__(self, params, files=('{name}.mp4',), error=None, info=None):
+        self.params = params
+        self.files, self.error = files, error
+        self.info = {'title': 'A title'} if info is None else info
+        FakeYoutubeDL.instances.append(self)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def extract_info(self, url, download=True):
+        self.url = url
+        home = Path(self.params['paths']['home'])
+        name = self.params['outtmpl']['default'].replace('.%(ext)s', '')
+        for pattern in self.files:
+            (home / pattern.format(name=name)).write_bytes(b'data')
+        if self.error:
+            raise self.error
+        return self.info
+
+
+class TestDownloadWithYtdlp(unittest.TestCase):
+    def setUp(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.folder = Path(tmp.name)
+        FakeYoutubeDL.instances = []
+
+    def run_download(self, url='https://example.test/v', **fake_arguments):
+        factory = lambda params: FakeYoutubeDL(params, **fake_arguments)
+        with patch.object(video_processor.yt_dlp, 'YoutubeDL', side_effect=factory):
+            return download_with_ytdlp(url, {'format': 'best'}, self.folder)
+
+    def test_remote_titles_never_reach_the_output_template(self):
+        """yt-dlp expands $VAR and %(field)s in the template; a title must not be part of it."""
+        path, title, error = self.run_download(info={'title': 'Get $PATH ${SECRET_KEY} %(id)s tips'})
+
+        template = FakeYoutubeDL.instances[0].params['outtmpl']['default']
+        self.assertRegex(template, r'^[0-9a-f]{8}\.%\(ext\)s$')
+        self.assertEqual(FakeYoutubeDL.instances[0].params['paths']['home'], str(self.folder))
+        self.assertIsNone(error)
+        self.assertEqual(Path(path).parent, self.folder)
+        self.assertRegex(Path(path).name, r'^[0-9a-f]{8}\.mp4$')
+        self.assertIn('tips', title)  # the title is still returned for display
+
+    def test_the_caller_options_are_not_modified(self):
+        options = {'format': 'best'}
+        with patch.object(video_processor.yt_dlp, 'YoutubeDL', side_effect=lambda p: FakeYoutubeDL(p)):
+            download_with_ytdlp('https://example.test/v', options, self.folder)
+        self.assertEqual(options, {'format': 'best'})
+
+    def test_a_skipped_download_is_reported(self):
+        path, title, error = self.run_download(files=())
+        self.assertEqual((path, title, error), (None, None, video_processor.NOT_DOWNLOADED_MESSAGE))
+
+    def test_missing_video_information_is_reported(self):
+        path, _, error = self.run_download(files=(), info={})
+        self.assertIsNone(path)
+        self.assertEqual(error, video_processor.EXTRACT_FAILED_MESSAGE)
+
+    def test_partial_files_are_removed_when_the_download_fails(self):
+        failure = yt_dlp.utils.DownloadError('network down')
+        with self.assertRaises(yt_dlp.utils.DownloadError):
+            self.run_download(files=('{name}.mp4.part', '{name}.f137.mp4.ytdl'), error=failure)
+        self.assertEqual(list(self.folder.iterdir()), [])
+
+    def test_unfinished_files_are_removed_when_nothing_finished(self):
+        self.run_download(files=('{name}.mp4.part',))
+        self.assertEqual(list(self.folder.iterdir()), [])
+
+    def test_other_files_in_the_folder_are_untouched(self):
+        keep = self.folder / 'other_download.mp4'
+        keep.write_bytes(b'x')
+        with self.assertRaises(yt_dlp.utils.DownloadError):
+            self.run_download(files=('{name}.mp4.part',), error=yt_dlp.utils.DownloadError('x'))
+        self.assertTrue(keep.exists())
+
+
+class TestExtractorUsesCleanInput(unittest.TestCase):
+    def setUp(self):
+        self.extractor = EnhancedVideoFrameExtractor()
+        self.playlist_url = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=PLabc123&index=2'
+        self.canonical = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ'
+
+    def test_download_uses_the_single_video_url(self):
+        with patch.object(video_processor, 'download_with_ytdlp',
+                          return_value=('p', 't', None)) as download:
+            self.extractor.download_video(self.playlist_url)
+        self.assertEqual(download.call_args.args[0], self.canonical)
+
+    @patch('video_processor.yt_dlp.YoutubeDL')
+    def test_video_info_uses_the_single_video_url(self, mock_ytdl):
+        instance = Mock()
+        instance.extract_info.return_value = {'title': 'T'}
+        mock_ytdl.return_value.__enter__.return_value = instance
+        self.extractor.get_video_info(self.playlist_url)
+        self.assertEqual(instance.extract_info.call_args.args[0], self.canonical)
+
+    def test_unexpected_download_errors_do_not_leak_details(self):
+        with patch.object(video_processor, 'download_with_ytdlp',
+                          side_effect=OSError(r'No space left on device: D:\secret\x.part')):
+            path, _, error = self.extractor.download_video(self.playlist_url)
+        self.assertIsNone(path)
+        self.assertNotIn('secret', error)
+        self.assertNotIn('D:', error)
+
+    @patch('video_processor.yt_dlp.YoutubeDL')
+    def test_unexpected_info_errors_do_not_leak_details(self, mock_ytdl):
+        mock_ytdl.return_value.__enter__.return_value.extract_info.side_effect = \
+            PermissionError(r'C:\Users\me\secret.txt')
+        success, _, error = self.extractor.get_video_info(self.playlist_url)
+        self.assertFalse(success)
+        self.assertNotIn('secret', error)
+
+    def test_instagram_failures_do_not_leak_details(self):
+        url = 'https://www.instagram.com/reel/Cabc123_x/'
+        with patch.object(video_processor, 'download_with_ytdlp',
+                          side_effect=OSError(r'D:\secret\cookies.txt')):
+            path, _, error = self.extractor.download_video(url)
+        self.assertIsNone(path)
+        self.assertNotIn('secret', error)
+
+
+class TestCleanup(unittest.TestCase):
+    def test_warnings_do_not_contain_server_paths(self):
+        config = get_config()
+        with tempfile.TemporaryDirectory() as root:
+            root = Path(root)
+            for name in ('DOWNLOAD_FOLDER', 'FRAMES_FOLDER', 'SHORTS_FOLDER'):
+                (root / name).mkdir()
+            old = root / 'DOWNLOAD_FOLDER' / 'old.mp4'
+            old.write_bytes(b'x')
+            long_ago = time.time() - 10 * 24 * 3600
+            os.utime(old, (long_ago, long_ago))
+
+            with patch.object(config, 'DOWNLOAD_FOLDER', root / 'DOWNLOAD_FOLDER'), \
+                    patch.object(config, 'FRAMES_FOLDER', root / 'FRAMES_FOLDER'), \
+                    patch.object(config, 'SHORTS_FOLDER', root / 'SHORTS_FOLDER'), \
+                    patch.object(Path, 'unlink', side_effect=PermissionError(str(old))):
+                _, _, errors = EnhancedVideoFrameExtractor().cleanup_old_files(max_age_hours=1)
+
+        self.assertTrue(errors)
+        for message in errors:
+            self.assertNotIn(str(root), message)
+
+    def test_a_file_that_vanishes_does_not_stop_the_sweep(self):
+        config = get_config()
+        with tempfile.TemporaryDirectory() as root:
+            root = Path(root)
+            for name in ('DOWNLOAD_FOLDER', 'FRAMES_FOLDER', 'SHORTS_FOLDER'):
+                (root / name).mkdir()
+            gone, kept_old = root / 'DOWNLOAD_FOLDER' / 'a.mp4', root / 'DOWNLOAD_FOLDER' / 'b.mp4'
+            for file in (gone, kept_old):
+                file.write_bytes(b'x')
+                os.utime(file, (time.time() - 99999, time.time() - 99999))
+            real_stat = Path.stat
+
+            def flaky_stat(path, *args, **kwargs):
+                if path.name == 'a.mp4':
+                    raise FileNotFoundError(str(path))
+                return real_stat(path, *args, **kwargs)
+
+            with patch.object(config, 'DOWNLOAD_FOLDER', root / 'DOWNLOAD_FOLDER'), \
+                    patch.object(config, 'FRAMES_FOLDER', root / 'FRAMES_FOLDER'), \
+                    patch.object(config, 'SHORTS_FOLDER', root / 'SHORTS_FOLDER'), \
+                    patch.object(Path, 'stat', flaky_stat):
+                deleted, _, _ = EnhancedVideoFrameExtractor().cleanup_old_files(max_age_hours=1)
+
+            self.assertEqual(deleted, 1)
+            self.assertFalse(kept_old.exists())
+
+
+class TestHelpers(unittest.TestCase):
     def test_find_downloaded_file_ignores_partial_downloads(self):
         with tempfile.TemporaryDirectory() as folder:
             folder = Path(folder)

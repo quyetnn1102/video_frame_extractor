@@ -32,11 +32,6 @@ MAX_DESCRIPTION_LENGTH = 500
 BYTES_PER_MB = 1024 * 1024
 
 
-def escape_template_text(text: str) -> str:
-    """Escape '%' so remote titles are not parsed as yt-dlp output-template fields."""
-    return text.replace('%', '%%')
-
-
 def find_downloaded_file(folder: Path, unique_id: str) -> Optional[Path]:
     """Return the newest finished download whose name carries `unique_id`."""
     candidates = [
@@ -56,29 +51,49 @@ EXTRACT_FAILED_MESSAGE = (
 NOT_DOWNLOADED_MESSAGE = "The video was not downloaded (it may exceed the size or duration limit)"
 
 
+def remove_partial_downloads(folder: Path, unique_id: str) -> None:
+    """Delete everything a (failed) download left behind under its random id."""
+    for path in Path(folder).glob(f'*{unique_id}*'):
+        try:
+            path.unlink(missing_ok=True)
+        except OSError as error:
+            video_logger.warning(f"Could not remove partial download ({type(error).__name__})")
+
+
 def download_with_ytdlp(url: str, opts: Dict[str, Any],
                         folder: Path) -> Tuple[Optional[str], Optional[str], Optional[str]]:
     """
-    Download `url` into `folder` with yt-dlp.
+    Download `url` into `folder` with yt-dlp in a single pass.
+
+    The file is named after a random id only. yt-dlp expands $VAR and
+    %(field)s inside the output template, so remote text (the video title)
+    must never be part of it; the title is returned separately for display.
 
     Returns:
         (file_path, sanitized_title, error_message)
     """
-    with yt_dlp.YoutubeDL(opts) as ydl:
-        info = ydl.extract_info(url, download=False)
-        if not isinstance(info, dict) or not info:
-            return None, None, EXTRACT_FAILED_MESSAGE
+    folder = Path(folder)
+    unique_id = uuid.uuid4().hex[:8]
+    options = dict(opts)
+    options['paths'] = {'home': str(folder)}
+    options['outtmpl'] = {'default': f'{unique_id}.%(ext)s'}
 
-        title = validator.sanitize_filename(info.get('title') or 'unknown')
-        unique_id = str(uuid.uuid4())[:8]
-        ydl.params['outtmpl'] = {
-            'default': f'{folder}/{escape_template_text(title)}_{unique_id}.%(ext)s'}
-        ydl.download([url])
+    try:
+        with yt_dlp.YoutubeDL(options) as ydl:
+            info = ydl.extract_info(url, download=True)
+    except BaseException:
+        remove_partial_downloads(folder, unique_id)
+        raise
+
+    if not isinstance(info, dict) or not info:
+        remove_partial_downloads(folder, unique_id)
+        return None, None, EXTRACT_FAILED_MESSAGE
 
     finished = find_downloaded_file(folder, unique_id)
-    if finished is None:
+    if finished is None:  # skipped by the duration/size filter, or only partial files exist
+        remove_partial_downloads(folder, unique_id)
         return None, None, NOT_DOWNLOADED_MESSAGE
-    return str(finished), title, None
+    return str(finished), validator.sanitize_filename(info.get('title') or 'unknown'), None
 
 
 class VideoProcessingError(Exception):
@@ -306,6 +321,7 @@ class EnhancedVideoFrameExtractor:
                 url, link_error = resolve_short_url(url)
                 if link_error:
                     return None, None, link_error
+                url = validator.canonicalize_url(url)
 
                 processor = self.processors.get(platform)
                 if not processor:
@@ -338,11 +354,11 @@ class EnhancedVideoFrameExtractor:
                 return None, None, enhanced_error
                 
             except Exception as e:
-                error_msg = f"Unexpected error during download: {str(e)}"
-                video_logger.exception("Video download failed", 
-                                     url=validator.hash_sensitive_data(url), 
+                # The details (paths, OS errors) go to the log, not to the browser
+                video_logger.exception("Video download failed",
+                                     url=validator.hash_sensitive_data(url),
                                      error=str(e))
-                return None, None, error_msg
+                return None, None, "Unexpected error during download. See the application log."
     
     def _download_standard_video(self, url: str, processor: PlatformProcessor) -> Tuple[Optional[str], Optional[str], Optional[str]]:
         """Download video using standard process"""
@@ -362,9 +378,11 @@ class EnhancedVideoFrameExtractor:
                 return file_path, title, None
             else:
                 return None, None, title or "Instagram download failed with all methods"
+        except yt_dlp.utils.DownloadError as e:
+            return None, None, processor.process_download_error(str(e))
         except Exception as e:
-            enhanced_error = processor.process_download_error(str(e))
-            return None, None, enhanced_error
+            video_logger.exception("Instagram download failed", error=str(e))
+            return None, None, "Unexpected error during download. See the application log."
     
     def get_platform_from_url(self, url: str) -> str:
         """Get platform from URL"""
@@ -440,6 +458,7 @@ class EnhancedVideoFrameExtractor:
                 url, link_error = resolve_short_url(url)
                 if link_error:
                     return False, None, link_error
+                url = validator.canonicalize_url(url)
 
                 processor = self.processors.get(platform)
                 if not processor:
@@ -485,7 +504,7 @@ class EnhancedVideoFrameExtractor:
                 video_logger.exception("Video info extraction failed", 
                                      url=validator.hash_sensitive_data(url), 
                                      error=str(e))
-                return False, None, f"Error extracting video info: {str(e)}"
+                return False, None, "Could not read the video information. See the application log."
     
     def cleanup_old_files(self, max_age_hours: int = None) -> Tuple[int, int, List[str]]:
         """
@@ -515,28 +534,30 @@ class EnhancedVideoFrameExtractor:
                 try:
                     if not folder.exists():
                         continue
-                        
+
                     for file_path in folder.iterdir():
-                        if file_path.is_file():
+                        # stat() and unlink() share one try: another request may
+                        # delete the file between listing and here
+                        try:
+                            if not file_path.is_file():
+                                continue
                             file_stat = file_path.stat()
-                            file_time = datetime.fromtimestamp(file_stat.st_mtime)
-                            
-                            if file_time < cutoff_time:
-                                try:
-                                    file_size = file_stat.st_size
-                                    file_path.unlink()
-                                    files_deleted += 1
-                                    space_freed += file_size
-                                    video_logger.debug(f"Deleted old file: {file_path.name}")
-                                except Exception as e:
-                                    error_msg = f"Could not delete {file_path.name}: {str(e)}"
-                                    errors.append(error_msg)
-                                    video_logger.warning(error_msg)
-                                    
-                except Exception as e:
-                    error_msg = f"Could not clean folder {folder}: {str(e)}"
-                    errors.append(error_msg)
-                    video_logger.warning(error_msg)
+                            if datetime.fromtimestamp(file_stat.st_mtime) >= cutoff_time:
+                                continue
+                            file_path.unlink()
+                            files_deleted += 1
+                            space_freed += file_stat.st_size
+                            video_logger.debug(f"Deleted old file: {file_path.name}")
+                        except FileNotFoundError:
+                            continue  # already gone
+                        except OSError as e:
+                            # Messages reach the browser: file name only, details go to the log
+                            errors.append(f"Could not delete {file_path.name}")
+                            video_logger.warning(f"Could not delete {file_path.name} ({type(e).__name__})")
+
+                except OSError as e:
+                    errors.append(f"Could not clean the {folder.name} folder")
+                    video_logger.warning(f"Could not clean {folder.name} ({type(e).__name__})")
             
             space_freed_mb = space_freed / (1024 * 1024)  # Convert to MB
             video_logger.info("Cleanup completed", 
