@@ -64,12 +64,13 @@ class TestUrlAcceptance(unittest.TestCase):
                 self.assert_accepted(url, 'facebook')
 
     def test_accepts_douyin_forms(self):
-        for url in [
-            'https://www.douyin.com/video/7234567890123456789',
-            'https://v.douyin.com/iabc123/',
-        ]:
-            with self.subTest(url=url):
-                self.assert_accepted(url, 'douyin')
+        self.assert_accepted('https://www.douyin.com/video/7234567890123456789', 'douyin')
+
+    def test_douyin_short_links_are_refused_because_they_cannot_be_downloaded(self):
+        is_valid, platform, error = self.validator.validate_url('https://v.douyin.com/iabc123/')
+        self.assertFalse(is_valid)
+        self.assertEqual(platform, 'douyin')
+        self.assertTrue(error)
 
 
 class TestUrlRejection(unittest.TestCase):

@@ -81,8 +81,8 @@ class SecurityValidator:
                 r'https?://fb\.watch/[\w-]+',
             ],
             'douyin': [
+                # v.douyin.com short links have no yt-dlp extractor; use the full link
                 r'https?://(www\.)?douyin\.com/video/\d+',
-                r'https?://v\.douyin\.com/[\w-]+',
             ],
         }
         
