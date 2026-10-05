@@ -7,6 +7,14 @@ import sys
 import subprocess
 from pathlib import Path
 
+MIN_SECRET_KEY_LENGTH = 32
+# One worker with threads: the sign-in state for YouTube and the rate-limit
+# counters live in process memory, so several workers would not share them.
+GUNICORN_COMMAND = (
+    "gunicorn --workers 1 --threads 4 --timeout 900 "
+    "--bind 127.0.0.1:8000 'app_enhanced:create_app()'"
+)
+
 def check_python_version():
     """Check if Python version is compatible"""
     if sys.version_info < (3, 8):
@@ -76,6 +84,12 @@ def validate_environment():
         for var in missing_required:
             print(f"   export {var}=your_value_here")
         sys.exit(1)
+
+    secret_key = os.getenv('SECRET_KEY', '')
+    if len(secret_key) < MIN_SECRET_KEY_LENGTH:
+        print(f"❌ SECRET_KEY must be at least {MIN_SECRET_KEY_LENGTH} characters. Generate one with:")
+        print('   python -c "import secrets; print(secrets.token_hex(32))"')
+        sys.exit(1)
     
     print("\nOptional environment variables:")
     for var, description in optional_vars.items():
@@ -89,8 +103,9 @@ def run_tests():
     """Run test suite"""
     print("🧪 Running test suite...")
     try:
-        result = subprocess.run([sys.executable, "test_enhanced.py"], 
-                               capture_output=True, text=True)
+        result = subprocess.run(
+            [sys.executable, "-m", "unittest", "discover", "-s", "tests", "-t", "."],
+            capture_output=True, text=True)
         if result.returncode == 0:
             print("✅ All tests passed")
         else:
@@ -120,7 +135,9 @@ def create_production_config():
     print("⚙️  Creating production configuration...")
     
     # Create systemd service file (Linux)
-    systemd_service = """[Unit]
+    # .env must be readable only by the service user (chmod 600). The app has no
+    # login, so keep it behind an authenticating proxy or VPN, never open to the internet.
+    systemd_service = f"""[Unit]
 Description=Video Frame Extractor
 After=network.target
 
@@ -131,34 +148,53 @@ Group=www-data
 WorkingDirectory=/path/to/video_frame_extractor
 Environment=PATH=/path/to/video_frame_extractor/venv/bin
 Environment=FLASK_ENV=production
+Environment=ALLOWED_HOSTS=your-domain.com
+Environment=TRUSTED_PROXY_COUNT=1
 EnvironmentFile=/path/to/video_frame_extractor/.env
-ExecStart=/path/to/video_frame_extractor/venv/bin/gunicorn -w 4 -b 127.0.0.1:8000 app_enhanced:create_app()
+ExecStart=/path/to/video_frame_extractor/venv/bin/{GUNICORN_COMMAND}
 Restart=always
+
+# Sandboxing
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/path/to/video_frame_extractor
 
 [Install]
 WantedBy=multi-user.target
 """
-    
-    # Create nginx configuration
+
+    # Create nginx configuration (TLS certificate paths must be filled in)
     nginx_config = """server {
     listen 80;
     server_name your-domain.com;
+    return 301 https://$host$request_uri;
+}
+
+limit_req_zone $binary_remote_addr zone=video_app:10m rate=30r/m;
+
+server {
+    listen 443 ssl;
+    server_name your-domain.com;
+
+    ssl_certificate     /path/to/fullchain.pem;
+    ssl_certificate_key /path/to/privkey.pem;
+
+    # Only enable this behind authentication (basic auth, SSO proxy or VPN)
+    # auth_basic "Video Frame Extractor";
+    # auth_basic_user_file /path/to/.htpasswd;
 
     location / {
+        limit_req zone=video_app burst=10 nodelay;
         proxy_pass http://127.0.0.1:8000;
         proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-For $remote_addr;
         proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 900s;  # rendering a short happens inside the request
     }
 
-    location /static {
-        alias /path/to/video_frame_extractor/static;
-        expires 1y;
-        add_header Cache-Control "public, immutable";
-    }
-
-    client_max_body_size 100M;
+    client_max_body_size 1M;  # the app accepts no uploads
 }
 """
     
@@ -197,8 +233,8 @@ def main():
     print("3. Set up systemd service (Linux) or process manager")
     print("4. Configure SSL certificate")
     print("5. Set up monitoring and log rotation")
-    print("\nTo start the application:")
-    print("   gunicorn -w 4 -b 0.0.0.0:8000 app_enhanced:create_app()")
+    print("\nTo start the application (Linux; gunicorn does not run on Windows):")
+    print(f"   {GUNICORN_COMMAND}")
     print("\nTo access the dashboard:")
     print("   http://your-domain.com/dashboard")
 
