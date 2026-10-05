@@ -21,6 +21,7 @@ DESCRIPTION_PREVIEW_LENGTH = 200
 
 REGION_PATTERN = re.compile(r'[A-Z]{2}')
 CATEGORY_PATTERN = re.compile(r'\d{1,3}')
+ERROR_CODE_PATTERN = re.compile(r'[A-Za-z][A-Za-z0-9_]{0,63}')  # e.g. API_KEY_INVALID, quotaExceeded
 
 # Single source of truth for category names and the /api/video-categories list.
 VIDEO_CATEGORIES = {
@@ -127,6 +128,32 @@ def _to_video(item: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _error_codes(response) -> List[str]:
+    """Machine-readable codes from a Google API error body (never its free-text message)."""
+    try:
+        error = response.json().get('error') or {}
+        found = [error.get('status')]
+        found += [entry.get('reason') for key in ('details', 'errors') for entry in error.get(key) or []]
+    except (ValueError, AttributeError, TypeError):
+        return []
+    codes = [code for code in found if isinstance(code, str) and ERROR_CODE_PATTERN.fullmatch(code)]
+    return list(dict.fromkeys(codes))
+
+
+def describe_api_failure(error: Exception) -> str:
+    """
+    What to log about a failed API call: the exception type, the HTTP status and Google's
+    error codes (API_KEY_INVALID, quotaExceeded, ...). The exception text and the error
+    message are left out because they can embed the request URL or the API key.
+    """
+    parts = [type(error).__name__]
+    response = getattr(error, 'response', None)
+    if response is not None:
+        parts.append(f"HTTP {response.status_code}")
+        parts += _error_codes(response)
+    return ', '.join(parts)
+
+
 def get_youtube_trending(category: str = '0', region: str = DEFAULT_REGION,
                          max_results: int = 20) -> List[Dict[str, Any]]:
     """Fetch the most popular videos; falls back to sample data on any failure."""
@@ -155,8 +182,7 @@ def get_youtube_trending(category: str = '0', region: str = DEFAULT_REGION,
         response.raise_for_status()
         items = response.json().get('items')
     except (requests.RequestException, ValueError) as error:
-        # Only the error type is logged: exception text can embed the request URL.
-        app_logger.error(f"YouTube API request failed ({type(error).__name__})")
+        app_logger.error(f"YouTube API request failed ({describe_api_failure(error)})")
         return get_fallback_trending_data()
 
     if not items:

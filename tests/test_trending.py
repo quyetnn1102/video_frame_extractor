@@ -128,6 +128,32 @@ class TestGetYoutubeTrending(unittest.TestCase):
         self.assertNotIn(SECRET_KEY_VALUE, logged)
         self.assertNotIn('googleapis.com', logged)
 
+    def test_http_errors_log_the_status_and_google_reason_but_no_key_or_message(self):
+        body = {'error': {'code': 400, 'status': 'INVALID_ARGUMENT',
+                          'message': f'API key not valid: {SECRET_KEY_VALUE}',
+                          'details': [{'reason': 'API_KEY_INVALID'}],
+                          'errors': [{'reason': 'badRequest'}]}}
+        response = Mock(status_code=400)
+        response.json.return_value = body
+        response.raise_for_status.side_effect = requests.HTTPError('400 for url', response=response)
+        with patch('trending.requests.get', return_value=response), \
+                patch('trending.app_logger') as log:
+            self.assertEqual(trending.get_youtube_trending(), trending.get_fallback_trending_data())
+
+        logged = ' '.join(str(call) for call in log.mock_calls)
+        for expected in ['HTTPError', 'HTTP 400', 'INVALID_ARGUMENT', 'API_KEY_INVALID', 'badRequest']:
+            self.assertIn(expected, logged)
+        self.assertNotIn(SECRET_KEY_VALUE, logged)
+
+    def test_an_unreadable_error_body_still_logs_the_status(self):
+        response = Mock(status_code=503)
+        response.json.side_effect = ValueError('not json')
+        response.raise_for_status.side_effect = requests.HTTPError('503', response=response)
+        with patch('trending.requests.get', return_value=response), \
+                patch('trending.app_logger') as log:
+            trending.get_youtube_trending()
+        self.assertIn('HTTP 503', ' '.join(str(call) for call in log.mock_calls))
+
     def test_malformed_items_are_skipped(self):
         items = [{'no_id': True}, api_item('good')]
         with patch('trending.requests.get', return_value=api_response(items)):
