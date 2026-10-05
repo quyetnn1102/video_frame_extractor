@@ -36,7 +36,7 @@ dependencies = [
     # MoviePy's progress logger; subclassed to report render progress and cancel jobs
     "proglog==0.1.12",
     "imageio-ffmpeg>=0.4",
-    "pillow==10.0.1",
+    "pillow==12.3.0",
 
     # YouTube upload (optional feature)
     "google-api-python-client==2.100.0",
