@@ -125,7 +125,8 @@ class TestLockfile(unittest.TestCase):
         pins = [line for line in RUNTIME + DEV if '==' in line]
         self.assertGreater(len(pins), 10)
         for line in pins:
-            name, version = re.match(r'([A-Za-z0-9_.\-]+)==([^;\s]+)', line).groups()
+            # an exact pin may carry extras: "yt-dlp[curl-cffi]==2026.8.19"
+            name, version = re.match(r'([A-Za-z0-9_.\-]+)(?:\[[^\]]*\])?==([^;\s]+)', line).groups()
             with self.subTest(pin=line):
                 self.assertEqual(locked.get(normalize(name)), version,
                                  f'uv.lock disagrees with {line}: run `uv lock`')

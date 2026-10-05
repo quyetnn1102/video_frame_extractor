@@ -202,6 +202,47 @@ class TestInstagramCookies(unittest.TestCase):
         self.assertEqual(len(attempts), 2)  # cookie file, then plain
 
 
+class TestTikTokErrors(unittest.TestCase):
+    """TikTok sends a bot-check page to plain Python clients; the message should say what to do."""
+    YTDLP_ERROR = ('ERROR: [TikTok] 7667906369852312852: Unexpected response from webpage request; '
+                   'please report this issue on https://github.com/yt-dlp/yt-dlp/issues')
+
+    def setUp(self):
+        self.processor = video_processor.TikTokProcessor()
+
+    def message(self, impersonation_available):
+        with patch.object(video_processor, 'browser_impersonation_available',
+                          return_value=impersonation_available):
+            return self.processor.process_download_error(self.YTDLP_ERROR)
+
+    def test_missing_curl_cffi_is_named_with_the_command_that_fixes_it(self):
+        message = self.message(impersonation_available=False)
+        self.assertIn('uv sync', message)
+        self.assertIn('curl-cffi', message)
+
+    def test_when_tiktok_still_refuses_the_user_is_told_to_wait_or_use_the_share_link(self):
+        message = self.message(impersonation_available=True)
+        self.assertNotIn('uv sync', message)
+        self.assertIn('vm.tiktok.com', message)
+
+    def test_the_message_does_not_send_users_to_the_yt_dlp_bug_tracker(self):
+        for available in (True, False):
+            with self.subTest(impersonation_available=available):
+                message = self.message(available)
+                self.assertNotIn('report this issue', message)
+                self.assertNotIn('yt-dlp -U', message)
+
+    def test_format_errors_keep_their_existing_advice(self):
+        message = self.processor.process_download_error('Requested format is not available')
+        self.assertIn('region-blocked', message)
+
+
+class TestBrowserImpersonation(unittest.TestCase):
+    def test_this_environment_can_impersonate_a_browser(self):
+        """Without curl_cffi yt-dlp cannot read TikTok at all (see pyproject.toml)."""
+        self.assertTrue(video_processor.browser_impersonation_available())
+
+
 class TestVideoInfo(unittest.TestCase):
     @patch('video_processor.yt_dlp.YoutubeDL')
     def test_missing_description_does_not_break_info_extraction(self, mock_ytdl):

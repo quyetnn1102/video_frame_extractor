@@ -1,6 +1,7 @@
 """
 Enhanced video processing module with improved error handling and performance
 """
+import importlib.util
 import os
 import cv2
 import yt_dlp
@@ -30,6 +31,8 @@ YTDLP_ALLOWED_EXTRACTORS = (
 
 MAX_DESCRIPTION_LENGTH = 500
 BYTES_PER_MB = 1024 * 1024
+# yt-dlp's wording (lower case) when TikTok serves its bot-check page instead of the video page
+TIKTOK_BLOCKED_MARKER = 'unexpected response from webpage request'
 
 # Modern sites (YouTube first) serve video and audio as separate streams, with no single
 # "best" file, so a selector like best[height<=720] finds nothing. Take video+audio and let
@@ -129,6 +132,15 @@ def make_size_limit_hook(limit_bytes: int):
     return hook
 
 
+def browser_impersonation_available() -> bool:
+    """
+    True when yt-dlp can imitate a real browser's connection, which needs the curl_cffi
+    package (the "curl-cffi" extra in pyproject.toml). TikTok answers plain Python clients
+    with a bot-check page, so without it every TikTok download fails.
+    """
+    return importlib.util.find_spec('curl_cffi') is not None
+
+
 class PlatformProcessor:
     """Base class for platform-specific video processing"""
 
@@ -190,6 +202,14 @@ class TikTokProcessor(PlatformProcessor):
         super().__init__('tiktok')
 
     def process_download_error(self, error: str) -> str:
+        if TIKTOK_BLOCKED_MARKER in error.lower():
+            if not browser_impersonation_available():
+                return ("TikTok Error: TikTok did not send the video page because it refuses plain "
+                        "Python requests. Run `uv sync` to install the browser-impersonation "
+                        "package (curl-cffi), then restart the app.")
+            return ("TikTok Error: TikTok did not send the video page. It sometimes blocks "
+                    "automated requests for a while. Try again in a few minutes, or use the "
+                    "vm.tiktok.com share link.")
         if 'format' in error.lower():
             return (
                 f"TikTok Error: {error}\n\n"

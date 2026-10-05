@@ -5,6 +5,8 @@ from pathlib import Path
 
 TEMPLATES_DIR = Path(__file__).resolve().parent.parent / 'templates'
 TEMPLATE_FILES = sorted(TEMPLATES_DIR.glob('*.html'))
+STATIC_DIR = Path(__file__).resolve().parent.parent / 'static'
+STYLESHEET = STATIC_DIR / 'css' / 'app.css'
 
 ELEMENT_ID = re.compile(r'\bid="([^"]+)"')
 SCRIPT_ID_LOOKUP = re.compile(r"""(?:getElementById\(|\$\()\s*['"]([^'"]+)['"]\s*\)""")
@@ -52,6 +54,32 @@ class TestTemplates(unittest.TestCase):
         self.assertNotIn('video_path', text, 'the upload API takes a file name, not a server path')
         self.assertNotIn('type="file"', text, 'the API takes a URL, not an uploaded file')
 
+    def test_earlier_shorts_are_listed_again_when_the_page_opens(self):
+        """The result used to live only in the page, so leaving or refreshing it lost the short."""
+        text = (TEMPLATES_DIR / 'create_short.html').read_text(encoding='utf-8')
+        self.assertIn("fetch('/api/shorts')", text)
+        self.assertIn("'/api/shorts/delete'", text)
+        self.assertIn('loadLibrary();', text, 'the list must be requested on page load')
+        section = re.search(r'<section[^>]*id="resultsSection"[^>]*>', text).group(0)
+        self.assertNotIn('hidden', section, 'the list of shorts must be visible on a fresh page')
+
+    def test_the_last_extraction_is_remembered_by_the_home_page(self):
+        text = (TEMPLATES_DIR / 'index.html').read_text(encoding='utf-8')
+        self.assertIn('localStorage.setItem', text)
+        self.assertIn('savedExtraction()', text)
+
+    def test_link_fields_show_a_preview_from_the_shared_script(self):
+        script = STATIC_DIR / 'js' / 'link-preview.js'
+        self.assertTrue(script.is_file())
+        for page, slot in [('index.html', 'linkPreview'), ('create_short.html', 'shortLinkPreview')]:
+            with self.subTest(template=page):
+                text = (TEMPLATES_DIR / page).read_text(encoding='utf-8')
+                self.assertIn('src="/static/js/link-preview.js"', text)
+                self.assertIn(f'id="{slot}"', text)
+                self.assertIn(f"$('{slot}')", text)
+        self.assertNotIn('innerHTML', script.read_text(encoding='utf-8'),
+                         'titles and channel names come from other sites')
+
     def test_extraction_warnings_are_shown_to_the_user(self):
         """/api/extract reports timestamps it could not extract; the page must not drop them."""
         text = (TEMPLATES_DIR / 'index.html').read_text(encoding='utf-8')
@@ -71,8 +99,21 @@ class TestTemplates(unittest.TestCase):
         self.assertNotIn('await', handler)
         self.assertIn('id="cancelLoadingBtn"', text)
 
+    def test_pages_share_one_stylesheet_and_its_fonts_exist(self):
+        for path in TEMPLATE_FILES:
+            with self.subTest(template=path.name):
+                self.assertIn('href="/static/css/app.css"', path.read_text(encoding='utf-8'))
+        css = STYLESHEET.read_text(encoding='utf-8')
+        font_files = re.findall(r'url\("([^"]+)"\)', css)
+        self.assertTrue(font_files, 'the stylesheet should load its fonts from this origin')
+        for relative in font_files:
+            with self.subTest(font=relative):
+                self.assertTrue((STYLESHEET.parent / relative).resolve().is_file())
+
     def test_loading_overlay_is_hidden_until_needed_and_covers_the_page(self):
-        text = (TEMPLATES_DIR / 'create_short.html').read_text(encoding='utf-8')
+        # the rule lives in the shared stylesheet; the page must contain the overlay it styles
+        self.assertIn('id="loadingOverlay"', (TEMPLATES_DIR / 'create_short.html').read_text(encoding='utf-8'))
+        text = STYLESHEET.read_text(encoding='utf-8')
         rule = re.search(r'\.loading-overlay\s*\{([^}]*)\}', text).group(1)
         for declaration in ['position: fixed', 'display: none', 'z-index']:
             self.assertIn(declaration, rule)
@@ -84,15 +125,13 @@ class TestTemplates(unittest.TestCase):
 
     def test_every_third_party_asset_has_a_subresource_integrity_hash(self):
         """A compromised CDN file would otherwise run in the origin that can publish to YouTube."""
+        # The pages currently load nothing from a CDN; this guards any asset added later
         tag = re.compile(r'<(?:script|link)\b[^>]*\b(?:src|href)="https?://[^"]+"[^>]*>')
-        checked = 0
         for path in TEMPLATE_FILES:
             for element in tag.findall(path.read_text(encoding='utf-8')):
-                checked += 1
                 with self.subTest(template=path.name, element=element[:90]):
                     self.assertRegex(element, r'integrity="sha384-[A-Za-z0-9+/]{64}"')
                     self.assertIn('crossorigin="anonymous"', element)
-        self.assertEqual(checked, 12)  # three assets in each of the four pages
 
     def test_external_assets_come_from_hosts_allowed_by_the_csp(self):
         import app_enhanced

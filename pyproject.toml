@@ -22,7 +22,10 @@ dependencies = [
 
     # Video download. Platform extractors change often: upgrade yt-dlp first when downloads
     # break (uv lock --upgrade-package yt-dlp).
-    "yt-dlp==2026.8.19",
+    # The curl-cffi extra lets yt-dlp present itself as a real browser. TikTok sends plain
+    # Python clients a bot-check page ("Unexpected response from webpage request"), so without
+    # it no TikTok link can be read, even on the newest yt-dlp.
+    "yt-dlp[curl-cffi]==2026.8.19",
 
     # Frame extraction and short-video rendering. MoviePy bundles its own FFmpeg through
     # imageio-ffmpeg, which the app also uses directly to merge downloaded streams.

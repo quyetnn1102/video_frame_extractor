@@ -24,6 +24,7 @@ from werkzeug.middleware.proxy_fix import ProxyFix
 
 from config import get_config
 from database import db_manager, get_analytics, get_recent_requests
+from library import list_shorts
 from logger import LogContext, api_logger, app_logger
 from short_video import (ShortVideoError, create_short, normalize_quality,
                          normalize_text_overlay, parse_duration, parse_start_time)
@@ -557,6 +558,29 @@ def create_app() -> Flask:
         if path is None:
             return json_error('Not found', 404)
         return send_from_directory(config.SHORTS_FOLDER, path.name)
+
+    @app.route('/api/shorts')
+    def list_generated_shorts():
+        return jsonify({'success': True, 'shorts': list_shorts(config.SHORTS_FOLDER)})
+
+    @app.route('/api/shorts/delete', methods=['POST'])
+    @limiter.limit("30 per minute")
+    def delete_generated_short():
+        data = get_json_body()
+        filename = data.get('filename') if data else None
+        if not isinstance(filename, str):
+            return json_error('filename is required', 400)
+        path = resolve_in_folder(config.SHORTS_FOLDER, filename, ('.mp4',))
+        if path is None:
+            return json_error('Not found', 404)
+        try:
+            path.unlink()
+        except PermissionError:
+            return json_error('The short is open in another program. Close it and try again.', 409)
+        except OSError as error:
+            app_logger.error(f"Could not delete a short ({type(error).__name__})")
+            return json_error('Could not delete the short', 500)
+        return jsonify({'success': True})
 
     @app.route('/api/cleanup', methods=['POST'])
     @limiter.limit("5 per minute")

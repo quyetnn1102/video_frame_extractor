@@ -3,739 +3,457 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>VideoExtract - Extract Frames Like a Pro</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-1BmE4kWBq78iYhFldvKuhfTAU6auU8tT94WrHftjDbrCEXSU1oBoqyl2QvZ6jIW3" crossorigin="anonymous">
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" integrity="sha384-3B6NwesSXE7YJlcLI9RpRqGf2p/EgVH8BgoKTaUrmKNDkHPStTQ3EyoYjCGXaOTS" crossorigin="anonymous">
+    <title>Extract frames - VideoExtract</title>
+    <link rel="stylesheet" href="/static/css/app.css">
     <style>
-        :root {
-            --youtube-red: #ff0000;
-            --youtube-dark: #0f0f0f;
-            --youtube-dark-secondary: #1c1c1c;
-            --youtube-text: #ffffff;
-            --youtube-text-secondary: #aaa;
-            --instagram-gradient: linear-gradient(45deg, #f09433 0%, #e6683c 25%, #dc2743 50%, #cc2366 75%, #bc1888 100%);
-            --facebook-blue: #1877f2;
-            --accent-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 50%, #f093fb 100%);
-            --card-shadow: 0 2px 10px rgba(0,0,0,0.1);
-            --card-shadow-hover: 0 8px 25px rgba(0,0,0,0.15);
-        }
-
-        * {
-            scrollbar-width: thin;
-            scrollbar-color: var(--youtube-text-secondary) var(--youtube-dark-secondary);
-        }
-
-        *::-webkit-scrollbar {
-            width: 8px;
-        }
-
-        *::-webkit-scrollbar-track {
-            background: var(--youtube-dark-secondary);
-        }
-
-        *::-webkit-scrollbar-thumb {
-            background-color: var(--youtube-text-secondary);
-            border-radius: 20px;
-        }
-
-        body {
-            background: var(--youtube-dark);
-            color: var(--youtube-text);
-            font-family: 'Roboto', 'YouTube Sans', -apple-system, BlinkMacSystemFont, sans-serif;
-            line-height: 1.6;
-        }
-
-        /* Navigation Bar - YouTube Style */
-        .navbar {
-            background: var(--youtube-dark-secondary) !important;
-            border-bottom: 1px solid #333;
-            backdrop-filter: blur(10px);
-            padding: 8px 0;
-        }
-
-        .navbar-brand {
-            font-weight: 700;
-            font-size: 1.5rem;
-            color: var(--youtube-text) !important;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-
-        .navbar-brand i {
-            color: var(--youtube-red);
-            font-size: 1.8rem;
-        }
-
-        .nav-link {
-            color: var(--youtube-text-secondary) !important;
-            font-weight: 500;
-            padding: 8px 16px !important;
-            border-radius: 20px;
-            margin: 0 4px;
-            transition: all 0.3s ease;
-            display: flex;
-            align-items: center;
-            gap: 6px;
-        }
-
-        .nav-link:hover {
-            color: var(--youtube-text) !important;
-            background: rgba(255, 255, 255, 0.1);
-        }
-
-        .nav-link.active {
-            background: var(--youtube-red);
-            color: white !important;
-        }
-
-        /* Container */
-        .main-container {
-            max-width: 1200px;
-            margin: 0 auto;
-            padding: 20px;
-        }
-
-        /* Hero Section - Instagram/YouTube Style */
-        .hero-section {
-            background: var(--instagram-gradient);
-            border-radius: 16px;
-            padding: 60px 40px;
-            text-align: center;
-            margin-bottom: 40px;
-            position: relative;
-            overflow: hidden;
-        }
-
-        .hero-section::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            bottom: 0;
-            background: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 1000"><polygon fill="%23ffffff10" points="0,1000 1000,0 1000,1000"/></svg>');
-            pointer-events: none;
-        }
-
-        .hero-content {
-            position: relative;
-            z-index: 1;
-        }
-
-        .hero-title {
-            font-size: 3rem;
-            font-weight: 900;
-            margin-bottom: 16px;
-            text-shadow: 0 2px 4px rgba(0,0,0,0.3);
-        }
-
-        .hero-subtitle {
-            font-size: 1.25rem;
-            opacity: 0.95;
-            margin-bottom: 32px;
-            font-weight: 400;
-        }
-
-        .platform-badges {
-            display: flex;
-            justify-content: center;
-            gap: 12px;
-            flex-wrap: wrap;
-        }
-
-        .platform-badge {
-            background: rgba(255, 255, 255, 0.2);
-            color: white;
-            padding: 8px 16px;
-            border-radius: 20px;
-            font-size: 0.9rem;
-            font-weight: 600;
-            backdrop-filter: blur(10px);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            transition: all 0.3s ease;
-        }
-
-        .platform-badge:hover {
-            background: rgba(255, 255, 255, 0.3);
-            transform: translateY(-2px);
-        }
-
-        /* Feature Cards - Social Media Style */
-        .features-grid {
+        .extract-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-            gap: 24px;
-            margin-bottom: 40px;
+            grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+            grid-template-areas:
+                "link time"
+                "go   time";
+            gap: 1.75rem 2.5rem;
         }
 
-        .feature-card {
-            background: var(--youtube-dark-secondary);
-            border-radius: 16px;
-            padding: 32px 24px;
-            text-align: center;
-            border: 1px solid #333;
-            transition: all 0.3s ease;
-            position: relative;
-            overflow: hidden;
-        }
+        .extract-grid .field-link { grid-area: link; }
+        .extract-grid .field-time { grid-area: time; display: flex; flex-direction: column; }
+        .extract-grid .go { grid-area: go; align-self: end; }
 
-        .feature-card::before {
-            content: '';
-            position: absolute;
-            top: 0;
-            left: 0;
-            right: 0;
-            height: 4px;
-            background: var(--accent-gradient);
-        }
-
-        .feature-card:hover {
-            transform: translateY(-8px);
-            box-shadow: var(--card-shadow-hover);
-            border-color: #555;
-        }
-
-        .feature-icon {
-            font-size: 3rem;
-            margin-bottom: 16px;
-            background: var(--accent-gradient);
-            -webkit-background-clip: text;
-            -webkit-text-fill-color: transparent;
-            background-clip: text;
-        }
-
-        .feature-title {
-            font-size: 1.25rem;
-            font-weight: 700;
-            margin-bottom: 12px;
-            color: var(--youtube-text);
-        }
-
-        .feature-description {
-            color: var(--youtube-text-secondary);
-            font-size: 0.95rem;
-            line-height: 1.5;
-        }
-
-        /* Main Form - Modern Card Style */
-        .upload-section {
-            background: var(--youtube-dark-secondary);
-            border-radius: 16px;
-            padding: 40px;
-            border: 1px solid #333;
-            margin-bottom: 32px;
-            box-shadow: var(--card-shadow);
-        }
-
-        .section-title {
-            font-size: 1.75rem;
-            font-weight: 700;
-            margin-bottom: 8px;
-            color: var(--youtube-text);
-            display: flex;
-            align-items: center;
-            gap: 12px;
-        }
-
-        .section-title i {
-            color: var(--youtube-red);
-        }
-
-        .section-subtitle {
-            color: var(--youtube-text-secondary);
-            margin-bottom: 32px;
-        }
-
-        /* Form Controls */
-        .form-label {
-            color: var(--youtube-text);
-            font-weight: 600;
-            margin-bottom: 8px;
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-
-        .form-control {
-            background: var(--youtube-dark);
-            border: 2px solid #444;
-            border-radius: 12px;
-            padding: 16px;
-            color: var(--youtube-text);
-            font-size: 1rem;
-            transition: all 0.3s ease;
-        }
-
-        .form-control:focus {
-            background: var(--youtube-dark);
-            border-color: var(--youtube-red);
-            box-shadow: 0 0 0 4px rgba(255, 0, 0, 0.1);
-            color: var(--youtube-text);
-        }
-
-        .form-control::placeholder {
-            color: var(--youtube-text-secondary);
-        }
-
-        .form-text {
-            color: var(--youtube-text-secondary);
-            font-size: 0.875rem;
-            margin-top: 6px;
-        }
-
-        /* Buttons */
-        .btn-primary {
-            background: var(--youtube-red);
-            border: none;
-            border-radius: 12px;
-            padding: 16px 32px;
-            font-weight: 700;
-            font-size: 1rem;
-            transition: all 0.3s ease;
-            display: inline-flex;
-            align-items: center;
-            gap: 8px;
-        }
-
-        .btn-primary:hover {
-            background: #cc0000;
-            transform: translateY(-2px);
-            box-shadow: 0 8px 25px rgba(255, 0, 0, 0.3);
-        }
-
-        .btn-outline-primary {
-            border: 2px solid var(--youtube-red);
-            color: var(--youtube-red);
-            background: transparent;
-            border-radius: 12px;
-            padding: 14px 28px;
-            font-weight: 600;
-            transition: all 0.3s ease;
-        }
-
-        .btn-outline-primary:hover {
-            background: var(--youtube-red);
-            color: white;
-        }
-
-        /* Timestamp Input */
-        .timestamp-input {
-            background: var(--youtube-dark) !important;
-            border: 2px dashed #555 !important;
-            border-radius: 12px;
-            min-height: 120px;
+        /* A log sheet: ruled lines, one timecode per line */
+        .timecodes {
+            flex: 1;
+            min-height: 11rem;
             resize: vertical;
+            font-family: var(--font-time);
+            font-size: 0.95rem;
+            line-height: 1.9rem;
+            padding-block: 0.45rem;
+            background:
+                repeating-linear-gradient(transparent 0 calc(1.9rem - 1px), #d3dad2 calc(1.9rem - 1px) 1.9rem) 0 0.45rem local,
+                #fff;
         }
 
-        /* Results Section */
-        .results-section {
-            background: var(--youtube-dark-secondary);
-            border-radius: 16px;
-            padding: 40px;
-            border: 1px solid #333;
-            display: none;
+        .link-status:not(:empty) {
+            margin-top: 0.75rem;
         }
 
-        .results-grid {
+        .link-status .tips {
+            display: block;
+            margin-top: 0.25rem;
+            font-size: var(--text-sm);
+            color: var(--ink-soft);
+        }
+
+        .contact {
+            margin-top: clamp(2.5rem, 6vw, 4.5rem);
+        }
+
+        /* The film strip: ghost frames mirror the timecodes you type, then fill with real frames */
+        .strip {
             display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-            gap: 24px;
+            grid-template-columns: repeat(auto-fill, minmax(16rem, 1fr));
+            gap: 1rem;
+            margin: 0;
+            padding: 0;
+            list-style: none;
         }
 
-        .frame-card {
-            background: var(--youtube-dark);
-            border-radius: 12px;
+        .frame {
+            padding: 0 0.55rem 0.4rem;
+            color: var(--strip-ink);
+            background: var(--strip);
+            border-radius: 2px;
+            box-shadow: 0 14px 20px -16px rgba(26, 36, 51, 0.6);
+        }
+
+        .frame::before {
+            content: "";
+            display: block;
+            height: 1rem;
+            background: linear-gradient(90deg, var(--table) 0 0.55rem, transparent 0.55rem) 0 50% / 1.1rem 0.38rem repeat-x;
+        }
+
+        .frame-pic {
+            aspect-ratio: 16 / 9;
+            background: #0e1115;
             overflow: hidden;
-            border: 1px solid #444;
-            transition: all 0.3s ease;
         }
 
-        .frame-card:hover {
-            transform: translateY(-4px);
-            box-shadow: var(--card-shadow-hover);
-        }
-
-        .frame-image {
+        .frame-pic img {
+            display: block;
             width: 100%;
-            height: 200px;
+            height: 100%;
             object-fit: cover;
         }
 
-        .frame-info {
-            padding: 16px;
+        .frame.is-ghost .frame-pic {
+            background: repeating-linear-gradient(135deg, #2b3139 0 7px, #252a31 7px 14px);
         }
 
-        .frame-title {
-            font-weight: 600;
-            margin-bottom: 12px;
-            color: var(--youtube-text);
-        }
-
-        .frame-download {
-            background: var(--youtube-red);
-            color: white;
-            border: none;
-            padding: 8px 16px;
-            border-radius: 8px;
-            font-weight: 600;
-            text-decoration: none;
-            display: inline-flex;
+        .frame-meta {
+            display: flex;
             align-items: center;
-            gap: 6px;
-            transition: all 0.3s ease;
+            justify-content: space-between;
+            gap: 1rem;
+            padding-top: 0.55rem;
         }
 
-        .frame-download:hover {
-            background: #cc0000;
-            color: white;
-            text-decoration: none;
-        }
-
-        /* Loading Overlay */
-        .loading-overlay {
-            display: none;
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
+        .frame-gone {
+            display: grid;
+            place-items: center;
             height: 100%;
-            background: rgba(0, 0, 0, 0.9);
-            backdrop-filter: blur(5px);
-            z-index: 9999;
-            justify-content: center;
-            align-items: center;
+            padding: 1rem;
+            text-align: center;
+            font-size: var(--text-sm);
+            color: var(--strip-dim);
         }
 
-        .loading-content {
-            background: var(--youtube-dark-secondary);
-            border: 1px solid #333;
-            border-radius: 20px;
-            color: var(--youtube-text);
+        .frame-code {
+            font-size: 1rem;
+            letter-spacing: 0.02em;
         }
 
-        /* Responsive */
-        @media (max-width: 768px) {
-            .hero-title {
-                font-size: 2rem;
-            }
-            
-            .upload-section, .results-section {
-                padding: 24px;
-            }
-            
-            .features-grid {
-                grid-template-columns: 1fr;
+        .frame-note {
+            font-size: var(--text-sm);
+            color: var(--strip-dim);
+        }
+
+        .frame.is-ghost .frame-code {
+            color: var(--strip-dim);
+        }
+
+        .frame a {
+            font-weight: 650;
+            font-size: var(--text-sm);
+        }
+
+        .frame a:focus-visible {
+            outline-color: #fff;
+        }
+
+        /* The one orchestrated moment: frames develop in order when the extraction finishes */
+        .frame.is-new .frame-pic img {
+            animation: develop 0.7s ease-out both;
+            animation-delay: calc(var(--i, 0) * 110ms);
+        }
+
+        @keyframes develop {
+            from { opacity: 0; filter: brightness(2.4) contrast(0.5); }
+            to { opacity: 1; filter: none; }
+        }
+
+        @media (max-width: 52rem) {
+            .extract-grid {
+                grid-template-columns: minmax(0, 1fr);
+                grid-template-areas: "link" "time" "go";
             }
         }
     </style>
 </head>
 <body>
-    <!-- Navigation - YouTube Style -->
-    <nav class="navbar navbar-expand-lg sticky-top">
-        <div class="container-fluid">
-            <a class="navbar-brand" href="/">
-                <i class="fab fa-youtube"></i>
-                VideoExtract
-            </a>
-            <div class="navbar-nav ms-auto">
-                <a class="nav-link active" href="/">
-                    <i class="fas fa-images"></i>
-                    Extract Frames
-                </a>
-                <a class="nav-link" href="/create-short">
-                    <i class="fas fa-cut"></i>
-                    Create Short
-                </a>
-                <a class="nav-link" href="/trending">
-                    <i class="fas fa-fire"></i>
-                    Trending
-                </a>
-                <a class="nav-link" href="/dashboard">
-                    <i class="fas fa-chart-line"></i>
-                    Analytics
-                </a>
-            </div>
-        </div>
-    </nav>
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="bar">
+        <a class="wordmark" href="/"><span class="mark" aria-hidden="true"></span>VideoExtract</a>
+        <nav aria-label="Main">
+            <a href="/" aria-current="page">Extract frames</a>
+            <a href="/create-short">Create short</a>
+            <a href="/trending">Trending</a>
+            <a href="/dashboard">Dashboard</a>
+        </nav>
+    </header>
 
-    <div class="main-container">
-        <!-- Hero Section -->
-        <div class="hero-section">
-            <div class="hero-content">
-                <h1 class="hero-title">
-                    <i class="fas fa-video"></i>
-                    Extract Video Frames
-                </h1>
-                <p class="hero-subtitle">
-                    Professional frame extraction from any video platform - YouTube, TikTok, Instagram & more
-                </p>
-                <div class="platform-badges">
-                    <span class="platform-badge">
-                        <i class="fab fa-youtube"></i> YouTube
-                    </span>
-                    <span class="platform-badge">
-                        <i class="fab fa-tiktok"></i> TikTok
-                    </span>
-                    <span class="platform-badge">
-                        <i class="fab fa-instagram"></i> Instagram
-                    </span>
-                    <span class="platform-badge">
-                        <i class="fab fa-facebook"></i> Facebook
-                    </span>
-                    <span class="platform-badge">
-                        <i class="fas fa-globe"></i> Douyin
-                    </span>
-                </div>
-            </div>
+    <main id="main" class="page">
+        <div class="page-head">
+            <h1>Pull any frame from a video.</h1>
+            <p>Paste a link, list the moments you want as timecodes, and get one image for each. Works with YouTube, TikTok, Instagram, Facebook and Douyin.</p>
         </div>
 
-        <!-- Features Grid -->
-        <div class="features-grid">
-            <div class="feature-card">
-                <i class="fas fa-bolt feature-icon"></i>
-                <h5 class="feature-title">Lightning Fast</h5>
-                <p class="feature-description">Extract frames in seconds with optimized processing algorithms</p>
-            </div>
-            <div class="feature-card">
-                <i class="fas fa-globe feature-icon"></i>
-                <h5 class="feature-title">Multi-Platform</h5>
-                <p class="feature-description">Works with all major video platforms and formats</p>
-            </div>
-            <div class="feature-card">
-                <i class="fas fa-crosshairs feature-icon"></i>
-                <h5 class="feature-title">Precise Control</h5>
-                <p class="feature-description">Extract frames at exact timestamps with millisecond accuracy</p>
-            </div>
-        </div>
-
-        <!-- Upload Section -->
-        <div class="upload-section">
-            <h2 class="section-title">
-                <i class="fas fa-link"></i>
-                Extract Frames from Video
-            </h2>
-            <p class="section-subtitle">Paste your video URL and specify timestamps to extract high-quality frames</p>
-            
-            <form id="extractForm">
-                <div class="row mb-4">
-                    <div class="col-md-8">
-                        <label for="videoUrl" class="form-label">
-                            <i class="fas fa-link"></i>
-                            Video URL
-                        </label>
-                        <input type="url" class="form-control" id="videoUrl" 
-                               placeholder="https://www.youtube.com/watch?v=dQw4w9WgXcQ" required>
-                        <div class="form-text">
-                            Paste a video URL from YouTube, TikTok, Instagram, Facebook, or Douyin
-                        </div>
+        <form id="extractForm" class="sheet">
+            <div class="extract-grid">
+                <div class="field field-link">
+                    <label for="videoUrl">Video link</label>
+                    <div class="input-row">
+                        <input type="url" id="videoUrl" required autocomplete="off"
+                               placeholder="https://www.youtube.com/watch?v=dQw4w9WgXcQ">
+                        <button type="button" class="btn" id="validateBtn">Check link</button>
                     </div>
-                    <div class="col-md-4">
-                        <label class="form-label">
-                            <i class="fas fa-check-circle"></i>
-                            URL Validation
-                        </label>
-                        <button type="button" class="btn btn-outline-primary w-100" id="validateBtn">
-                            <i class="fas fa-search"></i>
-                            Validate URL
-                        </button>
+                    <p class="hint">Only use videos you own or have permission to use.</p>
+                    <div class="link-status" id="linkStatus" role="status"></div>
+                    <div class="preview-slot" id="linkPreview" aria-live="polite"></div>
+                </div>
+
+                <div class="field field-time">
+                    <label for="timestamps">Timecodes</label>
+                    <textarea class="timecodes" id="timestamps" rows="5" required spellcheck="false"
+                              autocomplete="off" placeholder="0:05&#10;0:30&#10;1:15"></textarea>
+                    <p class="hint">One per line, as m:ss or h:mm:ss.</p>
+                </div>
+
+                <div class="go stack">
+                    <div id="formStatus" role="alert"></div>
+                    <div class="actions">
+                        <button type="submit" class="btn btn-primary">Extract frames</button>
                     </div>
                 </div>
+            </div>
+        </form>
 
-                <div class="mb-4">
-                    <label for="timestamps" class="form-label">
-                        <i class="fas fa-clock"></i>
-                        Timestamps (one per line)
-                    </label>
-                    <textarea class="form-control timestamp-input" id="timestamps" rows="4" 
-                              placeholder="0:05&#10;0:30&#10;1:15&#10;2:45" required></textarea>
-                    <div class="form-text">
-                        Enter timestamps in format: mm:ss or h:mm:ss (e.g., 0:05, 1:30, 2:15)
-                    </div>
-                </div>
-
-                <div class="text-center">
-                    <button type="submit" class="btn btn-primary btn-lg">
-                        <i class="fas fa-images"></i>
-                        Extract Frames
-                    </button>
-                </div>
-            </form>
-        </div>
-
-        <!-- Results Section -->
-        <div class="results-section" id="resultsSection">
-            <h3 class="section-title">
-                <i class="fas fa-images"></i>
-                Extracted Frames
-            </h3>
+        <section class="contact" id="resultsSection" aria-labelledby="stripHeading">
+            <div class="section-head">
+                <h2 id="stripHeading">Frames</h2>
+                <p id="stripSummary"></p>
+            </div>
             <div id="extractWarnings"></div>
-            <div id="framesContainer" class="results-grid">
-                <!-- Frames will be displayed here -->
-            </div>
+            <ul id="framesContainer" class="strip"></ul>
+        </section>
+    </main>
+
+    <div class="loading-overlay" id="loadingOverlay" role="status" aria-live="polite">
+        <div class="loading-box">
+            <span class="mark is-scanning" aria-hidden="true"></span>
+            <h2>Pulling your frames</h2>
+            <p id="loadingMessage">Downloading the video and extracting frames. This can take a minute.</p>
         </div>
     </div>
 
-    <!-- Loading Overlay -->
-    <div class="loading-overlay" id="loadingOverlay">
-        <div class="loading-content">
-            <div class="spinner-border text-primary mb-3" style="width: 3rem; height: 3rem;">
-                <span class="visually-hidden">Loading...</span>
-            </div>
-            <h4>Processing Video...</h4>
-            <p id="loadingMessage">Downloading and extracting frames, please wait...</p>
-            <div class="progress mt-3">
-                <div class="progress-bar progress-bar-striped progress-bar-animated" style="width: 100%"></div>
-            </div>
-        </div>
-    </div>
-
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js" integrity="sha384-ka7Sk0Gln4gmtz2MlQnikT1wXgYsOg+OMhuP+IlRH9sENBO0LRn5q+8nbTov4+1p" crossorigin="anonymous"></script>
+    <script src="/static/js/link-preview.js"></script>
     <script>
-        // Auto-fill URL and title from query parameters
-        document.addEventListener('DOMContentLoaded', function() {
-            const urlParams = new URLSearchParams(window.location.search);
-            const url = urlParams.get('url');
-            const title = urlParams.get('title');
-            
-            if (url) {
-                document.getElementById('videoUrl').value = url;
-            }
-            
-            if (title) {
-                console.log('Video title:', title);
-            }
-        });
+        (function () {
+            'use strict';
 
-        // URL Validation
-        document.getElementById('validateBtn').addEventListener('click', async function() {
-            const url = document.getElementById('videoUrl').value.trim();
-            if (!url) {
-                alert('Please enter a video URL first');
-                return;
+            const STORAGE_KEY = 'videoextract.lastExtraction';
+            const SAFE_FILE_NAME = /^[\w.-]+$/;
+            const MAX_GHOST_FRAMES = 12;
+            const SAMPLE_TIMECODES = ['0:05', '0:30', '1:15'];
+            const $ = (id) => document.getElementById(id);
+            let hasResults = false;   // real frames replace the preview until the next extraction
+            let busy = false;
+
+            // Server text (platform names, warnings, file names) is untrusted for display:
+            // everything below is built with textContent / addEventListener, never HTML strings.
+            function element(tag, className, text) {
+                const node = document.createElement(tag);
+                if (className) node.className = className;
+                if (text !== undefined) node.textContent = text;
+                return node;
             }
 
-            try {
-                const response = await fetch('/api/test-platform', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({ url })
-                });
+            function notice(kind, lead, message) {
+                const node = element('div', 'notice notice-' + kind);
+                if (lead) node.append(element('strong', undefined, lead + ' '));
+                node.append(document.createTextNode(message));
+                return node;
+            }
 
-                const result = await response.json();
-                
-                if (result.valid) {
-                    alert(`✅ URL is valid!\n\nPlatform: ${result.platform}\nStatus: ${result.info.status}\n${result.info.notes}\n\nTips: ${result.info.tips.join(', ')}`);
+            function scrollBehavior() {
+                return window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth';
+            }
+
+            function showLoading(message) {
+                $('loadingMessage').textContent = message;
+                $('loadingOverlay').style.display = 'flex';
+            }
+
+            function hideLoading() {
+                $('loadingOverlay').style.display = 'none';
+            }
+
+            // ---- the film strip ---------------------------------------------------
+
+            function frameItem(timecode, options) {
+                const item = element('li', 'frame');
+                const picture = element('div', 'frame-pic');
+                const meta = element('div', 'frame-meta');
+                meta.append(element('span', 'time frame-code', timecode));
+
+                if (options.imageUrl) {
+                    const image = element('img');
+                    image.src = options.imageUrl;
+                    image.alt = 'Frame at ' + timecode;
+                    image.loading = 'lazy';
+                    // Old files are removed after a while; say so instead of showing a broken image
+                    image.addEventListener('error', () => {
+                        picture.replaceChildren(element('p', 'frame-gone', 'This frame is no longer on disk.'));
+                        meta.querySelector('a')?.remove();
+                    });
+                    picture.append(image);
+
+                    const save = element('a', undefined, 'Download');
+                    save.href = options.imageUrl;
+                    save.download = '';
+                    meta.append(save);
+                    item.classList.add('is-new');
+                    item.style.setProperty('--i', String(options.index));
                 } else {
-                    alert(`❌ URL validation failed:\n${result.info.notes || 'Invalid or unsupported URL'}`);
+                    item.classList.add('is-ghost');
+                    meta.append(element('span', 'frame-note', options.note));
                 }
-            } catch (error) {
-                console.error('Validation error:', error);
-                alert('❌ Error validating URL. Please try again.');
+                item.append(picture, meta);
+                return item;
             }
-        });
 
-        // Form Submission
-        document.getElementById('extractForm').addEventListener('submit', async function(e) {
-            e.preventDefault();
-            
-            const url = document.getElementById('videoUrl').value.trim();
-            const timestampsText = document.getElementById('timestamps').value.trim();
-            
-            if (!url || !timestampsText) {
-                alert('Please fill in all required fields');
-                return;
+            function timecodesFromInput() {
+                return $('timestamps').value.split('\n').map((line) => line.trim()).filter(Boolean);
             }
-            
-            // Parse timestamps
-            const timestamps = timestampsText.split('\n').map(t => t.trim()).filter(t => t);
-            if (timestamps.length === 0) {
-                alert('Please enter at least one timestamp');
-                return;
+
+            function renderPreview() {
+                if (hasResults) return;
+                const typed = timecodesFromInput();
+                const isSample = typed.length === 0;
+                const codes = (isSample ? SAMPLE_TIMECODES : typed).slice(0, MAX_GHOST_FRAMES);
+                const note = isSample ? 'Example' : 'Queued';
+                $('framesContainer').replaceChildren(...codes.map((code, index) => frameItem(code, { note, index })));
+
+                let summary = 'One frame for each timecode appears here.';
+                if (!isSample) {
+                    summary = typed.length === 1 ? '1 frame to extract.' : typed.length + ' frames to extract.';
+                    if (typed.length > MAX_GHOST_FRAMES) summary += ' Showing the first ' + MAX_GHOST_FRAMES + '.';
+                }
+                $('stripSummary').textContent = summary;
             }
-            
-            // Show loading overlay
-            document.getElementById('loadingOverlay').style.display = 'flex';
-            document.getElementById('loadingMessage').textContent = 'Downloading and extracting frames, please wait...';
-            
-            try {
-                const response = await fetch('/api/extract', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        url: url,
-                        timestamps: timestamps
-                    })
-                });
-                
-                const result = await response.json();
-                
-                if (result.success) {
+
+            // The server reports whole seconds; show them the way they are typed (m:ss or h:mm:ss)
+            function formatTimecode(value) {
+                const total = Number(value);
+                if (!Number.isInteger(total) || total < 0) return String(value);
+                const hours = Math.floor(total / 3600);
+                const minutes = Math.floor((total % 3600) / 60);
+                const seconds = String(total % 60).padStart(2, '0');
+                return hours > 0 ? `${hours}:${String(minutes).padStart(2, '0')}:${seconds}` : `${minutes}:${seconds}`;
+            }
+
+            function displayResults(frames, warnings, options) {
+                const restored = Boolean(options && options.restored);
+                // Timestamps that could not be extracted (for example past the end of the video)
+                $('extractWarnings').replaceChildren(...warnings.map((warning) => notice('warn', 'Skipped.', warning)));
+
+                const items = frames.map((frame, index) => frameItem(formatTimecode(frame.timestamp), {
+                    imageUrl: '/frames/' + encodeURIComponent(frame.filename),
+                    index,
+                }));
+                $('framesContainer').replaceChildren(...items);
+                hasResults = true;
+                const count = frames.length === 1 ? '1 frame' : frames.length + ' frames';
+                $('stripSummary').textContent = restored ? count + ' from your last extraction.' : count + ' extracted.';
+                if (!restored) $('resultsSection').scrollIntoView({ behavior: scrollBehavior() });
+            }
+
+            // ---- remember the last extraction, so leaving or refreshing the page keeps it ----
+
+            function saveExtraction(url, frames, warnings) {
+                try {
+                    localStorage.setItem(STORAGE_KEY, JSON.stringify({ url, frames, warnings }));
+                } catch (error) {
+                    // storage can be full or blocked; the frames are still on screen and on disk
+                }
+            }
+
+            function savedExtraction() {
+                try {
+                    const saved = JSON.parse(localStorage.getItem(STORAGE_KEY));
+                    const valid = saved && Array.isArray(saved.frames) && saved.frames.length > 0
+                        && saved.frames.every((frame) => frame && SAFE_FILE_NAME.test(String(frame.filename))
+                                                         && frame.timestamp !== undefined);
+                    return valid ? saved : null;
+                } catch (error) {
+                    return null;
+                }
+            }
+
+            $('timestamps').addEventListener('input', renderPreview);
+
+            // ---- check the link ---------------------------------------------------
+
+            $('validateBtn').addEventListener('click', async () => {
+                const url = $('videoUrl').value.trim();
+                const status = $('linkStatus');
+                if (!url) {
+                    status.replaceChildren(notice('error', 'No link yet.', 'Paste a video link first.'));
+                    return;
+                }
+
+                try {
+                    const response = await fetch('/api/test-platform', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ url }),
+                    });
+                    const result = await response.json();
+                    const info = result.info || {};
+
+                    if (result.valid) {
+                        const ok = notice('ok', 'This link works.', `${result.platform}: ${info.status || 'ready'}. ${info.notes || ''}`.trim());
+                        if (info.tips && info.tips.length) {
+                            ok.append(element('span', 'tips', 'Tips: ' + info.tips.join(', ')));
+                        }
+                        status.replaceChildren(ok);
+                    } else {
+                        status.replaceChildren(notice('error', 'This link cannot be used.',
+                            info.notes || result.error || 'It is invalid or from an unsupported site.'));
+                    }
+                } catch (error) {
+                    console.error('Validation error:', error);
+                    status.replaceChildren(notice('error', 'Could not check the link.', 'Try again in a moment.'));
+                }
+            });
+
+            // ---- extract ----------------------------------------------------------
+
+            $('extractForm').addEventListener('submit', async (event) => {
+                event.preventDefault();
+                if (busy) return;
+
+                const url = $('videoUrl').value.trim();
+                const timestamps = timecodesFromInput();
+                const status = $('formStatus');
+                if (!url || timestamps.length === 0) {
+                    status.replaceChildren(notice('error', 'Missing details.', 'Add a video link and at least one timecode.'));
+                    return;
+                }
+                status.replaceChildren();
+
+                busy = true;
+                showLoading('Downloading the video and extracting frames. This can take a minute.');
+                try {
+                    const response = await fetch('/api/extract', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ url: url, timestamps: timestamps }),
+                    });
+                    const result = await response.json();
+
+                    if (!result.success) {
+                        throw new Error(result.error || 'Extraction failed');
+                    }
                     displayResults(result.frames, result.warnings || []);
-                } else {
-                    throw new Error(result.error || 'Extraction failed');
+                    saveExtraction(url, result.frames, result.warnings || []);
+                } catch (error) {
+                    console.error('Extraction error:', error);
+                    status.replaceChildren(notice('error', 'Extraction failed.', error.message));
+                } finally {
+                    busy = false;
+                    hideLoading();
                 }
-                
-            } catch (error) {
-                console.error('Extraction error:', error);
-                alert(`❌ Error: ${error.message}`);
-            } finally {
-                // Hide loading overlay
-                document.getElementById('loadingOverlay').style.display = 'none';
+            });
+
+            // ---- prefill from ?url= (the Trending page links here) ----------------
+
+            const prefill = new URLSearchParams(window.location.search).get('url');
+            const saved = savedExtraction();
+            if (prefill) {
+                $('videoUrl').value = prefill;
+                $('timestamps').focus();
+            } else if (saved) {
+                $('videoUrl').value = typeof saved.url === 'string' ? saved.url : '';
             }
-        });
-        
-        function displayResults(frames, warnings) {
-            const container = document.getElementById('framesContainer');
-            const resultsSection = document.getElementById('resultsSection');
+            window.attachLinkPreview($('videoUrl'), $('linkPreview'));
 
-            // Timestamps that could not be extracted (for example past the end of the video)
-            const notices = warnings.map(warning => {
-                const notice = document.createElement('div');
-                notice.className = 'alert alert-warning';
-                notice.textContent = warning;
-                return notice;
-            });
-            document.getElementById('extractWarnings').replaceChildren(...notices);
-
-            const cards = frames.map(frame => {
-                const frameUrl = '/frames/' + encodeURIComponent(frame.filename);
-
-                const image = document.createElement('img');
-                image.className = 'frame-image';
-                image.src = frameUrl;
-                image.alt = 'Frame ' + frame.timestamp;
-
-                const title = document.createElement('h5');
-                title.className = 'frame-title';
-                title.textContent = 'Frame at ' + frame.timestamp;
-
-                const download = document.createElement('a');
-                download.className = 'frame-download';
-                download.href = frameUrl;
-                download.download = '';
-                const downloadIcon = document.createElement('i');
-                downloadIcon.className = 'fas fa-download';
-                download.append(downloadIcon, ' Download');
-
-                const info = document.createElement('div');
-                info.className = 'frame-info';
-                info.append(title, download);
-
-                const card = document.createElement('div');
-                card.className = 'frame-card';
-                card.append(image, info);
-                return card;
-            });
-            container.replaceChildren(...cards);
-            
-            resultsSection.style.display = 'block';
-            resultsSection.scrollIntoView({ behavior: 'smooth' });
-        }
+            if (saved && !prefill) {
+                displayResults(saved.frames, Array.isArray(saved.warnings) ? saved.warnings.map(String) : [], { restored: true });
+            } else {
+                renderPreview();
+            }
+        })();
     </script>
 </body>
 </html>

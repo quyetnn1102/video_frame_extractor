@@ -28,6 +28,8 @@ uv run --frozen --no-dev python deploy.py               # Linux production helpe
 - `validators.py`: `validator` (`SecurityValidator`): URL/timestamp/filename validation with exact host matching, and `resolve_in_folder()` for any client-supplied file name.
 - `video_processor.py`: `extractor`: yt-dlp download with limits and an extractor allow-list (no generic extractor), OpenCV frame extraction, cleanup. `link_resolver.py` resolves `fb.watch` links safely (only that host is fetched, redirects re-validated).
 - `short_video.py`: request parsing (start time, duration, quality, overlay) and the MoviePy render.
+- `library.py`: lists the shorts in `generated_shorts/` for `GET /api/shorts`. The Create short page is rebuilt from it on every visit, so never keep a result only in the DOM. Frames cannot be grouped by extraction on the server, so the home page remembers the last one in `localStorage`.
+- `static/`: `css/app.css` (all shared styles, tokens at the top) and `js/link-preview.js` (the pasted-link preview, built with `textContent` only); fonts are self-hosted in `static/fonts/` because the CSP allows fonts from this origin only. Templates stay standalone (no base template: `tests/test_templates.py` lists the four files).
 - `trending.py`: YouTube Data API trending (API key sent in a header, never logged).
 - `youtube_uploader.py`: `youtube_uploader`: OAuth (state checked, JSON credentials, lazy `google_auth_oauthlib` import) and uploads.
 - `database.py`: `db_manager`: SQLite `app_data.db`; `/api/extract` and `/api/create-short` write to it, the dashboard reads it.
@@ -47,7 +49,7 @@ uv run --frozen --no-dev python deploy.py               # Linux production helpe
 - Pin third-party assets with Subresource Integrity (`tests/test_templates.py` checks); compute hashes from the exact URL.
 - Flask-Limiter holds only a weak reference to its `Limiter`; `create_app()` keeps a strong one in `app.extensions['rate_limiter']` (needed when `RATE_LIMIT_ENABLED=false`).
 - Tests are offline. Renders use a synthetic video; ImageMagick is optional (the overlay is skipped without it); DB tests use a temp file.
-- Download failures are usually fixed by upgrading `yt-dlp` (pinned in `pyproject.toml`, currently 2026.8.19; 2025.8.11 can no longer read YouTube). Formats are selected as `bv*+ba/b`, merged to mp4 with the FFmpeg bundled by MoviePy: modern sites have no single "best" file.
+- Download failures are usually fixed by upgrading `yt-dlp` (pinned in `pyproject.toml`, currently 2026.8.19; 2025.8.11 can no longer read YouTube). Exception: TikTok's "Unexpected response from webpage request" is not a version problem (the nightly fails too). TikTok serves a bot-check page to plain Python clients, so the pin carries the `curl-cffi` extra, which makes yt-dlp impersonate a browser automatically. If that error returns, first check `uv run python -c "import curl_cffi"`. Formats are selected as `bv*+ba/b`, merged to mp4 with the FFmpeg bundled by MoviePy: modern sites have no single "best" file.
 
 ## Notes
 

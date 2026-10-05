@@ -361,6 +361,56 @@ class TestServeFiles(RouteTestCase):
                 self.assertEqual(self.client.get(path).status_code, 404)
 
 
+class TestShortsLibrary(RouteTestCase):
+    """Earlier shorts stay available after the page is closed or refreshed."""
+
+    def setUp(self):
+        super().setUp()
+        patcher = patch('library.video_duration', return_value=30.0)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def delete(self, filename):
+        return self.client.post('/api/shorts/delete', json={'filename': filename})
+
+    def test_lists_the_shorts_in_the_output_folder(self):
+        (self.shorts / 'My Clip_abcd1234_short.mp4').write_bytes(b'mp4data')
+
+        data = self.client.get('/api/shorts').get_json()
+
+        self.assertTrue(data['success'])
+        self.assertEqual([item['filename'] for item in data['shorts']], ['My Clip_abcd1234_short.mp4'])
+        self.assertEqual(data['shorts'][0]['title'], 'My Clip')
+        self.assertEqual(data['shorts'][0]['url'], '/shorts/My%20Clip_abcd1234_short.mp4')
+
+    def test_an_empty_folder_gives_an_empty_list(self):
+        self.assertEqual(self.client.get('/api/shorts').get_json()['shorts'], [])
+
+    def test_deletes_a_short_by_file_name(self):
+        short = self.shorts / 'My Clip_abcd1234_short.mp4'
+        short.write_bytes(b'mp4data')
+
+        response = self.delete('My Clip_abcd1234_short.mp4')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(short.exists())
+
+    def test_never_deletes_outside_the_shorts_folder(self):
+        outside = self.shorts.parent / 'secret.mp4'
+        outside.write_bytes(b'x')
+        (self.shorts / 'notes.txt').write_bytes(b'x')
+        for name in ['../secret.mp4', '..\\secret.mp4', 'notes.txt', 'missing.mp4', '']:
+            with self.subTest(name=name):
+                self.assertEqual(self.delete(name).status_code, 404)
+        self.assertTrue(outside.exists())
+        self.assertTrue((self.shorts / 'notes.txt').exists())
+
+    def test_rejects_a_missing_or_non_text_file_name(self):
+        for body in [{}, {'filename': 5}, {'filename': ['a.mp4']}]:
+            with self.subTest(body=body):
+                self.assertEqual(self.client.post('/api/shorts/delete', json=body).status_code, 400)
+
+
 class TestCreateShort(RouteTestCase):
     def post(self, **overrides):
         body = {'url': VALID_URL, 'start_time': '0:30', 'duration': 20, 'quality': 'low'}

@@ -138,6 +138,8 @@ All endpoints return JSON (errors as `{"success": false, "error": "..."}`) and r
 | `POST /api/extract` `{url, timestamps[]}` | Download, extract frames, delete the download | 10/min |
 | `POST /api/create-short` `{url, start_time, duration, quality, vertical_format, text_overlay}` | Create a short | 5/min |
 | `GET /frames/<file>`, `GET /shorts/<file>` | Serve generated files | default |
+| `GET /api/shorts` | Earlier shorts in `generated_shorts/`, newest first (the Create short page shows them again after a refresh) | default |
+| `POST /api/shorts/delete` `{filename}` | Delete a short by file name | 30/min |
 | `POST /api/cleanup` | Delete files older than `AUTO_CLEANUP_HOURS` | 5/min |
 | `GET /api/trending?region=&category=&max_results=` | Popular YouTube videos | default |
 | `GET /api/video-categories` | Category list | default |
@@ -173,6 +175,7 @@ database.py          SQLite request log used by the dashboard (app_data.db)
 logger.py            Logging
 deploy.py            Production helper (Linux): checks, systemd and nginx config
 templates/           index, create_short, trending, dashboard pages
+static/              Shared stylesheet (css/app.css) and self-hosted fonts (fonts/, SIL OFL)
 tests/               Offline unit tests
 scripts/smoke_test.py  Manual check against a running server
 ```
@@ -211,6 +214,7 @@ The suite is offline and fast: it covers validation, the Flask routes (with the 
 | `No suitable extractor` | The link form is not supported (for example `v.douyin.com`); use the full video URL |
 | `Invalid Host header` | You opened the app under another name; add it to `ALLOWED_HOSTS` |
 | Instagram: login required / restricted | See [Platform authentication](#platform-authentication) |
+| TikTok: "did not send the video page" | Run `uv sync` (it installs `curl-cffi`, which lets yt-dlp present itself as a browser), restart the app, or wait a few minutes if TikTok is rate limiting you |
 | TikTok: format error | The video may be region-blocked or restricted |
 | "The video was not downloaded" | It exceeds `MAX_VIDEO_DURATION` or `MAX_DOWNLOAD_MB`, or is a live stream |
 | "Text overlay was skipped" | Install ImageMagick (see [Quick start](#quick-start)) |
@@ -230,7 +234,7 @@ Implemented:
 - **Network:** loopback-only binding, a strict `Host` allow-list (blocks DNS rebinding), and `/api/*` refuses requests the browser marks cross-site (`Sec-Fetch-Site`) or whose `Origin` is not this app, so another website cannot drive the API from your browser. Requests are capped at 1 MB.
 - **Downloads:** exact host matching for video URLs (no lookalike domains, embedded credentials or ports, 2048-character limit); a fixed extractor allow-list so yt-dlp cannot fetch arbitrary URLs; size, duration and timeout limits; remote video titles never become part of a file name or a yt-dlp output template.
 - **Files:** client-supplied file names are resolved strictly inside the output folders; uploads take a file name only.
-- **Output:** JSON error responses with no exception text or server paths; a Content-Security-Policy and other security headers; Subresource Integrity on the CDN assets; no data interpolated into HTML; control characters stripped from log messages.
+- **Output:** JSON error responses with no exception text or server paths; a Content-Security-Policy and other security headers; pages that load nothing from a CDN (any future third-party asset must carry a Subresource Integrity hash); no data interpolated into HTML; control characters stripped from log messages.
 - **YouTube:** OAuth with `state` and PKCE, credentials stored as JSON (never pickle) and written atomically, upload scope only.
 - **Defaults:** browser cookies are opt-in, the debugger is opt-in, and a mistyped `FLASK_ENV` is an error.
 
@@ -268,4 +272,4 @@ Licensed under the [Apache License 2.0](LICENSE).
 
 ## Acknowledgments
 
-[yt-dlp](https://github.com/yt-dlp/yt-dlp), [OpenCV](https://opencv.org/), [MoviePy](https://zulko.github.io/moviepy/), [Flask](https://flask.palletsprojects.com/), [Flask-Limiter](https://flask-limiter.readthedocs.io/), the Google API client libraries, [Bootstrap](https://getbootstrap.com/) and [Font Awesome](https://fontawesome.com/).
+[yt-dlp](https://github.com/yt-dlp/yt-dlp), [OpenCV](https://opencv.org/), [MoviePy](https://zulko.github.io/moviepy/), [Flask](https://flask.palletsprojects.com/), [Flask-Limiter](https://flask-limiter.readthedocs.io/), the Google API client libraries, and the fonts [Bricolage Grotesque](https://github.com/ateliertriay/bricolage) and [Martian Mono](https://github.com/evilmartians/mono) (SIL Open Font License, copies in `static/fonts/`).
