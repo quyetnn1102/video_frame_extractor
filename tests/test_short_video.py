@@ -2,6 +2,7 @@
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 import cv2
 import numpy as np
@@ -179,16 +180,52 @@ class TestCreateShort(unittest.TestCase):
             short_video.create_short(self.source, output, start=60, duration=5)
         self.assertFalse(output.exists())
 
-    def test_text_overlay_never_blocks_the_video(self):
+    def test_missing_imagemagick_skips_the_overlay_but_still_renders(self):
         output = self.folder / 'short.mp4'
         overlay = normalize_text_overlay('Hello')
 
-        result = short_video.create_short(self.source, output, start=0, duration=1,
-                                          quality='low', text_overlay=overlay)
+        with patch('moviepy.editor.TextClip', side_effect=OSError('ImageMagick not found')):
+            result = short_video.create_short(self.source, output, start=0, duration=1,
+                                              quality='low', text_overlay=overlay)
 
         self.assertTrue(output.exists())
-        self.assertGreater(output.stat().st_size, 0)
-        self.assertIsInstance(result['warnings'], list)
+        self.assertEqual(len(result['warnings']), 1)
+
+    def test_text_overlay_is_composited_at_every_position(self):
+        """Uses a stand-in for TextClip, so it runs without ImageMagick."""
+        from moviepy.editor import ColorClip
+
+        def fake_text_clip(text, **options):
+            return ColorClip((120, 30), color=(255, 255, 255), duration=1)
+
+        for position in ('top', 'center', 'bottom'):
+            with self.subTest(position=position):
+                output = self.folder / f'short_{position}.mp4'
+                overlay = normalize_text_overlay({'text': 'Hello', 'position': position})
+
+                with patch('moviepy.editor.TextClip', side_effect=fake_text_clip):
+                    result = short_video.create_short(self.source, output, start=0, duration=1,
+                                                      vertical=True, quality='low',
+                                                      text_overlay=overlay)
+
+                self.assertEqual(result['warnings'], [])
+                self.assertGreater(output.stat().st_size, 0)
+
+    def test_failed_renders_leave_no_output_or_temp_audio(self):
+        output = self.folder / 'short.mp4'
+        temp_audio = output.with_suffix('.tmp-audio.m4a')
+
+        def failing_write(self_clip, filename, **options):
+            Path(options['temp_audiofile']).write_bytes(b'partial audio')
+            Path(filename).write_bytes(b'partial video')
+            raise RuntimeError('encoder crashed')
+
+        with patch('moviepy.video.VideoClip.VideoClip.write_videofile', failing_write):
+            with self.assertRaises(RuntimeError):
+                short_video.create_short(self.source, output, start=0, duration=1, quality='low')
+
+        self.assertFalse(output.exists())
+        self.assertFalse(temp_audio.exists())
 
 
 if __name__ == '__main__':

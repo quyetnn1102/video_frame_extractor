@@ -169,7 +169,9 @@ def _build_text_clip(text_clip_class, overlay: Dict[str, Any], duration: float):
     if overlay['position'] == 'center':
         clip = clip.set_position('center')
     else:
-        clip = clip.set_position(('center', overlay['position'])).set_margin(OVERLAY_MARGIN)
+        # MoviePy 1.0 has no set_margin; margin() pads with a transparent border
+        edge = overlay['position']
+        clip = clip.margin(**{edge: OVERLAY_MARGIN}, opacity=0).set_position(('center', edge))
     return clip.set_duration(duration)
 
 
@@ -196,6 +198,7 @@ def create_short(source_path: Path, output_path: Path, *, start: float, duration
     from moviepy.editor import CompositeVideoClip, TextClip, VideoFileClip
 
     output_path = Path(output_path)
+    temp_audio_path = output_path.with_suffix('.tmp-audio.m4a')
     warnings: List[str] = []
     video = clip = text_clip = final = None
     try:
@@ -228,13 +231,15 @@ def create_short(source_path: Path, output_path: Path, *, start: float, duration
             codec='libx264',
             audio_codec='aac',
             bitrate=QUALITY_BITRATES[quality],
-            temp_audiofile=str(output_path.with_suffix('.tmp-audio.m4a')),
+            temp_audiofile=str(temp_audio_path),
             remove_temp=True,
             verbose=False,
             logger=None,
         )
     except Exception:
+        # MoviePy only removes its temp audio after a successful render
         output_path.unlink(missing_ok=True)
+        temp_audio_path.unlink(missing_ok=True)
         raise
     finally:
         _close_all((final if final is not clip else None, text_clip, clip, video))
