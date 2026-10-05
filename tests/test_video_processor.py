@@ -55,6 +55,66 @@ class TestYtdlpOptions(unittest.TestCase):
                         ydl.extract_info(url, download=False)
                 self.assertIn('No suitable extractor', str(caught.exception))
 
+    @staticmethod
+    def stream(format_id, ext, height, vcodec, acodec, tbr=500):
+        return {'format_id': format_id, 'ext': ext, 'height': height, 'vcodec': vcodec,
+                'acodec': acodec, 'tbr': tbr, 'protocol': 'https',
+                'url': f'https://example.invalid/{format_id}'}
+
+    def choose(self, platform, formats):
+        """Run yt-dlp's real format selection with the app's options on a synthetic video."""
+        opts = dict(self.options[platform], quiet=True)
+        info = {'id': 'x', 'title': 't', 'webpage_url': 'https://example.invalid/x',
+                'extractor': 'test', 'extractor_key': 'Test', 'formats': formats}
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            chosen = ydl.process_video_result(info, download=False)
+        return chosen, [(f['format_id'], f.get('height')) for f in
+                        (chosen.get('requested_formats') or [chosen])]
+
+    def test_modern_separate_streams_are_merged_at_about_720p(self):
+        """YouTube offers video-only and audio-only streams; there is no single 'best' file."""
+        formats = [self.stream('140', 'm4a', None, 'none', 'mp4a.40.2', 130)]
+        for height in (144, 360, 720, 1080, 2160):
+            formats.append(self.stream(f'v{height}', 'mp4', height, 'avc1.64002', 'none', height))
+        for platform in self.options:
+            with self.subTest(platform=platform):
+                chosen, picked = self.choose(platform, [dict(f) for f in formats])
+                self.assertEqual(picked, [('v720', 720), ('140', None)])
+                self.assertEqual(chosen['ext'], 'mp4')
+
+    def test_a_single_combined_stream_is_used_when_there_is_nothing_to_merge(self):
+        formats = [self.stream('hd', 'mp4', 1080, 'avc1', 'mp4a.40.2', 900),
+                   self.stream('sd', 'mp4', 480, 'avc1', 'mp4a.40.2', 400)]
+        _, picked = self.choose('tiktok', formats)
+        self.assertEqual(len(picked), 1)
+
+    def test_the_old_single_file_selector_would_have_failed_on_modern_streams(self):
+        """Pins why the selector changed, so it is not 'simplified' back."""
+        formats = [self.stream('140', 'm4a', None, 'none', 'mp4a.40.2'),
+                   self.stream('v720', 'mp4', 720, 'avc1', 'none')]
+        opts = {'quiet': True, 'format': 'best[height<=720]/best'}
+        info = {'id': 'x', 'title': 't', 'webpage_url': 'https://example.invalid/x',
+                'extractor': 'test', 'extractor_key': 'Test', 'formats': formats}
+        with yt_dlp.YoutubeDL(opts) as ydl:
+            with self.assertRaises(yt_dlp.utils.YoutubeDLError):
+                ydl.process_video_result(info, download=False)
+
+    def test_merging_uses_the_ffmpeg_bundled_with_moviepy(self):
+        for platform, opts in self.options.items():
+            with self.subTest(platform=platform):
+                self.assertEqual(opts['merge_output_format'], 'mp4')
+                self.assertTrue(Path(opts['ffmpeg_location']).is_file())
+
+    def test_video_info_does_not_depend_on_format_selection(self):
+        with patch('video_processor.yt_dlp.YoutubeDL') as mock_ytdl:
+            instance = Mock()
+            instance.extract_info.return_value = {'title': 'T'}
+            mock_ytdl.return_value.__enter__.return_value = instance
+            EnhancedVideoFrameExtractor().get_video_info('https://www.youtube.com/watch?v=abc123')
+        info_options = mock_ytdl.call_args.args[0]
+        self.assertTrue(info_options['ignore_no_formats_error'])
+        self.assertNotIn('match_filter', info_options)
+
     def test_downloads_are_aborted_once_they_pass_the_size_limit(self):
         """max_filesize only works when the server announces a size; streams need a hook."""
         limit = self.config.MAX_DOWNLOAD_MB * 1024 * 1024

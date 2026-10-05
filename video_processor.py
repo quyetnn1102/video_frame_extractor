@@ -31,6 +31,24 @@ YTDLP_ALLOWED_EXTRACTORS = (
 MAX_DESCRIPTION_LENGTH = 500
 BYTES_PER_MB = 1024 * 1024
 
+# Modern sites (YouTube first) serve video and audio as separate streams, with no single
+# "best" file, so a selector like best[height<=720] finds nothing. Take video+audio and let
+# the sort prefer 720p or below and mp4/m4a (which merge without re-encoding); fall back to a
+# single combined file where that is all a site offers.
+DOWNLOAD_FORMAT = 'bv*+ba/b'
+DOWNLOAD_FORMAT_SORT = ['res:720', 'ext:mp4:m4a']
+MERGE_FORMAT = 'mp4'
+
+
+def bundled_ffmpeg_path() -> Optional[str]:
+    """Path of the FFmpeg that ships with MoviePy (imageio-ffmpeg), used to merge streams."""
+    try:
+        import imageio_ffmpeg
+        return imageio_ffmpeg.get_ffmpeg_exe()
+    except Exception as error:  # missing package or binary: fall back to ffmpeg on PATH
+        video_logger.warning(f"Bundled FFmpeg not available ({type(error).__name__})")
+        return None
+
 
 def find_downloaded_file(folder: Path, unique_id: str) -> Optional[Path]:
     """Return the newest finished download whose name carries `unique_id`."""
@@ -122,8 +140,10 @@ class PlatformProcessor:
     def _get_base_options(self) -> Dict[str, Any]:
         """Get base yt-dlp options, including the safety limits for untrusted input"""
         max_duration = self.config.MAX_VIDEO_DURATION
-        return {
-            'format': f'best[height<={self.config.DEFAULT_VIDEO_QUALITY}]',
+        options = {
+            'format': DOWNLOAD_FORMAT,
+            'format_sort': list(DOWNLOAD_FORMAT_SORT),
+            'merge_output_format': MERGE_FORMAT,
             'outtmpl': {'default': f'{self.config.DOWNLOAD_FOLDER}/%(title)s_%(id)s.%(ext)s'},
             'noplaylist': True,
             'ignoreerrors': False,
@@ -144,6 +164,10 @@ class PlatformProcessor:
             'cachedir': False,
             'allowed_extractors': list(YTDLP_ALLOWED_EXTRACTORS),
         }
+        ffmpeg = bundled_ffmpeg_path()
+        if ffmpeg:
+            options['ffmpeg_location'] = ffmpeg
+        return options
 
     def get_download_options(self, url: str) -> Dict[str, Any]:
         """Get platform-specific download options - override in subclasses"""
@@ -158,23 +182,13 @@ class YouTubeProcessor(PlatformProcessor):
     
     def __init__(self):
         super().__init__('youtube')
-    
-    def get_download_options(self, url: str) -> Dict[str, Any]:
-        opts = self.base_opts.copy()
-        opts['format'] = 'best[height<=720]/best'
-        return opts
 
 class TikTokProcessor(PlatformProcessor):
     """TikTok-specific processing"""
     
     def __init__(self):
         super().__init__('tiktok')
-    
-    def get_download_options(self, url: str) -> Dict[str, Any]:
-        opts = self.base_opts.copy()
-        opts['format'] = 'best/h264_540p_468478/h264_540p_287260/bytevc1_540p_248040/download'
-        return opts
-    
+
     def process_download_error(self, error: str) -> str:
         if 'format' in error.lower():
             return (
@@ -192,12 +206,7 @@ class InstagramProcessor(PlatformProcessor):
     def __init__(self):
         super().__init__('instagram')
         self.cookie_sources = self.config.COOKIE_BROWSERS
-    
-    def get_download_options(self, url: str) -> Dict[str, Any]:
-        opts = self.base_opts.copy()
-        opts['format'] = 'best[height<=720]/mp4/best'
-        return opts
-    
+
     def try_with_cookies(self, url: str, base_opts: Dict[str, Any]) -> Tuple[Optional[str], Optional[str]]:
         """Try download with various cookie sources"""
         # Try manual cookie file first
@@ -259,12 +268,7 @@ class FacebookProcessor(PlatformProcessor):
     
     def __init__(self):
         super().__init__('facebook')
-    
-    def get_download_options(self, url: str) -> Dict[str, Any]:
-        opts = self.base_opts.copy()
-        opts['format'] = 'best[height<=720]/best'
-        return opts
-    
+
     def process_download_error(self, error: str) -> str:
         if 'login' in error.lower() or 'private' in error.lower():
             return (
@@ -281,11 +285,6 @@ class DouyinProcessor(PlatformProcessor):
     
     def __init__(self):
         super().__init__('douyin')
-    
-    def get_download_options(self, url: str) -> Dict[str, Any]:
-        opts = self.base_opts.copy()
-        opts['format'] = 'best/mp4'
-        return opts
 
 class EnhancedVideoFrameExtractor:
     """Enhanced video processing with improved error handling and modular design"""
@@ -478,8 +477,10 @@ class EnhancedVideoFrameExtractor:
 
                 opts = processor.get_download_options(url)
                 opts['quiet'] = True
-                # Showing details of a long video is harmless; only downloads are limited
+                # Showing details of a long video is harmless; only downloads are limited,
+                # and a title does not depend on which formats are available
                 opts.pop('match_filter', None)
+                opts['ignore_no_formats_error'] = True
 
                 with yt_dlp.YoutubeDL(opts) as ydl:
                     info = ydl.extract_info(url, download=False)

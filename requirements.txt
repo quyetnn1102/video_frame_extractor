@@ -11,7 +11,7 @@ requests==2.31.0
 psutil==7.0.0
 
 # Video download (platform extractors change often: upgrade yt-dlp first when downloads break)
-yt-dlp==2025.8.11
+yt-dlp==2026.8.19
 
 # Frame extraction and short-video rendering (MoviePy bundles its own FFmpeg via imageio-ffmpeg)
 opencv-python==4.8.1.78
