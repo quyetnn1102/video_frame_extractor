@@ -333,14 +333,17 @@
                              statItem(String(video.published)),
                              statItem(String(video.category)));
 
+                // Every entry has the same actions; the labels say which video they act on
                 const extractButton = element('button', 'btn', 'Extract frames');
                 extractButton.type = 'button';
+                extractButton.setAttribute('aria-label', `Extract frames from ${video.title}`);
                 extractButton.addEventListener('click', () => extractFromVideo(videoUrl));
 
                 const actions = element('div', 'actions');
                 actions.append(extractButton);
                 if (videoUrl) {
                     const watch = element('a', undefined, 'Watch on YouTube');
+                    watch.setAttribute('aria-label', `Watch ${video.title} on YouTube (opens a new tab)`);
                     watch.href = videoUrl;
                     watch.target = '_blank';
                     watch.rel = 'noopener noreferrer';
@@ -366,7 +369,8 @@
 
             function setLoading(isLoading) {
                 $('videosGrid').setAttribute('aria-busy', String(isLoading));
-                $('refreshBtn').disabled = isLoading;
+                // aria-disabled, not disabled: a disabled button drops keyboard focus to the page
+                $('refreshBtn').setAttribute('aria-disabled', String(isLoading));
                 if (!isLoading) {
                     $('trendStatus').replaceChildren();
                     return;
@@ -425,6 +429,7 @@
 
             $('queryForm').addEventListener('submit', (event) => {
                 event.preventDefault();
+                if ($('refreshBtn').getAttribute('aria-disabled') === 'true') return;  // already loading
                 loadTrendingVideos();
             });
 

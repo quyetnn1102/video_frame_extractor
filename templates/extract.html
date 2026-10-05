@@ -165,7 +165,8 @@
             <main id="main" class="page page-narrow">
                 <p class="intro">Paste a link, list the moments you want as timecodes, and get one image for each. Works with YouTube, TikTok, Instagram, Facebook and Douyin.</p>
 
-                <form id="extractForm" class="card">
+                <form id="extractForm" class="card stack" novalidate>
+                    <div id="errorSummary" class="error-summary" tabindex="-1" hidden></div>
                     <div class="extract-grid">
                         <div class="field field-link">
                             <label for="videoUrl">Video link</label>
@@ -183,7 +184,7 @@
                             <label for="timestamps">Timecodes</label>
                             <textarea class="timecodes" id="timestamps" rows="5" required spellcheck="false"
                                       autocomplete="off" placeholder="0:05&#10;0:30&#10;1:15"></textarea>
-                            <p class="hint">One per line, as m:ss or h:mm:ss.</p>
+                            <p class="hint">One per line, as m:ss or h:mm:ss. Up to 50.</p>
                         </div>
 
                         <div class="go stack">
@@ -197,7 +198,7 @@
 
                 <section class="contact" id="resultsSection" aria-labelledby="stripHeading">
                     <div class="section-head">
-                        <h2 id="stripHeading">Frames</h2>
+                        <h2 id="stripHeading" tabindex="-1">Frames</h2>
                         <p id="stripSummary"></p>
                     </div>
                     <div id="extractWarnings"></div>
@@ -207,14 +208,17 @@
         </div>
     </div>
 
-    <div class="loading-overlay" id="loadingOverlay" role="status" aria-live="polite">
+    <div class="loading-overlay" id="loadingOverlay" role="dialog" aria-modal="true"
+         aria-labelledby="loadingHeading" aria-describedby="loadingMessage">
         <div class="loading-box">
             <span class="mark is-scanning" aria-hidden="true"></span>
-            <h2>Pulling your frames</h2>
+            <h2 id="loadingHeading" tabindex="-1">Pulling your frames</h2>
             <p id="loadingMessage">Downloading the video and extracting frames. This can take a minute.</p>
         </div>
     </div>
+    <p class="visually-hidden" id="busyStatus" role="status"></p>
 
+    <script src="/static/js/ui.js"></script>
     <script src="/static/js/link-preview.js"></script>
     <script>
         (function () {
@@ -223,6 +227,7 @@
             const STORAGE_KEY = 'videoextract.lastExtraction';
             const SAFE_FILE_NAME = /^[\w.-]+$/;
             const MAX_GHOST_FRAMES = 12;
+            const MAX_TIMECODES = 50;  // MAX_TIMESTAMPS in validators.py
             const SAMPLE_TIMECODES = ['0:05', '0:30', '1:15'];
             const $ = (id) => document.getElementById(id);
             let hasResults = false;   // real frames replace the preview until the next extraction
@@ -248,15 +253,6 @@
                 return window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth';
             }
 
-            function showLoading(message) {
-                $('loadingMessage').textContent = message;
-                $('loadingOverlay').style.display = 'flex';
-            }
-
-            function hideLoading() {
-                $('loadingOverlay').style.display = 'none';
-            }
-
             // ---- the film strip ---------------------------------------------------
 
             function frameItem(timecode, options) {
@@ -280,6 +276,7 @@
                     const save = element('a', undefined, 'Download');
                     save.href = options.imageUrl;
                     save.download = '';
+                    save.setAttribute('aria-label', 'Download frame at ' + timecode);
                     meta.append(save);
                     item.classList.add('is-new');
                     item.style.setProperty('--i', String(options.index));
@@ -300,8 +297,10 @@
                 const typed = timecodesFromInput();
                 const isSample = typed.length === 0;
                 const codes = (isSample ? SAMPLE_TIMECODES : typed).slice(0, MAX_GHOST_FRAMES);
-                const note = isSample ? 'Example' : 'Queued';
+                const note = isSample ? 'Example' : 'Preview';
                 $('framesContainer').replaceChildren(...codes.map((code, index) => frameItem(code, { note, index })));
+                // Placeholders only: screen readers get the summary line instead of fake results
+                $('framesContainer').setAttribute('aria-hidden', 'true');
 
                 let summary = 'One frame for each timecode appears here.';
                 if (!isSample) {
@@ -331,6 +330,7 @@
                     index,
                 }));
                 $('framesContainer').replaceChildren(...items);
+                $('framesContainer').removeAttribute('aria-hidden');
                 hasResults = true;
                 const count = frames.length === 1 ? '1 frame' : frames.length + ' frames';
                 $('stripSummary').textContent = restored ? count + ' from your last extraction.' : count + ' extracted.';
@@ -363,7 +363,7 @@
 
             // ---- check the link ---------------------------------------------------
 
-            $('validateBtn').addEventListener('click', async () => {
+            $('validateBtn').addEventListener('click', () => ui.whileWorking($('validateBtn'), 'Checking...', async () => {
                 const url = $('videoUrl').value.trim();
                 const status = $('linkStatus');
                 if (!url) {
@@ -394,7 +394,37 @@
                     console.error('Validation error:', error);
                     status.replaceChildren(notice('error', 'Could not check the link.', 'Try again in a moment.'));
                 }
-            });
+            }));
+
+            // ---- check the form before anything is downloaded ----------------------
+
+            function linkError() {
+                const url = $('videoUrl').value.trim();
+                if (!url) return 'Enter a video link';
+                if (!ui.isLink(url)) return 'Enter a full link, starting with https://';
+                return null;
+            }
+
+            function timecodesError() {
+                const codes = timecodesFromInput();
+                if (codes.length === 0) return 'Enter at least one timecode';
+                if (codes.length > MAX_TIMECODES) return `Enter ${MAX_TIMECODES} timecodes or fewer`;
+                const wrong = codes.find((code) => ui.parseTimecode(code) === null);
+                if (wrong) return `"${wrong}" is not a timecode. Use m:ss or h:mm:ss, for example 1:05`;
+                return null;
+            }
+
+            const checks = [[$('videoUrl'), linkError], [$('timestamps'), timecodesError]];
+            checks.forEach(([input, check]) => ui.revalidateOnInput(input, check));
+
+            function formIsValid() {
+                const errors = checks
+                    .map(([input, check]) => ({ input, message: check() }))
+                    .filter((error) => error.message);
+                ui.clearErrors($('errorSummary'), checks.map(([input]) => input));
+                if (errors.length) ui.showErrors($('errorSummary'), errors);
+                return errors.length === 0;
+            }
 
             // ---- extract ----------------------------------------------------------
 
@@ -402,17 +432,15 @@
                 event.preventDefault();
                 if (busy) return;
 
+                const status = $('formStatus');
+                status.replaceChildren();
+                if (!formIsValid()) return;
                 const url = $('videoUrl').value.trim();
                 const timestamps = timecodesFromInput();
-                const status = $('formStatus');
-                if (!url || timestamps.length === 0) {
-                    status.replaceChildren(notice('error', 'Missing details.', 'Add a video link and at least one timecode.'));
-                    return;
-                }
-                status.replaceChildren();
 
                 busy = true;
-                showLoading('Downloading the video and extracting frames. This can take a minute.');
+                let focusAfter;  // on success, focus moves to the results for keyboard and screen reader users
+                ui.showBusy('Downloading the video and extracting frames. This can take a minute.');
                 try {
                     const response = await fetch('/api/extract', {
                         method: 'POST',
@@ -426,12 +454,13 @@
                     }
                     displayResults(result.frames, result.warnings || []);
                     saveExtraction(url, result.frames, result.warnings || []);
+                    focusAfter = $('stripHeading');
                 } catch (error) {
                     console.error('Extraction error:', error);
                     status.replaceChildren(notice('error', 'Extraction failed.', error.message));
                 } finally {
                     busy = false;
-                    hideLoading();
+                    ui.hideBusy(focusAfter);
                 }
             });
 

@@ -208,13 +208,6 @@
             margin-top: 0.8rem;
         }
 
-        .short-actions .btn.is-armed {
-            color: #fff;
-            background: var(--danger);
-            border-color: var(--danger);
-            text-decoration: none;
-        }
-
         @media (max-width: 60rem) {
             .workbench {
                 grid-template-columns: minmax(0, 1fr);
@@ -251,6 +244,7 @@
 
                 <div class="workbench">
                     <form id="shortVideoForm" class="card stack" novalidate>
+                        <div id="errorSummary" class="error-summary" tabindex="-1" hidden></div>
                         <div class="field">
                             <label for="shortVideoUrl">Video link</label>
                             <div class="input-row">
@@ -339,7 +333,7 @@
 
                 <section class="library" id="resultsSection" aria-labelledby="resultHeading">
                     <div class="section-head">
-                        <h2 id="resultHeading">Your shorts</h2>
+                        <h2 id="resultHeading" tabindex="-1">Your shorts</h2>
                         <p id="libraryCount"></p>
                     </div>
                     <div id="resultsStatus" role="alert"></div>
@@ -350,15 +344,18 @@
         </div>
     </div>
 
-    <div class="loading-overlay" id="loadingOverlay" role="status" aria-live="polite">
+    <div class="loading-overlay" id="loadingOverlay" role="dialog" aria-modal="true"
+         aria-labelledby="loadingHeading" aria-describedby="loadingMessage">
         <div class="loading-box">
             <span class="mark is-scanning" aria-hidden="true"></span>
-            <h2>Working on it</h2>
+            <h2 id="loadingHeading" tabindex="-1">Working on it</h2>
             <p id="loadingMessage">Please wait.</p>
             <button type="button" class="btn" id="cancelLoadingBtn" hidden>Cancel</button>
         </div>
     </div>
+    <p class="visually-hidden" id="busyStatus" role="status"></p>
 
+    <script src="/static/js/ui.js"></script>
     <script src="/static/js/link-preview.js"></script>
     <script>
         (function () {
@@ -400,14 +397,14 @@
             }
 
             function showLoading(message, cancellable) {
-                $('loadingMessage').textContent = message;
                 $('cancelLoadingBtn').hidden = !cancellable;
-                $('loadingOverlay').style.display = 'flex';
+                ui.showBusy(message);
+                if (cancellable) $('cancelLoadingBtn').focus();
             }
 
             function hideLoading() {
-                $('loadingOverlay').style.display = 'none';
                 $('cancelLoadingBtn').hidden = true;
+                ui.hideBusy();
             }
 
             $('cancelLoadingBtn').addEventListener('click', () => {
@@ -439,6 +436,7 @@
                 $('selectedDuration').value = duration;
                 $('customDurationDiv').hidden = duration !== 'custom';
                 if (duration === 'custom') $('customDuration').focus();
+                else ui.clearFieldError($('customDuration'));
             }
 
             function getDuration() {
@@ -468,7 +466,7 @@
 
             // ---- link check -------------------------------------------------------
 
-            $('validateShortBtn').addEventListener('click', async () => {
+            $('validateShortBtn').addEventListener('click', () => ui.whileWorking($('validateShortBtn'), 'Checking...', async () => {
                 const url = $('shortVideoUrl').value.trim();
                 const status = $('shortLinkStatus');
                 if (!url) {
@@ -489,7 +487,47 @@
                     console.error('Validation error:', error);
                     status.replaceChildren(notice('error', 'Could not check the link.', 'Try again in a moment.'));
                 }
-            });
+            }));
+
+            // ---- check the form before anything is downloaded ----------------------
+
+            function linkError() {
+                const url = $('shortVideoUrl').value.trim();
+                if (!url) return 'Enter a video link to cut a short from';
+                if (!ui.isLink(url)) return 'Enter a full link, starting with https://';
+                return null;
+            }
+
+            function lengthError() {
+                if ($('selectedDuration').value !== 'custom') return null;
+                // As loose as the server (parse_duration): any number from 1 to 300, decimals too
+                const value = Number($('customDuration').value.trim() || NaN);
+                if (!Number.isFinite(value) || value < 1 || value > MAX_DURATION_SECONDS) {
+                    return `Enter a length from 1 to ${MAX_DURATION_SECONDS} seconds`;
+                }
+                return null;
+            }
+
+            function startTimeError() {
+                const value = $('startTime').value.trim();
+                // Seconds without a colon are read as a number by the server (parse_start_time)
+                const asSeconds = value.includes(':') ? NaN : Number(value);
+                if (!value || ui.parseTimecode(value) !== null || (Number.isFinite(asSeconds) && asSeconds >= 0)) return null;
+                return 'Enter the start as m:ss, h:mm:ss or seconds, for example 1:30 or 90';
+            }
+
+            const checks = [[$('shortVideoUrl'), linkError], [$('customDuration'), lengthError],
+                            [$('startTime'), startTimeError]];
+            checks.forEach(([input, check]) => ui.revalidateOnInput(input, check));
+
+            function formIsValid() {
+                const errors = checks
+                    .map(([input, check]) => ({ input, message: check() }))
+                    .filter((error) => error.message);
+                ui.clearErrors($('errorSummary'), checks.map(([input]) => input));
+                if (errors.length) ui.showErrors($('errorSummary'), errors);
+                return errors.length === 0;
+            }
 
             // ---- create a short ---------------------------------------------------
 
@@ -498,25 +536,13 @@
                 if (busy) return;
 
                 const status = $('formStatus');
-                const url = $('shortVideoUrl').value.trim();
-                if (!url) {
-                    status.replaceChildren(notice('error', 'No link yet.', 'Paste a video link to cut a short from.'));
-                    return;
-                }
-
-                let duration;
-                try {
-                    duration = getDuration();
-                } catch (error) {
-                    status.replaceChildren(notice('error', 'Check the length.', error.message));
-                    return;
-                }
                 status.replaceChildren();
+                if (!formIsValid()) return;
 
                 const body = {
-                    url: url,
+                    url: $('shortVideoUrl').value.trim(),
                     start_time: $('startTime').value.trim() || '0',
-                    duration: duration,
+                    duration: getDuration(),
                     quality: $('quality').value,
                     vertical_format: $('verticalFormat').checked,
                 };
@@ -542,7 +568,6 @@
 
             // ---- your shorts: kept on disk, listed again after a refresh ------------
 
-            const DELETE_CONFIRM_MS = 4000;
             const RELATIVE_UNITS = [['day', 86400], ['hour', 3600], ['minute', 60]];
 
             function relativeTime(isoDate) {
@@ -554,20 +579,32 @@
                 return 'just now';
             }
 
-            function armDelete(button, item) {
-                if (button.dataset.armed === 'true') {
+            // Deleting cannot be undone, so it is confirmed in a dialog (no time limit to beat)
+            function confirmDelete(item) {
+                const dialog = element('dialog', 'dialog');
+                dialog.setAttribute('aria-labelledby', 'deleteHeading');
+                dialog.addEventListener('close', () => dialog.remove());
+
+                const heading = element('h2', undefined, 'Delete this short?');
+                heading.id = 'deleteHeading';
+                const note = element('p', undefined, `"${item.title}" is removed from this computer. This cannot be undone.`);
+
+                const remove = element('button', 'btn btn-danger', 'Delete short');
+                remove.type = 'button';
+                remove.addEventListener('click', () => {
+                    dialog.close();
                     deleteShort(item);
-                    return;
-                }
-                const label = button.textContent;
-                button.dataset.armed = 'true';
-                button.textContent = 'Click again to delete';
-                button.classList.add('is-armed');
-                setTimeout(() => {
-                    button.dataset.armed = 'false';
-                    button.textContent = label;
-                    button.classList.remove('is-armed');
-                }, DELETE_CONFIRM_MS);
+                });
+                const keep = element('button', 'btn', 'Keep it');
+                keep.type = 'button';
+                keep.addEventListener('click', () => dialog.close());
+
+                const actions = element('div', 'actions');
+                actions.append(remove, keep);
+                dialog.append(heading, note, actions);
+                document.body.append(dialog);
+                dialog.showModal();
+                keep.focus();  // the safe choice is the default
             }
 
             async function deleteShort(item) {
@@ -575,9 +612,12 @@
                     const { ok, data } = await postJson('/api/shorts/delete', { filename: item.filename });
                     if (!ok || !data.success) throw new Error(data.error || 'Could not delete the short');
                     await loadLibrary();
+                    $('resultsStatus').replaceChildren(notice('ok', 'Short deleted.', `"${item.title}" was removed.`));
                 } catch (error) {
                     $('resultsStatus').replaceChildren(notice('error', 'Could not delete the short.', error.message));
                 }
+                // The deleted card took focus with it; continue from the list heading
+                $('resultHeading').focus();
             }
 
             function shortCard(item, isNew) {
@@ -594,17 +634,21 @@
                 if (item.size) meta.append(element('span', undefined, (item.size / BYTES_PER_MB).toFixed(1) + ' MB'));
                 meta.append(element('span', undefined, relativeTime(item.created)));
 
+                // Every card has the same three buttons; the labels say which short they act on
                 const download = element('a', 'btn btn-sm', 'Download');
                 download.href = source;
                 download.download = item.filename;
+                download.setAttribute('aria-label', `Download ${item.title}`);
 
                 const upload = element('button', 'btn btn-sm', 'Upload to YouTube');
                 upload.type = 'button';
+                upload.setAttribute('aria-label', `Upload ${item.title} to YouTube`);
                 upload.addEventListener('click', () => startYouTubeUpload(item.filename, item.title));
 
                 const remove = element('button', 'btn btn-sm btn-quiet', 'Delete');
                 remove.type = 'button';
-                remove.addEventListener('click', () => armDelete(remove, item));
+                remove.setAttribute('aria-label', `Delete ${item.title}`);
+                remove.addEventListener('click', () => confirmDelete(item));
 
                 const actions = element('div', 'short-actions');
                 actions.append(download, upload, remove);
@@ -645,6 +689,7 @@
 
             function resetForm() {
                 $('shortVideoForm').reset();
+                ui.clearErrors($('errorSummary'), checks.map(([input]) => input));
                 $('formStatus').replaceChildren();
                 $('shortLinkStatus').replaceChildren();
                 $('shortLinkPreview').replaceChildren();
@@ -719,6 +764,7 @@
                 }
                 busy = true;
                 cancelRequested = false;
+                let uploaded = null;
                 const status = $('resultsStatus');
                 status.replaceChildren();
                 showLoading('Signing in to YouTube...');
@@ -736,7 +782,7 @@
                         privacy: 'private',  // change it in YouTube Studio when you are ready
                     });
                     if (!ok || !data.success) throw new Error(data.error || 'Upload failed');
-                    showYouTubeSuccess(data);
+                    uploaded = data;
                 } catch (error) {
                     console.error('YouTube upload failed:', error);
                     status.replaceChildren(notice('error', 'Upload failed.', error.message));
@@ -745,6 +791,8 @@
                     busy = false;
                     hideLoading();
                 }
+                // Opened only after the overlay is gone, so closing it returns focus to the Upload button
+                if (uploaded) showYouTubeSuccess(uploaded);
             }
 
             function showYouTubeSuccess(result) {

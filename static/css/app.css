@@ -445,7 +445,8 @@ a {
     margin-top: 1.25rem;
 }
 
-.stack > :empty {
+.stack > :empty,
+.stack > [hidden]:first-child + * {
     margin-top: 0;
 }
 
@@ -522,7 +523,9 @@ textarea:hover {
 input:focus-visible,
 select:focus-visible,
 textarea:focus-visible {
-    outline: 0;
+    /* transparent, not removed: Windows high contrast mode draws it in a visible colour */
+    outline: 2px solid transparent;
+    outline-offset: 2px;
     border-color: var(--ink);
     box-shadow: 0 0 0 3px rgba(27, 27, 27, 0.18);
 }
@@ -558,6 +561,47 @@ select {
     height: 1.15rem;
     margin: 0;
     accent-color: var(--primary);
+}
+
+/* ---- form errors: a summary above the form, a message at each field ---- */
+
+.error-summary {
+    padding: 1rem 1.15rem;
+    background: var(--danger-soft);
+    border: 2px solid var(--danger);
+    border-radius: var(--radius-sm);
+}
+
+.error-summary h2 {
+    font-size: var(--text-base);
+    font-weight: 700;
+}
+
+.error-summary ul {
+    margin: 0.4rem 0 0;
+    padding-left: 1.2rem;
+}
+
+.error-summary a {
+    font-weight: 600;
+    color: var(--danger);
+}
+
+.field.has-error {
+    padding-left: 0.85rem;
+    border-left: 4px solid var(--danger);
+}
+
+.field-error {
+    margin-bottom: 0.4rem;
+    font-size: var(--text-sm);
+    font-weight: 600;
+    color: var(--danger);
+}
+
+.field.has-error input,
+.field.has-error textarea {
+    border-color: var(--danger);
 }
 
 /* ---- buttons ---- */
@@ -608,6 +652,13 @@ select {
     color: #fff;
     background: var(--primary-hover);
     border-color: var(--primary-hover);
+}
+
+.btn-danger,
+.btn-danger:hover {
+    color: #fff;
+    background: var(--danger);
+    border-color: var(--danger);
 }
 
 .btn-quiet {
@@ -798,8 +849,11 @@ dialog.dialog .actions {
         left: 0;
         z-index: 60;
         width: 17.5rem;
+        /* Off screen is not enough: hidden also takes the closed drawer out of the tab order
+           and away from screen readers. It turns hidden only after the slide-out ends. */
+        visibility: hidden;
         transform: translateX(-100%);
-        transition: transform 0.2s ease-out;
+        transition: transform 0.2s ease-out, visibility 0s linear 0.2s;
     }
 
     .sidebar-collapsed .brand-name,
@@ -824,7 +878,9 @@ dialog.dialog .actions {
     }
 
     .menu-open .sidebar {
+        visibility: visible;
         transform: none;
+        transition: transform 0.2s ease-out;
     }
 
     .menu-open .scrim {
@@ -845,8 +901,14 @@ dialog.dialog .actions {
         flex-direction: column;
     }
 
+    /* Hidden from sight only: the link still needs its name for screen readers */
     .topbar-actions .btn-label {
-        display: none;
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip: rect(0 0 0 0);
+        white-space: nowrap;
     }
 }
 

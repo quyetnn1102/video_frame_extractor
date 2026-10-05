@@ -24,9 +24,18 @@
             toggle.setAttribute('aria-label', collapsed ? 'Expand the sidebar' : 'Collapse the sidebar');
         }
 
+        const workspace = document.querySelector('.workspace');
+
+        // The open drawer behaves like a dialog: focus moves into it, the page behind cannot be
+        // reached, and closing it puts focus back on the menu button.
         function setMenu(open) {
+            const wasOpen = root.classList.contains('menu-open');
+            if (open === wasOpen) return;
             root.classList.toggle('menu-open', open);
             menuButton.setAttribute('aria-expanded', String(open));
+            workspace.inert = open;
+            if (open) document.querySelector('#sidebar a').focus();
+            else menuButton.focus();
         }
 
         toggle.addEventListener('click', () => {
@@ -46,6 +55,10 @@
             if (event.key === 'Escape') setMenu(false);
         });
         document.querySelectorAll('#sidebar a').forEach((link) => link.addEventListener('click', () => setMenu(false)));
+        // Widening the window past the drawer breakpoint must not leave the page inert
+        window.matchMedia('(min-width: 56.01rem)').addEventListener('change', (event) => {
+            if (event.matches) setMenu(false);
+        });
 
         syncToggle();
     });

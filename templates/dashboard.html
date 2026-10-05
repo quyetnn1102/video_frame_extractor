@@ -28,6 +28,14 @@
             margin: 0 0 1.5rem;
         }
 
+        /* The markup reads label then number (dt before dd); the number is shown first */
+        .readout > div,
+        .average {
+            display: flex;
+            flex-direction: column-reverse;
+            justify-content: flex-end;
+        }
+
         .readout > div {
             padding: 1.1rem 1.25rem;
             background: #fff;
@@ -245,25 +253,27 @@
                         <input type="checkbox" id="autoRefresh" checked>
                         Update every 5 seconds
                     </label>
-                    <p class="hint" id="lastUpdated" role="status">Showing the numbers from when the page loaded.</p>
+                    <p class="hint" id="lastUpdated">Showing the numbers from when the page loaded.</p>
+                    <!-- Only failures are announced: a status that changes every 5 seconds is noise -->
+                    <p class="visually-hidden" id="refreshAlert" role="status"></p>
                 </div>
 
                 <dl class="readout" id="metricsRow">
                     <div>
-                        <dd id="totalRequests">{{ analytics.total_requests or 0 }}</dd>
                         <dt>requests in total</dt>
+                        <dd id="totalRequests">{{ analytics.total_requests or 0 }}</dd>
                     </div>
                     <div>
-                        <dd id="successRate">{{ "%.1f"|format(analytics.success_rate or 0) }}%</dd>
                         <dt>succeeded</dt>
+                        <dd id="successRate">{{ "%.1f"|format(analytics.success_rate or 0) }}%</dd>
                     </div>
                     <div>
-                        <dd id="recentRequests">{{ analytics.recent_requests_24h or 0 }}</dd>
                         <dt>in the last 24 hours</dt>
+                        <dd id="recentRequests">{{ analytics.recent_requests_24h or 0 }}</dd>
                     </div>
                     <div>
-                        <dd id="totalFrames">{{ analytics.total_frames_extracted or 0 }}</dd>
                         <dt>frames extracted</dt>
+                        <dd id="totalFrames">{{ analytics.total_frames_extracted or 0 }}</dd>
                     </div>
                 </dl>
 
@@ -293,28 +303,22 @@
                             <h2 id="systemHeading">This computer</h2>
                         </div>
                         <div class="meters" id="systemInfo">
+                            {# High load is said in words too, not only shown in red #}
+                            {% for key, label, value in [('cpu', 'Processor', system_info.cpu_percent or 0),
+                                                         ('memory', 'Memory', system_info.memory_percent or 0),
+                                                         ('disk', 'Disk', system_info.disk_usage or 0)] %}
                             <div class="meter">
-                                <div class="meter-head"><span>Processor</span><span class="time" id="cpuPercent">{{ "%.1f"|format(system_info.cpu_percent or 0) }}%</span></div>
-                                <div class="meter-track" aria-hidden="true">
-                                    <div class="meter-fill{% if (system_info.cpu_percent or 0) >= 85 %} is-high{% endif %}" id="cpuProgressBar" style="width: {{ system_info.cpu_percent or 0 }}%"></div>
+                                <div class="meter-head"><span id="{{ key }}Label">{{ label }}</span><span class="time" id="{{ key }}Percent">{{ "%.1f"|format(value) }}%{% if value >= 85 %} (high){% endif %}</span></div>
+                                <div class="meter-track" id="{{ key }}Meter" role="meter" aria-labelledby="{{ key }}Label"
+                                     aria-valuemin="0" aria-valuemax="100" aria-valuenow="{{ "%.1f"|format(value) }}">
+                                    <div class="meter-fill{% if value >= 85 %} is-high{% endif %}" id="{{ key }}ProgressBar" style="width: {{ value }}%"></div>
                                 </div>
                             </div>
-                            <div class="meter">
-                                <div class="meter-head"><span>Memory</span><span class="time" id="memoryPercent">{{ "%.1f"|format(system_info.memory_percent or 0) }}%</span></div>
-                                <div class="meter-track" aria-hidden="true">
-                                    <div class="meter-fill{% if (system_info.memory_percent or 0) >= 85 %} is-high{% endif %}" id="memoryProgressBar" style="width: {{ system_info.memory_percent or 0 }}%"></div>
-                                </div>
-                            </div>
-                            <div class="meter">
-                                <div class="meter-head"><span>Disk</span><span class="time" id="diskPercent">{{ "%.1f"|format(system_info.disk_usage or 0) }}%</span></div>
-                                <div class="meter-track" aria-hidden="true">
-                                    <div class="meter-fill{% if (system_info.disk_usage or 0) >= 85 %} is-high{% endif %}" id="diskProgressBar" style="width: {{ system_info.disk_usage or 0 }}%"></div>
-                                </div>
-                            </div>
+                            {% endfor %}
                         </div>
                         <dl class="average">
-                            <dd id="avgProcessingTime">{{ (analytics.avg_processing_time_ms or 0)|round|int }}ms</dd>
                             <dt>average time to process a request</dt>
+                            <dd id="avgProcessingTime">{{ (analytics.avg_processing_time_ms or 0)|round|int }}ms</dd>
                         </dl>
                     </section>
                 </div>
@@ -372,10 +376,12 @@
 
             function setMeter(name, percent) {
                 const value = Number(percent) || 0;
-                $(name + 'Percent').textContent = value.toFixed(1) + '%';
+                const isHigh = value >= HIGH_LOAD_PERCENT;
+                $(name + 'Percent').textContent = value.toFixed(1) + '%' + (isHigh ? ' (high)' : '');
+                $(name + 'Meter').setAttribute('aria-valuenow', value.toFixed(1));
                 const bar = $(name + 'ProgressBar');
                 bar.style.width = value.toFixed(1) + '%';
-                bar.classList.toggle('is-high', value >= HIGH_LOAD_PERCENT);
+                bar.classList.toggle('is-high', isHigh);
             }
 
             function platformRow(platform, count, busiest) {
@@ -434,10 +440,14 @@
                             setMeter('disk', data.system_info.disk_usage);
                         }
                         $('lastUpdated').textContent = 'Updated at ' + new Date().toLocaleTimeString() + '.';
+                        $('refreshAlert').textContent = '';
                     })
                     .catch((error) => {
                         console.error('Error updating dashboard:', error);
-                        $('lastUpdated').textContent = 'Could not update. Trying again in a few seconds.';
+                        const message = 'Could not update. Trying again in a few seconds.';
+                        $('lastUpdated').textContent = message;
+                        // Set once per outage, so the failure is announced but not repeated every 5 s
+                        if ($('refreshAlert').textContent !== message) $('refreshAlert').textContent = message;
                     });
             }
 

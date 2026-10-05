@@ -131,6 +131,73 @@ class TestTemplates(unittest.TestCase):
         for declaration in ['position: fixed', 'display: none', 'z-index']:
             self.assertIn(declaration, rule)
 
+    def test_the_top_bar_button_keeps_its_name_on_small_screens(self):
+        """display:none on the label left the icon-only "New short" link without a name."""
+        css = STYLESHEET.read_text(encoding='utf-8')
+        rule = re.search(r'\.topbar-actions \.btn-label\s*\{([^}]*)\}', css).group(1)
+        self.assertNotIn('display: none', rule)
+        self.assertIn('clip:', rule)
+
+    def test_the_closed_mobile_drawer_cannot_be_reached_by_keyboard(self):
+        css = STYLESHEET.read_text(encoding='utf-8')
+        drawer = css.split('@media (max-width: 56rem)')[1]
+        self.assertRegex(drawer, r'\.sidebar\s*\{[^}]*visibility: hidden')
+        self.assertRegex(drawer, r'\.menu-open \.sidebar\s*\{[^}]*visibility: visible')
+        shell = (STATIC_DIR / 'js' / 'shell.js').read_text(encoding='utf-8')
+        self.assertIn('workspace.inert = open', shell)
+        self.assertIn('menuButton.focus()', shell, 'closing the drawer must return focus to the menu button')
+
+    def test_the_busy_overlay_is_a_modal_that_is_announced(self):
+        ui = (STATIC_DIR / 'js' / 'ui.js').read_text(encoding='utf-8')
+        self.assertIn(".inert = true", ui, 'the page behind the overlay must not be reachable')
+        for page in ['extract.html', 'create_short.html']:
+            with self.subTest(template=page):
+                text = (TEMPLATES_DIR / page).read_text(encoding='utf-8')
+                overlay = re.search(r'<div class="loading-overlay"[^>]*>', text).group(0)
+                self.assertIn('role="dialog"', overlay)
+                self.assertIn('aria-modal="true"', overlay)
+                # a live region that is itself shown and hidden is not read out reliably
+                self.assertNotIn('role="status"', overlay)
+                self.assertIn('id="busyStatus" role="status"', text)
+                self.assertIn('src="/static/js/ui.js"', text)
+                self.assertIn('ui.showBusy(', text)
+                self.assertIn('ui.hideBusy(', text)
+        # Focus cannot move into the page while it is inert, so the results take focus via hideBusy
+        extract = (TEMPLATES_DIR / 'extract.html').read_text(encoding='utf-8')
+        self.assertIn('ui.hideBusy(focusAfter)', extract)
+
+    def test_forms_show_their_own_errors_at_each_field(self):
+        for page in ['extract.html', 'create_short.html']:
+            with self.subTest(template=page):
+                text = (TEMPLATES_DIR / page).read_text(encoding='utf-8')
+                form = re.search(r'<form [^>]*>', text).group(0)
+                self.assertIn('novalidate', form, 'browser tooltips would pre-empt the error summary')
+                self.assertIn('id="errorSummary" class="error-summary" tabindex="-1" hidden', text)
+                self.assertIn('ui.showErrors(', text)
+                self.assertIn("ui.whileWorking($('validate", text, 'Check link needs a busy state')
+
+    def test_the_timecode_limit_matches_the_server(self):
+        from validators import MAX_TIMESTAMPS
+        text = (TEMPLATES_DIR / 'extract.html').read_text(encoding='utf-8')
+        self.assertEqual(int(re.search(r'MAX_TIMECODES = (\d+)', text).group(1)), MAX_TIMESTAMPS)
+        self.assertIn(f'Up to {MAX_TIMESTAMPS}.', text)
+
+    def test_deleting_a_short_is_confirmed_in_a_dialog_without_a_time_limit(self):
+        text = (TEMPLATES_DIR / 'create_short.html').read_text(encoding='utf-8')
+        self.assertNotIn('Click again', text)
+        delete = text.split('function confirmDelete')[1].split('async function deleteShort')[0]
+        self.assertIn('showModal()', delete)
+        self.assertNotIn('setTimeout', delete)
+
+    def test_dashboard_lists_put_each_label_before_its_value(self):
+        text = (TEMPLATES_DIR / 'dashboard.html').read_text(encoding='utf-8')
+        for group in re.findall(r'<dl[^>]*>(.*?)</dl>', text, re.S):
+            for first_of_pair in re.findall(r'<(dt|dd)\b', group)[::2]:
+                self.assertEqual(first_of_pair, 'dt', 'a <dd> before its <dt> is read out backwards')
+        status = re.search(r'<p[^>]*id="lastUpdated"[^>]*>', text).group(0)
+        self.assertNotIn('role="status"', status, 'a status rewritten every 5 s is announced every 5 s')
+        self.assertIn('role="meter"', text)
+
     def test_no_invented_reliability_percentages_are_shown(self):
         for path in TEMPLATE_FILES:
             with self.subTest(template=path.name):
