@@ -1,0 +1,136 @@
+.query {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
+    gap: 1rem;
+    align-items: end;
+    margin-bottom: 1.5rem;
+}
+
+.query .hint {
+    grid-column: 1 / -1;
+    margin: 0;
+}
+
+.trend-status:not(:empty),
+.trend-message:not(:empty) {
+    margin-bottom: 1.25rem;
+}
+
+.chart {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(17rem, 1fr));
+    gap: 1.5rem;
+    align-items: start;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    transition: opacity 0.2s;
+}
+
+.chart[aria-busy="true"] {
+    opacity: 0.4;
+}
+
+.entry > :not(.thumb) {
+    padding-inline: 1rem;
+}
+
+.thumb {
+    position: relative;
+    aspect-ratio: 16 / 9;
+    overflow: hidden;
+    background: var(--strip);
+}
+
+.thumb img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.rank {
+    position: absolute;
+    left: var(--space-3);
+    top: var(--space-3);
+}
+
+.entry-title {
+    margin-top: 0.85rem;
+    font-size: var(--text-base);
+    font-weight: 600;
+    line-height: 1.3;
+}
+
+.entry-channel {
+    margin-top: 0.15rem;
+    font-size: var(--text-sm);
+    font-weight: 500;
+}
+
+.entry-desc {
+    margin-top: 0.35rem;
+    font-size: var(--text-sm);
+    color: var(--ink-soft);
+}
+
+.entry-stats {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.15rem 1rem;
+    margin-top: 0.6rem;
+    font-size: var(--text-sm);
+    color: var(--ink-soft);
+}
+
+.entry-stats strong {
+    font-weight: 600;
+    color: var(--ink);
+}
+
+.entry .actions {
+    margin-top: 0.9rem;
+    padding-bottom: 1rem;
+    align-items: center;
+    gap: 1rem;
+}
+
+.entry .btn {
+    min-height: 2.2rem;
+    padding: 0.35rem 0.8rem;
+}
+
+.entry .actions a:not(.btn) {
+    font-size: var(--text-sm);
+    font-weight: 600;
+}
+
+/* The first video on the chart gets the room */
+@media (min-width: 46rem) {
+    .entry.is-lead {
+        grid-column: span 2;
+    }
+
+    .entry.is-lead .thumb {
+        aspect-ratio: 2 / 1;
+    }
+
+    .entry.is-lead .entry-title {
+        --lines: 3;
+        font-size: var(--text-xl);
+        font-weight: 700;
+        letter-spacing: -0.01em;
+        line-height: 1.2;
+    }
+
+    .entry.is-lead .entry-desc {
+        --lines: 3;
+        font-size: var(--text-base);
+    }
+}
+
+@media (max-width: 52rem) {
+    .query {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}

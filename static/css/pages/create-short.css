@@ -1,0 +1,207 @@
+.workbench {
+    display: grid;
+    grid-template-columns: minmax(0, 1.7fr) minmax(16rem, 1fr);
+    gap: clamp(1.25rem, 3vw, 2rem);
+    align-items: start;
+}
+
+.aside {
+    position: sticky;
+    top: calc(var(--topbar-h) + 1.25rem);
+}
+
+/* Length presets: pressed state is the selection */
+.durations {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 0.5rem;
+}
+
+.duration-option {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.1rem;
+    padding: 0.6rem 0.4rem 0.55rem;
+    font: inherit;
+    color: var(--ink);
+    background: var(--surface);
+    border: 1px solid var(--field-edge);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: background-color var(--quick), color var(--quick), border-color var(--quick);
+}
+
+.duration-option:hover {
+    border-color: var(--ink);
+}
+
+.duration-option strong {
+    font-size: var(--text-lg);
+    font-weight: 700;
+    line-height: 1.2;
+}
+
+.duration-option small {
+    font-size: var(--text-xs);
+    color: var(--ink-soft);
+}
+
+.duration-option[aria-pressed="true"] {
+    color: var(--surface);
+    background: var(--primary);
+    border-color: var(--primary);
+}
+
+.duration-option[aria-pressed="true"] small {
+    color: var(--on-primary-dim);
+}
+
+.two-up {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1.25rem;
+}
+
+.form-end {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.render-note {
+    flex-basis: 100%;
+}
+
+/* The crop diagram: what the 9:16 cut keeps of the original picture */
+.crop {
+    margin: 0;
+}
+
+.crop-frame {
+    position: relative;
+    aspect-ratio: 16 / 9;
+    overflow: hidden;
+    background: var(--hatch);
+    border-radius: var(--radius-sm);
+}
+
+.crop-keep {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 50%;
+    width: 31.64%;
+    transform: translateX(-50%);
+    border: 2px solid var(--lime);
+    background: var(--crop-keep);
+    box-shadow: 0 0 0 100vmax var(--crop-shade);
+}
+
+.crop.is-full .crop-keep {
+    width: 100%;
+    border-color: transparent;
+    box-shadow: none;
+}
+
+.crop figcaption {
+    margin-top: 0.6rem;
+    font-size: var(--text-sm);
+    color: var(--ink-soft);
+}
+
+.aside-note {
+    margin-top: 1.5rem;
+    padding-top: 1.25rem;
+    border-top: 1px solid var(--rule);
+}
+
+.aside-note h2 {
+    font-size: var(--text-base);
+    font-weight: 600;
+}
+
+.aside-note p {
+    margin-top: 0.4rem;
+    font-size: var(--text-sm);
+    color: var(--ink-soft);
+}
+
+/* Your shorts: bordered cards that are rebuilt from the server on every visit */
+.library {
+    margin-top: clamp(2rem, 5vw, 3rem);
+}
+
+.library .notice {
+    margin-bottom: 1.25rem;
+}
+
+.shelf {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
+    gap: 1.5rem;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.short-video {
+    display: block;
+    width: 100%;
+    aspect-ratio: 9 / 16;
+    object-fit: contain;
+    background: var(--strip);
+}
+
+.short-card.is-new {
+    border-color: var(--ink);
+    box-shadow: 0 0 0 2px var(--lime), var(--card-shadow);
+}
+
+.short-body {
+    padding: 0.85rem 1rem 1rem;
+}
+
+.short-title {
+    font-size: var(--text-base);
+    font-weight: 600;
+    line-height: 1.3;
+    overflow-wrap: anywhere;
+}
+
+.short-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0 0.9rem;
+    margin-top: 0.2rem;
+    font-size: var(--text-sm);
+    color: var(--ink-soft);
+}
+
+.short-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    margin-top: 0.8rem;
+}
+
+@media (max-width: 60rem) {
+    .workbench {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .aside {
+        position: static;
+    }
+}
+
+@media (max-width: 36rem) {
+    .durations {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .two-up {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}

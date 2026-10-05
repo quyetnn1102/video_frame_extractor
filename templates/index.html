@@ -5,225 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Home - VideoExtract</title>
     <link rel="stylesheet" href="/static/css/app.css">
+    <link rel="stylesheet" href="/static/css/shell.css">
     <script src="/static/js/shell.js"></script>
-    <style>
-        .launcher {
-            width: min(100%, 44rem);
-            margin: 0 auto;
-        }
-
-        .launcher h2 {
-            margin-bottom: 1rem;
-            font-size: var(--text-lg);
-            font-weight: 600;
-        }
-
-        .launch-actions {
-            display: flex;
-            flex-wrap: wrap;
-            align-items: center;
-            gap: 0.75rem;
-            margin-top: 1rem;
-        }
-
-        .launch-actions .hint {
-            margin: 0 0 0 auto;
-        }
-
-        .tools {
-            display: grid;
-            grid-template-columns: repeat(3, minmax(0, 1fr));
-            gap: 1.25rem;
-            margin-top: clamp(1.75rem, 4vw, 2.5rem);
-        }
-
-        .tool {
-            display: block;
-            padding: 1.25rem;
-            text-decoration: none;
-            background: #fff;
-            border: 1px solid var(--rule);
-            border-radius: var(--radius);
-            box-shadow: var(--card-shadow);
-            transition: border-color var(--quick), box-shadow var(--quick);
-        }
-
-        .tool:hover {
-            border-color: var(--ink);
-        }
-
-        .tool-icon {
-            display: grid;
-            place-items: center;
-            width: 2.75rem;
-            height: 2.75rem;
-            margin-bottom: 1rem;
-            background: var(--soft);
-            border-radius: 10px;
-        }
-
-        .tool h3 {
-            font-size: var(--text-base);
-            font-weight: 600;
-        }
-
-        .tool p {
-            margin-top: 0.15rem;
-            font-size: var(--text-sm);
-            color: var(--ink-soft);
-        }
-
-        .home-section {
-            margin-top: clamp(2rem, 5vw, 3rem);
-        }
-
-        .home-section .section-head a {
-            font-size: var(--text-sm);
-            font-weight: 600;
-        }
-
-        /* Recent shorts */
-        .recent {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
-            gap: 1.25rem;
-            margin: 0;
-            padding: 0;
-            list-style: none;
-        }
-
-        .recent-card {
-            display: block;
-            overflow: hidden;
-            text-decoration: none;
-            background: #fff;
-            border: 1px solid var(--rule);
-            border-radius: var(--radius);
-            box-shadow: var(--card-shadow);
-            transition: border-color var(--quick);
-        }
-
-        .recent-card:hover {
-            border-color: var(--ink);
-        }
-
-        .recent-thumb {
-            position: relative;
-            aspect-ratio: 16 / 10;
-            background: var(--strip);
-        }
-
-        .recent-thumb video {
-            display: block;
-            width: 100%;
-            height: 100%;
-            object-fit: contain;
-            pointer-events: none;
-        }
-
-        .recent-thumb .tag {
-            position: absolute;
-            left: 0.6rem;
-            bottom: 0.6rem;
-        }
-
-        .recent-thumb .chip {
-            position: absolute;
-            right: 0.6rem;
-            bottom: 0.6rem;
-        }
-
-        .recent-body {
-            padding: 0.8rem 1rem 0.9rem;
-        }
-
-        .recent-title {
-            display: -webkit-box;
-            -webkit-line-clamp: 1;
-            line-clamp: 1;
-            -webkit-box-orient: vertical;
-            overflow: hidden;
-            font-weight: 500;
-        }
-
-        .recent-meta {
-            font-size: var(--text-sm);
-            color: var(--ink-soft);
-        }
-
-        .empty-card {
-            display: flex;
-            flex-wrap: wrap;
-            align-items: center;
-            justify-content: space-between;
-            gap: 1rem;
-            padding: 1.5rem;
-            background: var(--soft);
-            border: 1px dashed var(--field-edge);
-            border-radius: var(--radius);
-        }
-
-        .empty-card strong {
-            display: block;
-        }
-
-        .empty-card p {
-            font-size: var(--text-sm);
-            color: var(--ink-soft);
-        }
-
-        /* Get started: a real sequence, so the steps are numbered */
-        .steps {
-            display: grid;
-            grid-template-columns: repeat(3, minmax(0, 1fr));
-            gap: 1.25rem;
-            margin: 0;
-            padding: 0;
-            list-style: none;
-        }
-
-        .step {
-            padding: 1.25rem;
-            background: var(--soft);
-            border-radius: var(--radius);
-        }
-
-        .step-number {
-            display: grid;
-            place-items: center;
-            width: 2rem;
-            height: 2rem;
-            margin-bottom: 0.9rem;
-            font-size: var(--text-sm);
-            font-weight: 700;
-            color: var(--lime-ink);
-            background: var(--lime);
-            border-radius: 50%;
-        }
-
-        .step h3 {
-            font-size: var(--text-base);
-            font-weight: 600;
-        }
-
-        .step p {
-            margin-top: 0.2rem;
-            font-size: var(--text-sm);
-            color: var(--ink-soft);
-        }
-
-        @media (max-width: 52rem) {
-            .tools,
-            .steps {
-                grid-template-columns: minmax(0, 1fr);
-            }
-
-            .launch-actions .hint {
-                margin-left: 0;
-                flex-basis: 100%;
-            }
-        }
-    </style>
+    <link rel="stylesheet" href="/static/css/pages/home.css">
 </head>
 <body>
     <a class="skip-link" href="#main">Skip to content</a>
@@ -248,17 +32,17 @@
                 </form>
 
                 <div class="tools">
-                    <a class="tool" href="/extract">
+                    <a class="card tool" href="/extract">
                         <span class="tool-icon"><svg class="icon" aria-hidden="true"><use href="#i-frames"/></svg></span>
                         <h3>Extract frames</h3>
                         <p>One image for every timecode you list</p>
                     </a>
-                    <a class="tool" href="/create-short">
+                    <a class="card tool" href="/create-short">
                         <span class="tool-icon"><svg class="icon" aria-hidden="true"><use href="#i-scissors"/></svg></span>
                         <h3>Create short</h3>
                         <p>Vertical 9:16 clips from any moment of a video</p>
                     </a>
-                    <a class="tool" href="/trending">
+                    <a class="card tool" href="/trending">
                         <span class="tool-icon"><svg class="icon" aria-hidden="true"><use href="#i-trending"/></svg></span>
                         <h3>Trending</h3>
                         <p>See what is popular on YouTube right now</p>
@@ -271,12 +55,12 @@
                         <a href="/create-short#resultsSection">View all</a>
                     </div>
                     <ul class="recent" id="recentShorts"></ul>
-                    <div class="empty-card" id="recentEmpty" hidden>
+                    <div class="empty-state" id="recentEmpty" hidden>
                         <div>
-                            <strong>No shorts yet</strong>
+                            <h3>No shorts yet</h3>
                             <p>Shorts you create show up here and stay after you close the app.</p>
                         </div>
-                        <a class="btn btn-primary" href="/create-short">Create your first short</a>
+                        <a class="btn" href="/create-short">Create your first short</a>
                     </div>
                 </section>
 
@@ -307,114 +91,7 @@
     </div>
 
     <script src="/static/js/link-preview.js"></script>
-    <script>
-        (function () {
-            'use strict';
-
-            const MAX_RECENT = 4;
-            const SECONDS_PER_MINUTE = 60;
-            const RELATIVE_UNITS = [['day', 86400], ['hour', 3600], ['minute', 60]];
-            const $ = (id) => document.getElementById(id);
-
-            // Titles come from other sites: everything is built with textContent, never HTML strings.
-            function element(tag, className, text) {
-                const node = document.createElement(tag);
-                if (className) node.className = className;
-                if (text !== undefined) node.textContent = text;
-                return node;
-            }
-
-            function isLink(value) {
-                try {
-                    const url = new URL(value);
-                    return (url.protocol === 'https:' || url.protocol === 'http:') && url.hostname.includes('.');
-                } catch (error) {
-                    return false;
-                }
-            }
-
-            // ---- paste a link, then choose what to do with it --------------------------
-
-            function syncButtons() {
-                const ready = isLink($('launchUrl').value.trim());
-                $('launchShort').disabled = !ready;
-                $('launchFrames').disabled = !ready;
-            }
-
-            function openTool(path) {
-                const url = $('launchUrl').value.trim();
-                if (!isLink(url)) return;
-                window.location.href = path + '?url=' + encodeURIComponent(url);
-            }
-
-            $('launchUrl').addEventListener('input', syncButtons);
-            $('launchForm').addEventListener('submit', (event) => {
-                event.preventDefault();
-                openTool('/create-short');
-            });
-            $('launchFrames').addEventListener('click', () => openTool('/extract'));
-            window.attachLinkPreview($('launchUrl'), $('launchPreview'));
-            syncButtons();
-
-            // ---- recent shorts, from the shorts saved on disk ---------------------------
-
-            function relativeTime(isoDate) {
-                const seconds = (new Date(isoDate).getTime() - Date.now()) / 1000;
-                const formatter = new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' });
-                for (const [unit, size] of RELATIVE_UNITS) {
-                    if (Math.abs(seconds) >= size) return formatter.format(Math.round(seconds / size), unit);
-                }
-                return 'just now';
-            }
-
-            function formatLength(totalSeconds) {
-                const seconds = Math.round(Number(totalSeconds));
-                if (!Number.isFinite(seconds) || seconds <= 0) return '';
-                return `${Math.floor(seconds / SECONDS_PER_MINUTE)}:${String(seconds % SECONDS_PER_MINUTE).padStart(2, '0')}`;
-            }
-
-            function recentCard(item) {
-                const thumb = element('div', 'recent-thumb');
-                if (typeof item.url === 'string' && item.url.startsWith('/shorts/')) {
-                    const video = element('video');
-                    video.preload = 'metadata';
-                    video.muted = true;
-                    video.playsInline = true;
-                    video.src = item.url + '#t=0.1';  // shows the first moment as the cover
-                    thumb.append(video);
-                }
-                thumb.append(element('span', 'tag', 'Short'));
-                const length = formatLength(item.duration);
-                if (length) thumb.append(element('span', 'chip', length));
-
-                const body = element('div', 'recent-body');
-                body.append(element('p', 'recent-title', item.title), element('p', 'recent-meta', relativeTime(item.created)));
-
-                const card = element('a', 'recent-card');
-                card.href = '/create-short#resultsSection';
-                card.append(thumb, body);
-
-                const entry = element('li');
-                entry.append(card);
-                return entry;
-            }
-
-            async function loadRecent() {
-                try {
-                    const response = await fetch('/api/shorts');
-                    const data = await response.json();
-                    if (!response.ok || !data.success) throw new Error(data.error || 'Request failed');
-                    const items = data.shorts.slice(0, MAX_RECENT);
-                    $('recentShorts').replaceChildren(...items.map(recentCard));
-                    $('recentEmpty').hidden = items.length > 0;
-                } catch (error) {
-                    console.error('Could not load the recent shorts:', error);
-                    $('recentEmpty').hidden = false;
-                }
-            }
-
-            loadRecent();
-        })();
-    </script>
+    <script src="/static/js/ui.js"></script>
+    <script src="/static/js/pages/home.js"></script>
 </body>
 </html>

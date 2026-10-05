@@ -47,7 +47,7 @@
 
     function card(info) {
         const text = element('div', 'preview-text');
-        text.append(element('strong', 'preview-title', info.title || 'Untitled video'));
+        text.append(element('strong', 'preview-title clamp', info.title || 'Untitled video'));
 
         const facts = element('div', 'preview-facts');
         [info.platform, info.uploader].forEach((fact) => {

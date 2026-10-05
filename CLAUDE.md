@@ -29,20 +29,21 @@ uv run --frozen --no-dev python deploy.py               # Linux production helpe
 - `video_processor.py`: `extractor`: yt-dlp download with limits and an extractor allow-list (no generic extractor), OpenCV frame extraction, cleanup. `link_resolver.py` resolves `fb.watch` links safely (only that host is fetched, redirects re-validated).
 - `short_video.py`: request parsing (start time, duration, quality, overlay) and the MoviePy render.
 - `library.py`: lists the shorts in `generated_shorts/` for `GET /api/shorts`. The Create short page is rebuilt from it on every visit, so never keep a result only in the DOM. Frames cannot be grouped by extraction on the server, so the home page remembers the last one in `localStorage`.
-- `static/`: `css/app.css` (all shared styles, tokens at the top), `js/shell.js` (collapsible sidebar, mobile drawer) and `js/link-preview.js` (the pasted-link preview, built with `textContent` only); the Inter font is self-hosted in `static/fonts/` because the CSP allows fonts from this origin only.
+- `static/`: `css/app.css` (tokens at the top: colours, `--space-*`, type scale; then shared components such as `.card`/`.card-flush`, `.clamp`, `.empty-state`, `.inline-loading`, forms, notices, overlay, dialog), `css/shell.css` (sidebar, top bar, mobile drawer), `js/shell.js` (collapsible sidebar, mobile drawer), `js/ui.js` (`window.ui`: DOM helpers, `postJson`, busy overlay, form errors, timecode parsing, `attachLinkCheck`) and `js/link-preview.js` (the pasted-link preview, built with `textContent` only). Each page's own code is in `css/pages/<page>.css` and `js/pages/<page>.js`. The Inter font is self-hosted in `static/fonts/` because the CSP allows fonts from this origin only.
 - Pages share the app shell (dark sidebar + top bar) through `templates/partials/` (`icons`, `sidebar`, `topbar`), included after each page sets `active_page` and `page_title`. There is no base template and no inheritance: `tests/test_templates.py` lists the five page files and checks that each includes the partials. `/` is the Home launcher, the frame extractor is `/extract`.
 - `trending.py`: YouTube Data API trending (API key sent in a header, never logged).
 - `youtube_uploader.py`: `youtube_uploader`: OAuth (state checked, JSON credentials, lazy `google_auth_oauthlib` import) and uploads.
 - `database.py`: `db_manager`: SQLite `app_data.db`; `/api/extract` and `/api/create-short` write to it, the dashboard reads it.
 - `logger.py`: `app_logger`, `api_logger`, `video_logger`, `LogContext`.
 
-`templates/` holds the four Jinja pages (`index`, `create_short`, `trending`, `dashboard`).
+`templates/` holds the five Jinja pages (`index`, `extract`, `create_short`, `trending`, `dashboard`).
 
 ## Rules that matter here
 
 - Never accept a file path from a client. Use `resolve_in_folder(folder, name, extensions)`; uploads take the name of a short in `generated_shorts/`.
 - Error responses use `json_error()`; never return `str(e)` or paths to the browser. Log details server-side.
 - In templates build DOM with `textContent`/`addEventListener`; never interpolate data into `innerHTML` or inline handlers. `tests/test_templates.py` enforces this and that script ids exist in the page.
+- The CSP has no `'unsafe-inline'`: no `<style>`, inline `<script>`, `style="..."` or `on...=` attributes in templates (set sizes from JS, e.g. `data-width`). Colours are tokens in `app.css`'s `:root`; page files use `var(--...)`. Use the shared helpers in `ui.js` and components in `app.css` instead of copying them into a page; the tests check all of this, and that every CSS/JS file stays under 800 lines.
 - Adding a platform needs: host in `PLATFORM_HOSTS` and a path pattern in `validators.py`, its yt-dlp extractor name in `YTDLP_ALLOWED_EXTRACTORS`, and a `PlatformProcessor`.
 - Changing an env var or route? Update the `README.md` tables: `tests/test_docs.py` fails when they drift from `config.py` and the URL map.
 - `/api/*` rejects cross-site browser requests (`Sec-Fetch-Site`, `Origin`) and every request needs an allowed `Host`; new API routes get this for free, new GET routes with side effects should not exist.

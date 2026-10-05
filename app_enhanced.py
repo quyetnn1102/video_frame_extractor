@@ -44,8 +44,9 @@ MAX_TRENDING_RESULTS = 50
 
 CONTENT_SECURITY_POLICY = "; ".join([
     "default-src 'self'",
-    "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net",
-    "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com",
+    # No 'unsafe-inline': pages keep their scripts and styles in /static (tests/test_templates.py)
+    "script-src 'self' https://cdn.jsdelivr.net",
+    "style-src 'self' https://cdn.jsdelivr.net https://cdnjs.cloudflare.com",
     "font-src 'self' https://cdnjs.cloudflare.com",
     "img-src 'self' data: https:",
     "media-src 'self'",
@@ -96,10 +97,12 @@ PLATFORM_GUIDANCE = {
 }
 
 OAUTH_RESULT_PAGE = """<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><title>YouTube sign-in</title></head>
-<body style="font-family: sans-serif; text-align: center; margin-top: 15vh;">
+<html lang="en"><head><meta charset="utf-8"><title>YouTube sign-in</title>
+<link rel="stylesheet" href="/static/css/app.css"></head>
+<body><main class="result-page">
 <h1>{{ heading }}</h1><p>{{ message }}</p><p>You can close this window.</p>
-<script>setTimeout(function () { window.close(); }, 2000);</script>
+</main>
+<script src="/static/js/oauth-result.js"></script>
 </body></html>"""
 
 

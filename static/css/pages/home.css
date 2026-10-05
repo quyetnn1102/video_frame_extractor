@@ -1,0 +1,165 @@
+.launcher {
+    width: min(100%, 44rem);
+    margin: 0 auto;
+}
+
+.launcher h2 {
+    margin-bottom: 1rem;
+    font-size: var(--text-lg);
+    font-weight: 600;
+}
+
+.launch-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.75rem;
+    margin-top: 1rem;
+}
+
+.launch-actions .hint {
+    margin: 0 0 0 auto;
+}
+
+.tools {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 1.25rem;
+    margin-top: clamp(1.75rem, 4vw, 2.5rem);
+}
+
+.tool {
+    padding: 1.25rem;
+}
+
+.tool-icon {
+    display: grid;
+    place-items: center;
+    width: 2.75rem;
+    height: 2.75rem;
+    margin-bottom: 1rem;
+    background: var(--soft);
+    border-radius: 10px;
+}
+
+.tool h3 {
+    font-size: var(--text-base);
+    font-weight: 600;
+}
+
+.tool p {
+    margin-top: 0.15rem;
+    font-size: var(--text-sm);
+    color: var(--ink-soft);
+}
+
+.home-section {
+    margin-top: clamp(2rem, 5vw, 3rem);
+}
+
+.home-section .section-head a {
+    font-size: var(--text-sm);
+    font-weight: 600;
+}
+
+/* Recent shorts */
+.recent {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
+    gap: 1.25rem;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.recent-thumb {
+    position: relative;
+    aspect-ratio: 16 / 10;
+    background: var(--strip);
+}
+
+.recent-thumb video {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+    pointer-events: none;
+}
+
+.recent-thumb .tag {
+    position: absolute;
+    left: 0.6rem;
+    bottom: 0.6rem;
+}
+
+.recent-thumb .chip {
+    position: absolute;
+    right: 0.6rem;
+    bottom: 0.6rem;
+}
+
+.recent-body {
+    padding: 0.8rem 1rem 0.9rem;
+}
+
+.recent-title {
+    --lines: 1;
+    font-weight: 500;
+}
+
+.recent-meta {
+    font-size: var(--text-sm);
+    color: var(--ink-soft);
+}
+
+/* Get started: a real sequence, so the steps are numbered */
+.steps {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 1.25rem;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.step {
+    padding: 1.25rem;
+    background: var(--soft);
+    border-radius: var(--radius);
+}
+
+.step-number {
+    display: grid;
+    place-items: center;
+    width: 2rem;
+    height: 2rem;
+    margin-bottom: 0.9rem;
+    font-size: var(--text-sm);
+    font-weight: 700;
+    color: var(--lime-ink);
+    background: var(--lime);
+    border-radius: 50%;
+}
+
+.step h3 {
+    font-size: var(--text-base);
+    font-weight: 600;
+}
+
+.step p {
+    margin-top: 0.2rem;
+    font-size: var(--text-sm);
+    color: var(--ink-soft);
+}
+
+@media (max-width: 52rem) {
+    .tools,
+    .steps {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .launch-actions .hint {
+        margin-left: 0;
+        flex-basis: 100%;
+    }
+}

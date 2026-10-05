@@ -1,0 +1,218 @@
+.live {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.25rem 1.5rem;
+    margin-bottom: 1.25rem;
+}
+
+.live .hint {
+    margin: 0;
+}
+
+/* The headline numbers */
+.readout {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 1rem;
+    margin: 0 0 1.5rem;
+}
+
+/* The markup reads label then number (dt before dd); the number is shown first */
+.readout > div,
+.average {
+    display: flex;
+    flex-direction: column-reverse;
+    justify-content: flex-end;
+}
+
+.readout dd {
+    margin: 0;
+    font-size: clamp(1.75rem, 1.2rem + 1.6vw, 2.5rem);
+    font-weight: 700;
+    line-height: 1.1;
+    letter-spacing: -0.02em;
+    font-variant-numeric: tabular-nums;
+}
+
+.readout dt {
+    margin-top: 0.3rem;
+    font-size: var(--text-sm);
+    color: var(--ink-soft);
+}
+
+.panels {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1.5rem;
+}
+
+.log {
+    margin-top: 1.5rem;
+}
+
+/* Platform usage: lengths are the counts, scaled to the busiest platform */
+.tally {
+    display: grid;
+    gap: 0.9rem;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.tally li {
+    display: grid;
+    grid-template-columns: 6.5rem minmax(0, 1fr) 3rem;
+    align-items: center;
+    gap: 0.9rem;
+}
+
+.tally li.muted {
+    display: block;
+}
+
+.tally .name {
+    text-transform: capitalize;
+    font-weight: 600;
+    overflow-wrap: anywhere;
+}
+
+.tally .track {
+    height: 0.8rem;
+    background: var(--soft);
+    border-radius: 999px;
+    overflow: hidden;
+}
+
+.tally .fill {
+    display: block;
+    height: 100%;
+    background: var(--primary);
+    border-radius: 999px;
+}
+
+.tally .count {
+    text-align: right;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+}
+
+/* Level meters for this computer: red when nearly full */
+.meters {
+    display: grid;
+    gap: 1.25rem;
+}
+
+.meter-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 0.35rem;
+    font-size: var(--text-sm);
+    font-weight: 600;
+}
+
+.meter-track {
+    height: 0.8rem;
+    background: var(--soft);
+    border-radius: 999px;
+    overflow: hidden;
+}
+
+.meter-fill {
+    height: 100%;
+    width: 0;
+    background: var(--primary);
+    border-radius: 999px;
+    transition: width 0.6s ease-out;
+}
+
+.meter-fill.is-high {
+    background: var(--danger);
+}
+
+.average {
+    margin: 1.5rem 0 0;
+    padding-top: 1.1rem;
+    border-top: 1px solid var(--rule);
+}
+
+.average dd {
+    margin: 0;
+    font-size: var(--text-2xl);
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    font-variant-numeric: tabular-nums;
+}
+
+.average dt {
+    font-size: var(--text-sm);
+    color: var(--ink-soft);
+}
+
+/* The request log */
+.log-scroll {
+    overflow-x: auto;
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: var(--text-sm);
+}
+
+th,
+td {
+    padding: 0.7rem 1rem 0.7rem 0;
+    text-align: left;
+    vertical-align: top;
+    border-bottom: 1px solid var(--rule);
+}
+
+th {
+    font-weight: 600;
+    white-space: nowrap;
+    color: var(--ink-soft);
+}
+
+td.platform {
+    text-transform: capitalize;
+    font-weight: 600;
+}
+
+td.when {
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+}
+
+.state::before {
+    content: "";
+    display: inline-block;
+    width: 0.65rem;
+    height: 0.65rem;
+    margin-right: 0.45rem;
+    border: 2px solid currentColor;
+    background: currentColor;
+}
+
+.status-completed { color: var(--ok); }
+.status-completed::before { border-radius: 50%; }
+.status-failed { color: var(--danger); }
+.status-processing { color: var(--warn); }
+.status-processing::before { border-radius: 50%; background: transparent; }
+
+.empty-row {
+    padding: 1.5rem 0;
+    color: var(--ink-soft);
+}
+
+@media (max-width: 52rem) {
+    .readout {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .panels {
+        grid-template-columns: minmax(0, 1fr);
+    }
+}
