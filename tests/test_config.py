@@ -5,8 +5,7 @@ import unittest
 from unittest.mock import patch
 
 import config
-from config import (Config, DevelopmentConfig, ProductionConfig, env_bool,
-                    get_config, resolve_environment)
+from config import Config, env_bool, get_config, resolve_environment
 
 
 def load_fresh_config(env):
@@ -79,6 +78,20 @@ class TestSafeDefaults(unittest.TestCase):
         self.assertFalse(fresh.DevelopmentConfig.DEBUG)
         self.assertFalse(fresh.ProductionConfig.DEBUG)
         self.assertTrue(load_fresh_config({'FLASK_DEBUG': '1'}).DevelopmentConfig.DEBUG)
+
+    def test_the_testing_environment_does_not_enable_the_debugger_either(self):
+        """The Werkzeug debugger wraps the app outside the Host check; it must stay opt-in."""
+        self.assertFalse(load_fresh_config({'FLASK_DEBUG': ''}).TestConfig.DEBUG)
+
+    def test_request_bodies_are_capped_for_a_json_only_api(self):
+        self.assertLessEqual(Config.MAX_CONTENT_LENGTH, 1024 * 1024)
+
+    def test_invalid_numbers_name_the_setting(self):
+        for name in ['PORT', 'MAX_VIDEO_DURATION', 'MAX_DOWNLOAD_MB']:
+            with self.subTest(name=name):
+                with self.assertRaises(ValueError) as caught:
+                    load_fresh_config({name: 'abc'})
+                self.assertIn(name, str(caught.exception))
 
     def test_dev_secret_key_is_random_not_a_published_constant(self):
         fresh = load_fresh_config({'SECRET_KEY': ''})

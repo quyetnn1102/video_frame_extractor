@@ -29,7 +29,11 @@ def env_bool(name: str, default: bool = False, environ: Optional[Mapping[str, st
 
 def env_int(name: str, default: int) -> int:
     """Read an integer from the environment; blank or unset uses the default."""
-    return int(os.getenv(name) or default)
+    raw = os.getenv(name) or default
+    try:
+        return int(raw)
+    except ValueError:
+        raise ValueError(f"{name} must be a whole number, got {raw!r}") from None
 
 
 def env_str(name: str, default: str) -> str:
@@ -74,7 +78,7 @@ class Config:
     DEBUG = env_bool('FLASK_DEBUG')
     # Without SECRET_KEY, development gets a random per-process key, not a published constant.
     SECRET_KEY = os.getenv('SECRET_KEY') or secrets.token_hex(32)
-    MAX_CONTENT_LENGTH = 100 * 1024 * 1024  # 100MB max request body
+    MAX_CONTENT_LENGTH = 1024 * 1024  # 1MB: the API only takes small JSON bodies, no uploads
 
     # Network exposure: loopback only unless explicitly changed
     HOST = env_str('HOST', '127.0.0.1')
@@ -168,7 +172,6 @@ class ProductionConfig(Config):
 class TestConfig(Config):
     """Testing configuration"""
     TESTING = True
-    DEBUG = True
     DOWNLOAD_FOLDER = Config.BASE_DIR / 'test_downloads'
     FRAMES_FOLDER = Config.BASE_DIR / 'test_frames'
     SHORTS_FOLDER = Config.BASE_DIR / 'test_shorts'

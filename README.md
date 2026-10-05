@@ -141,7 +141,8 @@ All endpoints return JSON (errors as `{"success": false, "error": "..."}`) and r
 | `POST /api/cleanup` | Delete files older than `AUTO_CLEANUP_HOURS` | 5/min |
 | `GET /api/trending?region=&category=&max_results=` | Popular YouTube videos | default |
 | `GET /api/video-categories` | Category list | default |
-| `GET /api/youtube-auth` | Sign-in state, or the Google consent URL | 20/min |
+| `GET /api/youtube-auth` | Sign-in state only (safe to poll) | 120/min |
+| `POST /api/youtube-auth/start` | Begin sign-in; returns the Google consent URL | 20/min |
 | `GET /oauth2callback` | Google redirects back here after sign-in | 10/min |
 | `POST /api/upload-to-youtube` `{filename, title, description, tags, privacy}` | Upload a short from `generated_shorts/` by file name | 5/min |
 | `GET /api/youtube-quota` | Pointer to the official quota rules | default |

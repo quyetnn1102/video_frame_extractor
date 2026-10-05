@@ -59,7 +59,9 @@ class TestApiTableMatchesTheApp(unittest.TestCase):
         return routes
 
     def app_routes(self):
-        with patch.object(app_enhanced, 'extractor', Mock()), \
+        extractor = Mock()
+        extractor.cleanup_old_files.return_value = (0, 0, [])
+        with patch.object(app_enhanced, 'extractor', extractor), \
                 patch.object(app_enhanced, 'youtube_uploader', Mock()), \
                 patch.object(app_enhanced, 'db_manager', Mock()):
             app = app_enhanced.create_app()

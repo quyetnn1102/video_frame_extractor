@@ -52,6 +52,19 @@ class TestTemplates(unittest.TestCase):
         self.assertNotIn('video_path', text, 'the upload API takes a file name, not a server path')
         self.assertNotIn('type="file"', text, 'the API takes a URL, not an uploaded file')
 
+    def test_youtube_sign_in_flow_is_robust(self):
+        text = (TEMPLATES_DIR / 'create_short.html').read_text(encoding='utf-8')
+        self.assertIn("'/api/youtube-auth/start'", text)
+        # The sign-in is awaited by polling the server; popup.closed is unreliable once
+        # Google's pages sever the link to the opener
+        wait_logic = text.split('async function ensureSignedIn')[1].split('function startYouTubeUpload')[0]
+        self.assertNotIn('.closed', re.sub(r'//.*', '', wait_logic), 'code must not rely on popup.closed')
+        # window.open has to run in the click handler, before any await
+        handler = text.split('function startYouTubeUpload')[1].split('async function uploadToYouTube')[0]
+        self.assertIn('openSignInWindow()', handler)
+        self.assertNotIn('await', handler)
+        self.assertIn('id="cancelLoadingBtn"', text)
+
     def test_loading_overlay_is_hidden_until_needed_and_covers_the_page(self):
         text = (TEMPLATES_DIR / 'create_short.html').read_text(encoding='utf-8')
         rule = re.search(r'\.loading-overlay\s*\{([^}]*)\}', text).group(1)

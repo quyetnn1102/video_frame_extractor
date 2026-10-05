@@ -7,12 +7,13 @@ responses. It is built for local use: it listens on loopback by default and
 only answers requests whose Host header is on the allow-list.
 """
 import os
+import re
 import time
 import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Optional
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 from flask import (Flask, jsonify, render_template, render_template_string, request,
                    send_from_directory)
@@ -33,6 +34,9 @@ from youtube_uploader import PRIVACY_STATUSES, YouTubeUploaderError, youtube_upl
 
 APP_VERSION = '2.1.0'
 LOOPBACK_HOSTS = ('127.0.0.1', 'localhost', '::1')
+HOST_HEADER = re.compile(r'(?P<host>\[[0-9a-f:.]+\]|[a-z0-9.-]+)(?::(?P<port>\d{1,5}))?')
+MAX_PORT = 65535
+CROSS_SITE_VALUES = ('cross-site', 'same-site')
 MAX_FRAME_FILENAME_TITLE = 50
 DEFAULT_SHORT_DURATION = 30
 MAX_TRENDING_RESULTS = 50
@@ -109,14 +113,31 @@ def get_json_body() -> Optional[Dict[str, Any]]:
     return data if isinstance(data, dict) else None
 
 
-def host_is_allowed(host_header: str, allowed_hosts) -> bool:
-    """True when the Host header names one of the allowed hosts (any port)."""
-    try:
-        hostname = urlsplit('//' + (host_header or '')).hostname
-    except ValueError:
+def host_is_allowed(host_header: Optional[str], allowed_hosts) -> bool:
+    """
+    True when a Host header is exactly `<allowed host>` or `<allowed host>:<port>`.
+
+    The whole header must match a strict pattern (no userinfo, tabs, paths or
+    extra colons), instead of being parsed leniently and then trusted.
+    """
+    match = HOST_HEADER.fullmatch((host_header or '').lower())
+    if not match:
+        return False
+    port = match.group('port')
+    if port is not None and int(port) > MAX_PORT:
         return False
     allowed = {host.strip('[]').lower() for host in allowed_hosts}
-    return bool(hostname) and hostname.lower() in allowed
+    return match.group('host').strip('[]') in allowed
+
+
+def origin_is_allowed(origin: str, allowed_hosts) -> bool:
+    """True when an Origin header names this app (an allowed host over http or https)."""
+    try:
+        parsed = urlsplit(origin)
+    except ValueError:
+        return False
+    return (parsed.scheme in ('http', 'https') and bool(parsed.netloc)
+            and host_is_allowed(parsed.netloc, allowed_hosts))
 
 
 def remove_quietly(path) -> None:
@@ -194,6 +215,16 @@ def create_app() -> Flask:
         if not host_is_allowed(request.host, config.ALLOWED_HOSTS):
             app_logger.warning("Rejected request with unexpected Host header")
             return json_error('Invalid Host header', 400)
+
+        # There is no login, so the browser must not let another website call the API.
+        # Pages and /oauth2callback are exempt: following a link or Google's redirect
+        # back after sign-in are cross-site navigations.
+        if request.path.startswith('/api/'):
+            if request.headers.get('Sec-Fetch-Site') in CROSS_SITE_VALUES:
+                return json_error('Cross-site requests are not allowed', 403)
+            origin = request.headers.get('Origin')
+            if origin is not None and not origin_is_allowed(origin, config.ALLOWED_HOSTS):
+                return json_error('Origin not allowed', 403)
 
     @app.after_request
     def finish_response(response):
@@ -319,13 +350,23 @@ def create_app() -> Flask:
         if not isinstance(url, str) or not url.strip():
             return json_error('URL is required', 400)
 
-        platform = validator.get_platform_from_url(url.strip())
-        info = PLATFORM_GUIDANCE.get(platform, {
-            'status': 'unsupported',
-            'notes': 'Unsupported platform',
-            'tips': ['Try a YouTube, TikTok, Facebook, Instagram or Douyin link'],
-        })
-        return jsonify({'platform': platform, 'valid': platform in PLATFORM_GUIDANCE, 'info': info})
+        # Same check create-short applies, so "valid" here means the link will be accepted
+        url = url.strip()
+        is_valid, platform, error = validator.validate_url(url)
+        if platform == 'unknown':
+            platform = validator.get_platform_from_url(url)
+        guidance = PLATFORM_GUIDANCE.get(platform)
+
+        if is_valid:
+            info = guidance
+        else:
+            info = {
+                'status': 'invalid' if guidance else 'unsupported',
+                'notes': error or 'Unsupported platform',
+                'tips': guidance['tips'] if guidance else
+                        ['Try a YouTube, TikTok, Facebook, Instagram or Douyin link'],
+            }
+        return jsonify({'platform': platform, 'valid': is_valid, 'info': info})
 
     @app.route('/api/video-categories')
     def get_video_categories():
@@ -424,7 +465,10 @@ def create_app() -> Flask:
             response['warnings'] = errors
         return jsonify(response)
 
+    # The file routes are cheap and a results page loads up to 50 frames at once (and
+    # videos are fetched in ranges), so they are exempt from the API rate limit.
     @app.route('/frames/<filename>')
+    @limiter.exempt
     def serve_frame(filename):
         path = resolve_in_folder(config.FRAMES_FOLDER, filename, ('.jpg',))
         if path is None:
@@ -458,7 +502,9 @@ def create_app() -> Flask:
             text_overlay = normalize_text_overlay(overlay_request)
         except ShortVideoError as error:
             return json_error(str(error), 400)
-        vertical = data.get('vertical_format') is True
+        vertical = data.get('vertical_format', False)
+        if not isinstance(vertical, bool):
+            return json_error('vertical_format must be true or false', 400)
 
         with LogContext(api_logger, "Short video creation"):
             started = time.time()
@@ -498,13 +544,14 @@ def create_app() -> Flask:
                 'start_time': result['start_time'],
                 'quality': quality,
                 'file_size': file_size_or_none(output_path),
-                'download_url': f'/shorts/{output_name}',
+                'download_url': f'/shorts/{quote(output_name)}',
             }
             if result['warnings']:
                 response['warnings'] = result['warnings']
             return jsonify(response)
 
     @app.route('/shorts/<filename>')
+    @limiter.exempt
     def serve_short_video(filename):
         path = resolve_in_folder(config.SHORTS_FOLDER, filename, ('.mp4',))
         if path is None:
@@ -528,9 +575,15 @@ def create_app() -> Flask:
     # -- API: YouTube -----------------------------------------------------------
 
     @app.route('/api/youtube-auth')
+    @limiter.limit("120 per minute")  # the page polls this while the sign-in window is open
+    def youtube_auth_status():
+        """Sign-in state only. No side effects, so polling cannot disturb a sign-in in progress."""
+        return jsonify({'authenticated': youtube_uploader.is_authenticated()})
+
+    @app.route('/api/youtube-auth/start', methods=['POST'])
     @limiter.limit("20 per minute")
-    def youtube_auth():
-        """Report sign-in state, or return the Google consent URL to open in a popup."""
+    def youtube_auth_start():
+        """Begin sign-in and return the Google consent URL to open in a popup."""
         if youtube_uploader.is_authenticated():
             return jsonify({'authenticated': True})
         try:
@@ -611,6 +664,8 @@ def create_app() -> Flask:
     def youtube_quota():
         return jsonify(youtube_uploader.get_upload_quota_info())
 
+    # Done here, not in main(), so gunicorn and tests get it too
+    run_startup_cleanup()
     return app
 
 
@@ -627,7 +682,6 @@ def main():
     """Main entry point"""
     config = get_config()
     app = create_app()
-    run_startup_cleanup()
 
     if config.HOST not in LOOPBACK_HOSTS:
         app_logger.warning(

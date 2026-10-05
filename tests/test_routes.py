@@ -3,6 +3,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
+from urllib.parse import quote
 
 import app_enhanced
 from app_enhanced import create_app
@@ -27,14 +28,18 @@ class RouteTestCase(unittest.TestCase):
             folder.mkdir()
 
         config = get_config()
+        # ALLOWED_HOSTS and HOST are pinned so a developer's .env cannot change the results
         for name, value in [('FRAMES_FOLDER', self.frames), ('SHORTS_FOLDER', self.shorts),
                             ('DOWNLOAD_FOLDER', self.downloads),
-                            ('RATELIMIT_ENABLED', self.rate_limit_enabled)]:
+                            ('RATELIMIT_ENABLED', self.rate_limit_enabled),
+                            ('ALLOWED_HOSTS', ('localhost', '127.0.0.1', '[::1]')),
+                            ('HOST', '127.0.0.1')]:
             patcher = patch.object(config, name, value, create=True)
             patcher.start()
             self.addCleanup(patcher.stop)
 
         self.extractor = self.patch_module('extractor')
+        self.extractor.cleanup_old_files.return_value = (0, 0, [])
         self.uploader = self.patch_module('youtube_uploader')
         self.db = self.patch_module('db_manager')
         self.db.log_video_request.return_value = 7
@@ -59,10 +64,27 @@ class TestRequestGuards(RouteTestCase):
         for host, expected in [('localhost', 200), ('localhost:5000', 200), ('LOCALHOST', 200),
                                ('127.0.0.1:5000', 200), ('[::1]:5000', 200),
                                ('evil.example', 400), ('localhost.evil.com', 400),
-                               ('127.0.0.1.evil.com', 400), ('192.168.1.10:5000', 400)]:
+                               ('127.0.0.1.evil.com', 400), ('192.168.1.10:5000', 400),
+                               ('localhost.', 400), ('user@localhost', 400),
+                               ('evil.com\\@localhost', 400)]:
             with self.subTest(host=host):
                 response = self.client.get('/api/health', headers={'Host': host})
                 self.assertEqual(response.status_code, expected)
+
+    def test_host_header_parser(self):
+        allowed = ('localhost', '127.0.0.1', '[::1]', 'My.Box')
+        for host in ['localhost', 'LOCALHOST:5000', '127.0.0.1:1', '[::1]', '[::1]:65535',
+                     'my.box', 'MY.BOX:8080']:
+            with self.subTest(host=host):
+                self.assertTrue(app_enhanced.host_is_allowed(host, allowed))
+        # (ports like 'localhost:abc' never reach the app through the test client, so they
+        # are checked here, against the parser itself)
+        for host in ['', None, 'localhost\t', ' localhost', 'localhost:', ':5000', '::1',
+                     '[::1', 'localhost:65536', 'localhost:abc', 'localhost:99999',
+                     'localhost:5000:80', '[::ffff:127.0.0.1]', 'a@localhost',
+                     'localhost/path', 'localhost#x']:
+            with self.subTest(host=host):
+                self.assertFalse(app_enhanced.host_is_allowed(host, allowed))
 
     def test_security_headers_are_set(self):
         response = self.client.get('/api/health')
@@ -78,6 +100,59 @@ class TestRequestGuards(RouteTestCase):
     def test_hsts_is_only_sent_over_https(self):
         response = self.client.get('/api/health', base_url='https://localhost')
         self.assertIn('Strict-Transport-Security', response.headers)
+
+
+class TestCrossSiteGuards(RouteTestCase):
+    """Another website must not be able to drive the local API from the user's browser."""
+
+    def test_api_calls_from_other_sites_are_refused(self):
+        self.extractor.cleanup_old_files.reset_mock()  # create_app() already swept once
+        for site in ('cross-site', 'same-site'):
+            for method, path in [('get', '/api/health'), ('post', '/api/cleanup'),
+                                 ('get', '/api/youtube-auth'), ('get', '/api/trending')]:
+                with self.subTest(site=site, path=path):
+                    response = getattr(self.client, method)(path, headers={'Sec-Fetch-Site': site})
+                    self.assertEqual(response.status_code, 403)
+                    self.assertFalse(response.get_json()['success'])
+        self.extractor.cleanup_old_files.assert_not_called()
+
+    def test_same_origin_and_non_browser_clients_are_fine(self):
+        for headers in [{'Sec-Fetch-Site': 'same-origin'}, {'Sec-Fetch-Site': 'none'}, {}]:
+            with self.subTest(headers=headers):
+                self.assertEqual(self.client.get('/api/health', headers=headers).status_code, 200)
+
+    def test_foreign_origins_are_refused(self):
+        for origin in ['http://evil.example', 'https://localhost.evil.com', 'null',
+                       'http://localhost@evil.com', 'file://', 'ftp://localhost']:
+            with self.subTest(origin=origin):
+                response = self.client.post('/api/cleanup', headers={'Origin': origin})
+                self.assertEqual(response.status_code, 403)
+
+    def test_the_apps_own_origin_is_accepted(self):
+        for origin in ['http://localhost:5000', 'http://127.0.0.1:5000', 'http://[::1]:5000',
+                       'https://localhost']:
+            with self.subTest(origin=origin):
+                response = self.client.post('/api/cleanup', headers={'Origin': origin})
+                self.assertEqual(response.status_code, 200)
+
+    def test_pages_and_the_oauth_callback_can_be_reached_from_other_sites(self):
+        """Following a link, and Google's redirect back after sign-in, are cross-site navigations."""
+        headers = {'Sec-Fetch-Site': 'cross-site'}
+        self.assertEqual(self.client.get('/', headers=headers).status_code, 200)
+        response = self.client.get('/oauth2callback', headers=headers)
+        self.assertEqual(response.status_code, 400)  # missing code/state, but not blocked as 403
+
+
+class TestRequestSize(RouteTestCase):
+    def test_oversized_bodies_are_refused_with_json(self):
+        huge = '{"url": "' + 'a' * (2 * 1024 * 1024) + '"}'
+        response = self.client.post('/api/validate-url', data=huge, content_type='application/json')
+        self.assertEqual(response.status_code, 413)
+        self.assertFalse(response.get_json()['success'])
+
+    def test_normal_bodies_are_accepted(self):
+        response = self.client.post('/api/validate-url', json={'url': 'https://example.com/x'})
+        self.assertEqual(response.status_code, 200)
 
 
 class TestErrorHandling(RouteTestCase):
@@ -141,6 +216,18 @@ class TestPagesAndInfo(RouteTestCase):
     def test_platform_guidance_for_unsupported_urls(self):
         data = self.client.post('/api/test-platform', json={'url': 'https://example.com/x'}).get_json()
         self.assertFalse(data['valid'])
+
+    def test_platform_check_agrees_with_what_create_short_would_accept(self):
+        """Any URL on a supported host used to count as valid, even a channel page."""
+        for url in ['https://www.youtube.com/', 'https://www.youtube.com/@somechannel',
+                    'https://evil.com\\.youtube.com/watch?v=abc123',
+                    'https://www.youtube.com:8443/watch?v=abc123']:
+            with self.subTest(url=url):
+                data = self.client.post('/api/test-platform', json={'url': url}).get_json()
+                self.assertFalse(data['valid'])
+                self.assertTrue(data['info']['notes'])
+        data = self.client.post('/api/test-platform', json={'url': VALID_URL}).get_json()
+        self.assertTrue(data['valid'])
 
     def test_platform_guidance_needs_a_string_url(self):
         for body in [{}, {'url': ''}, {'url': 5}]:
@@ -305,7 +392,8 @@ class TestCreateShort(RouteTestCase):
         self.assertRegex(data['filename'], r'^[\w -]+_[0-9a-f]{8}_short\.mp4$')
         self.assertNotIn(':', data['filename'])
         self.assertNotIn('/', data['filename'])
-        self.assertEqual(data['download_url'], '/shorts/' + data['filename'])
+        self.assertEqual(data['download_url'], '/shorts/' + quote(data['filename']))
+        self.assertNotIn(' ', data['download_url'])
         self.assertEqual((data['quality'], data['duration'], data['start_time']), ('low', 20, 30))
         self.assertEqual(data['file_size'], len(b'rendered-short'))
         self.assertTrue((self.shorts / data['filename']).exists())
@@ -315,6 +403,15 @@ class TestCreateShort(RouteTestCase):
         self.assertEqual((kwargs['start'], kwargs['duration'], kwargs['vertical']), (30, 20, True))
         self.assertEqual(kwargs['text_overlay']['text'], 'Hi')
         self.assertEqual(self.db.update_video_request.call_args.args[:2], (7, 'completed'))
+
+    def test_vertical_format_must_be_a_json_boolean(self):
+        """'true' used to be silently treated as false, giving a non-vertical short."""
+        for value in ['true', 1, 'yes', None, []]:
+            with self.subTest(value=value):
+                response = self.post(vertical_format=value)
+                self.assertEqual(response.status_code, 400)
+                self.assertIn('vertical_format', response.get_json()['error'])
+        self.extractor.download_video.assert_not_called()
 
     def test_legacy_overlay_text_field_is_still_accepted(self):
         video = self.make_download()
@@ -425,22 +522,36 @@ class TestYouTubeRoutes(RouteTestCase):
         self.assertEqual(response.status_code, 502)
         self.assertEqual(response.get_json()['error'], 'YouTube API error (403): quotaExceeded')
 
-    def test_auth_status_when_signed_in(self):
-        self.assertEqual(self.client.get('/api/youtube-auth').get_json(), {'authenticated': True})
+    def test_auth_status_reports_the_sign_in_state_without_side_effects(self):
+        """Polling this must never start (and so invalidate) a sign-in in progress."""
+        for signed_in in (True, False):
+            with self.subTest(signed_in=signed_in):
+                self.uploader.is_authenticated.return_value = signed_in
+                response = self.client.get('/api/youtube-auth')
+                self.assertEqual(response.get_json(), {'authenticated': signed_in})
+        self.uploader.begin_auth.assert_not_called()
 
-    def test_auth_returns_the_consent_url_when_signed_out(self):
+    def test_starting_sign_in_returns_the_consent_url(self):
         self.uploader.is_authenticated.return_value = False
         self.uploader.begin_auth.return_value = 'https://accounts.google.com/o/oauth2/auth?x=1'
-        data = self.client.get('/api/youtube-auth').get_json()
+        data = self.client.post('/api/youtube-auth/start').get_json()
         self.assertEqual(data, {'authenticated': False,
                                 'auth_url': 'https://accounts.google.com/o/oauth2/auth?x=1'})
 
-    def test_auth_reports_setup_problems(self):
+    def test_starting_sign_in_when_already_signed_in_does_not_restart_it(self):
+        data = self.client.post('/api/youtube-auth/start').get_json()
+        self.assertEqual(data, {'authenticated': True})
+        self.uploader.begin_auth.assert_not_called()
+
+    def test_starting_sign_in_reports_setup_problems(self):
         self.uploader.is_authenticated.return_value = False
         self.uploader.begin_auth.side_effect = YouTubeUploaderError('client_secrets.json not found.')
-        response = self.client.get('/api/youtube-auth')
+        response = self.client.post('/api/youtube-auth/start')
         self.assertEqual(response.status_code, 400)
         self.assertEqual(response.get_json()['error'], 'client_secrets.json not found.')
+
+    def test_starting_sign_in_is_not_available_as_a_get(self):
+        self.assertEqual(self.client.get('/api/youtube-auth/start').status_code, 405)
 
     def test_oauth_callback_completes_sign_in(self):
         self.uploader.complete_auth.return_value = (True, 'Authentication completed successfully')
@@ -495,28 +606,48 @@ class TestRateLimiting(RouteTestCase):
         self.assertFalse(response.get_json()['success'])
 
 
+class TestFileRoutesAreNotRateLimited(RouteTestCase):
+    """A result page loads one image per frame (up to 50), and videos fetch in ranges."""
+    rate_limit_enabled = True
+
+    def test_serving_files_does_not_use_up_the_api_rate_limit(self):
+        for path in ['/frames/missing.jpg', '/shorts/missing.mp4']:
+            with self.subTest(path=path):
+                statuses = {self.client.get(path).status_code for _ in range(60)}
+                self.assertEqual(statuses, {404})
+
+
+class TestStartupCleanup(RouteTestCase):
+    """Leftovers are swept when the app is created, so gunicorn gets it too."""
+
+    def test_creating_the_app_sweeps_old_files(self):
+        self.extractor.cleanup_old_files.reset_mock()
+        create_app()
+        self.extractor.cleanup_old_files.assert_called_once()
+
+    def test_a_failing_sweep_does_not_prevent_startup(self):
+        self.extractor.cleanup_old_files.side_effect = OSError('disk')
+        app = create_app()
+        self.assertEqual(app.test_client().get('/api/health').status_code, 200)
+
+
 class TestMain(unittest.TestCase):
-    def test_main_binds_to_the_configured_host_and_cleans_up_first(self):
+    def test_main_binds_to_the_configured_host(self):
         fake_app = Mock()
-        with patch.object(app_enhanced, 'create_app', return_value=fake_app), \
-                patch.object(app_enhanced, 'extractor') as extractor:
-            extractor.cleanup_old_files.return_value = (0, 0, [])
+        with patch.object(app_enhanced, 'create_app', return_value=fake_app):
             app_enhanced.main()
 
-        extractor.cleanup_old_files.assert_called_once()
         kwargs = fake_app.run.call_args.kwargs
         config = get_config()
         self.assertEqual((kwargs['host'], kwargs['port'], kwargs['debug']),
                          (config.HOST, config.PORT, config.DEBUG))
-        self.assertEqual(config.HOST, '127.0.0.1')
 
-    def test_startup_cleanup_failures_do_not_prevent_startup(self):
+    def test_main_never_enables_the_debugger_unless_asked(self):
         fake_app = Mock()
         with patch.object(app_enhanced, 'create_app', return_value=fake_app), \
-                patch.object(app_enhanced, 'extractor') as extractor:
-            extractor.cleanup_old_files.side_effect = OSError('disk')
+                patch.object(get_config(), 'DEBUG', False):
             app_enhanced.main()
-        fake_app.run.assert_called_once()
+        self.assertIs(fake_app.run.call_args.kwargs['debug'], False)
 
 
 if __name__ == '__main__':

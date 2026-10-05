@@ -755,6 +755,7 @@
             <div class="loading-progress">
                 <div class="progress-bar"></div>
             </div>
+            <button type="button" class="btn btn-outline-primary mt-3" id="cancelLoadingBtn" style="display: none;">Cancel</button>
         </div>
     </div>
 
@@ -770,6 +771,8 @@
             const BYTES_PER_MB = 1024 * 1024;
             const $ = (id) => document.getElementById(id);
             let busy = false;
+            let signedIn = false;          // set once the server confirms the YouTube sign-in
+            let cancelRequested = false;   // set by the Cancel button while waiting for sign-in
 
             // Server text is untrusted for display purposes: everything below is built
             // with textContent / addEventListener instead of HTML strings.
@@ -790,14 +793,20 @@
                     ? value : '';
             }
 
-            function showLoading(message) {
+            function showLoading(message, cancellable) {
                 $('loadingMessage').textContent = message;
+                $('cancelLoadingBtn').style.display = cancellable ? 'inline-block' : 'none';
                 $('loadingOverlay').style.display = 'flex';
             }
 
             function hideLoading() {
                 $('loadingOverlay').style.display = 'none';
+                $('cancelLoadingBtn').style.display = 'none';
             }
+
+            $('cancelLoadingBtn').addEventListener('click', () => {
+                cancelRequested = true;
+            });
 
             async function postJson(url, body) {
                 const response = await fetch(url, {
@@ -933,7 +942,7 @@
 
                 const upload = withIcon(element('button', 'btn-share'), 'fab fa-youtube', 'Upload to YouTube');
                 upload.type = 'button';
-                upload.addEventListener('click', () => uploadToYouTube(result.filename, result.title));
+                upload.addEventListener('click', () => startYouTubeUpload(result.filename, result.title));
 
                 const another = withIcon(element('button', 'btn-share'), 'fas fa-plus', 'Create Another');
                 another.type = 'button';
@@ -967,48 +976,72 @@
 
             // ---- YouTube upload ---------------------------------------------------
 
-            async function checkYouTubeAuth() {
+            const sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+
+            async function isSignedInToYouTube() {
                 const response = await fetch('/api/youtube-auth');
                 const data = await response.json();
-                if (!response.ok && data.error) throw new Error(data.error);
-                return data;
+                if (!response.ok) throw new Error(data.error || 'Could not check the YouTube sign-in');
+                return data.authenticated === true;
             }
 
-            async function authenticateYouTube() {
-                const status = await checkYouTubeAuth();
-                if (status.authenticated) return true;
-                if (!status.auth_url) throw new Error('Could not start the YouTube sign-in');
-
-                const authWindow = window.open(status.auth_url, 'youtube_auth',
-                                               'width=600,height=700,scrollbars=yes,resizable=yes');
-                if (!authWindow) throw new Error('Please allow pop-ups for this page and try again');
-
-                return new Promise((resolve, reject) => {
-                    const timeout = setTimeout(() => {
-                        clearInterval(poll);
-                        if (!authWindow.closed) authWindow.close();
-                        reject(new Error('Sign-in timed out'));
-                    }, AUTH_TIMEOUT_MS);
-                    const poll = setInterval(async () => {
-                        if (!authWindow.closed) return;
-                        clearInterval(poll);
-                        clearTimeout(timeout);
-                        try {
-                            resolve((await checkYouTubeAuth()).authenticated === true);
-                        } catch (error) {
-                            reject(error);
-                        }
-                    }, AUTH_POLL_MS);
-                });
+            // The popup must be opened synchronously inside the click handler (before any
+            // await), otherwise browsers treat it as unrequested and may block it.
+            function openSignInWindow() {
+                return window.open('', 'youtube_auth', 'width=600,height=700,scrollbars=yes,resizable=yes');
             }
 
-            async function uploadToYouTube(filename, title) {
-                if (busy) return;
+            async function ensureSignedIn(popup) {
+                if (await isSignedInToYouTube()) {
+                    signedIn = true;
+                    if (popup) popup.close();
+                    return true;
+                }
+                if (!popup) throw new Error('Please allow pop-ups for this page and try again');
+
+                const { ok, data } = await postJson('/api/youtube-auth/start', {});
+                if (!ok || !data.auth_url) {
+                    popup.close();
+                    throw new Error(data.error || 'Could not start the YouTube sign-in');
+                }
+                popup.location.href = data.auth_url;
+                showLoading('Waiting for you to sign in to YouTube in the other window...', true);
+
+                // Poll the server rather than popup.closed: Google's pages can sever the
+                // link to the opener, which makes `closed` unreliable.
+                const deadline = Date.now() + AUTH_TIMEOUT_MS;
+                while (Date.now() < deadline) {
+                    await sleep(AUTH_POLL_MS);
+                    if (cancelRequested) {
+                        popup.close();
+                        return false;
+                    }
+                    if (await isSignedInToYouTube()) {
+                        signedIn = true;
+                        popup.close();
+                        return true;
+                    }
+                }
+                popup.close();
+                throw new Error('Sign-in timed out');
+            }
+
+            function startYouTubeUpload(filename, title) {
+                const popup = signedIn ? null : openSignInWindow();  // synchronous: see above
+                uploadToYouTube(filename, title, popup);
+            }
+
+            async function uploadToYouTube(filename, title, popup) {
+                if (busy) {
+                    if (popup) popup.close();
+                    return;
+                }
                 busy = true;
+                cancelRequested = false;
                 showLoading('Signing in to YouTube...');
                 try {
-                    if (!(await authenticateYouTube())) {
-                        alert('YouTube sign-in was not completed. Please try again.');
+                    if (!(await ensureSignedIn(popup))) {
+                        alert('YouTube sign-in was cancelled.');
                         return;
                     }
                     showLoading('Uploading to YouTube...');
@@ -1025,6 +1058,7 @@
                     console.error('YouTube upload failed:', error);
                     alert(`❌ Upload failed: ${error.message}`);
                 } finally {
+                    if (popup && !popup.closed) popup.close();
                     busy = false;
                     hideLoading();
                 }
