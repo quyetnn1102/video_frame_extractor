@@ -55,6 +55,42 @@ class TestYtdlpOptions(unittest.TestCase):
                         ydl.extract_info(url, download=False)
                 self.assertIn('No suitable extractor', str(caught.exception))
 
+    def test_downloads_are_aborted_once_they_pass_the_size_limit(self):
+        """max_filesize only works when the server announces a size; streams need a hook."""
+        limit = self.config.MAX_DOWNLOAD_MB * 1024 * 1024
+        for name, opts in self.options.items():
+            with self.subTest(platform=name):
+                hooks = opts['progress_hooks']
+                self.assertEqual(len(hooks), 1)
+                hooks[0]({'status': 'downloading', 'downloaded_bytes': limit})  # at the limit: fine
+                hooks[0]({'status': 'downloading'})  # no byte count yet
+                hooks[0]({'status': 'finished', 'downloaded_bytes': None})
+                with self.assertRaises(yt_dlp.utils.DownloadError) as caught:
+                    hooks[0]({'status': 'downloading', 'downloaded_bytes': limit + 1})
+                self.assertIn(f'{self.config.MAX_DOWNLOAD_MB} MB', str(caught.exception))
+
+    def test_an_oversized_stream_is_reported_and_leaves_nothing_behind(self):
+        with tempfile.TemporaryDirectory() as folder:
+            folder = Path(folder)
+            options = self.options['youtube']
+            limit = self.config.MAX_DOWNLOAD_MB * 1024 * 1024
+
+            def fake_factory(params):
+                fake = FakeYoutubeDL(params, files=('{name}.mp4.part',))
+
+                def extract_info(url, download=True):
+                    FakeYoutubeDL.extract_info(fake, url, download)  # writes the .part file
+                    for hook in params['progress_hooks']:  # then the stream passes the limit
+                        hook({'status': 'downloading', 'downloaded_bytes': limit + 1})
+
+                fake.extract_info = extract_info
+                return fake
+
+            with patch.object(video_processor.yt_dlp, 'YoutubeDL', side_effect=fake_factory):
+                with self.assertRaises(yt_dlp.utils.DownloadError):
+                    download_with_ytdlp('https://example.test/v', options, folder)
+            self.assertEqual(list(folder.iterdir()), [])
+
     def test_duration_filter_rejects_long_videos_and_live_streams(self):
         match = self.options['youtube']['match_filter']
         self.assertIsNone(match({'duration': 60}, incomplete=False))

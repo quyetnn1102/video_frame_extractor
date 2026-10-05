@@ -96,9 +96,20 @@ def download_with_ytdlp(url: str, opts: Dict[str, Any],
     return str(finished), validator.sanitize_filename(info.get('title') or 'unknown'), None
 
 
-class VideoProcessingError(Exception):
-    """Custom exception for video processing errors"""
-    pass
+def make_size_limit_hook(limit_bytes: int):
+    """
+    yt-dlp progress hook that aborts a download once it passes `limit_bytes`.
+
+    The max_filesize option only applies when the server announces a size in
+    advance; HLS/DASH streams and chunked responses report none, so they need this.
+    """
+    def hook(status: Dict[str, Any]) -> None:
+        downloaded = status.get('downloaded_bytes') or 0
+        if downloaded > limit_bytes:
+            raise yt_dlp.utils.DownloadError(
+                f"The download is larger than the {limit_bytes // BYTES_PER_MB} MB limit")
+    return hook
+
 
 class PlatformProcessor:
     """Base class for platform-specific video processing"""
@@ -125,6 +136,7 @@ class PlatformProcessor:
             'writethumbnail': False,
             # Limits for untrusted URLs
             'max_filesize': self.config.MAX_DOWNLOAD_MB * BYTES_PER_MB,
+            'progress_hooks': [make_size_limit_hook(self.config.MAX_DOWNLOAD_MB * BYTES_PER_MB)],
             'socket_timeout': self.config.SOCKET_TIMEOUT,
             'retries': self.config.DOWNLOAD_RETRIES,
             'match_filter': yt_dlp.utils.match_filter_func(
