@@ -388,13 +388,14 @@ class EnhancedVideoFrameExtractor:
                 if not is_valid_path:
                     return False, path_error
                 
+                # Messages reach the browser, so they never include server paths
                 if not os.path.exists(video_path):
-                    return False, f"Video file not found: {video_path}"
-                
+                    return False, "Video file not found"
+
                 # Use OpenCV for frame extraction (more reliable than moviepy for single frames)
                 cap = cv2.VideoCapture(video_path)
                 if not cap.isOpened():
-                    return False, f"Could not open video file: {video_path}"
+                    return False, "Could not open the video file"
                 
                 # Set video position to timestamp (in milliseconds)
                 cap.set(cv2.CAP_PROP_POS_MSEC, timestamp * 1000)
@@ -409,18 +410,18 @@ class EnhancedVideoFrameExtractor:
                 # Save frame
                 success = cv2.imwrite(output_path, frame)
                 if not success:
-                    return False, f"Could not save frame to {output_path}"
+                    return False, "Could not save the extracted frame"
                 
                 video_logger.info("Frame extracted successfully", 
                                 timestamp=timestamp, 
                                 output_path=os.path.basename(output_path))
                 return True, None
                 
-            except Exception as e:
-                video_logger.exception("Frame extraction failed", 
-                                     timestamp=timestamp, 
+            except (cv2.error, OSError, ValueError) as e:
+                video_logger.exception("Frame extraction failed",
+                                     timestamp=timestamp,
                                      error=str(e))
-                return False, f"Frame extraction error: {str(e)}"
+                return False, "Frame extraction failed"
     
     def get_video_info(self, url: str) -> Tuple[bool, Optional[Dict[str, Any]], Optional[str]]:
         """

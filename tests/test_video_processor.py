@@ -190,6 +190,18 @@ class TestFrameExtraction(unittest.TestCase):
         self.assertFalse(success)
         self.assertIn('outside', error)
 
+    def test_error_messages_do_not_reveal_server_paths(self):
+        missing = self.folder / 'missing.mp4'
+        unreadable = self.folder / 'broken.avi'
+        unreadable.write_bytes(b'not a video')
+        for video in (missing, unreadable):
+            with self.subTest(video=video.name):
+                success, error = self.extractor.extract_frame_at_timestamp(
+                    str(video), 1, str(self.folder / 'x.jpg'))
+                self.assertFalse(success)
+                self.assertNotIn(str(self.folder), error)
+                self.assertNotIn(video.name, error)
+
     def test_webm_is_not_rejected_by_extension(self):
         success, error = self.extractor.extract_frame_at_timestamp(
             str(self.folder / 'missing.webm'), 1, str(self.folder / 'x.jpg'))
