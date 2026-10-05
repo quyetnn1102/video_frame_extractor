@@ -121,7 +121,6 @@ class Config:
 
     # Cleanup settings
     AUTO_CLEANUP_HOURS = env_int('AUTO_CLEANUP_HOURS', 24)
-    MAX_STORAGE_MB = env_int('MAX_STORAGE_MB', 1024)  # 1GB
 
     # Logging configuration
     LOG_LEVEL = os.getenv('LOG_LEVEL', 'INFO')
