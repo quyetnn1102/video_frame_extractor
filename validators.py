@@ -16,38 +16,74 @@ class ValidationError(Exception):
     """Custom exception for validation errors"""
     pass
 
+# Hosts owned by each platform. A URL host must equal one of these or be a
+# subdomain of it; substring matching would accept "youtube.com.evil.com".
+PLATFORM_HOSTS = {
+    'youtube': ('youtube.com', 'youtu.be'),
+    'tiktok': ('tiktok.com',),
+    'instagram': ('instagram.com',),
+    'facebook': ('facebook.com', 'fb.com', 'fb.watch'),
+    'douyin': ('douyin.com',),
+}
+
+# Windows device names cannot be used as file names.
+WINDOWS_RESERVED_NAMES = frozenset(
+    ['CON', 'PRN', 'AUX', 'NUL']
+    + [f'COM{i}' for i in range(1, 10)]
+    + [f'LPT{i}' for i in range(1, 10)]
+)
+
+MAX_TIMESTAMPS = 50
+MAX_FILENAME_LENGTH = 100
+
+# Seconds/minutes are bounded to 00-59 so "1:60" is rejected, not read as 120s.
+TIMESTAMP_PATTERNS = (
+    (re.compile(r'\d{1,6}'), lambda m: int(m.group(0))),
+    (re.compile(r'(\d{1,3}):([0-5]\d)'),
+     lambda m: int(m.group(1)) * 60 + int(m.group(2))),
+    (re.compile(r'(\d{1,2}):([0-5]\d):([0-5]\d)'),
+     lambda m: int(m.group(1)) * 3600 + int(m.group(2)) * 60 + int(m.group(3))),
+)
+
+
+def _host_matches(host: str, domain: str) -> bool:
+    return host == domain or host.endswith('.' + domain)
+
+
 class SecurityValidator:
     """Comprehensive input validation and security checks"""
-    
+
     def __init__(self):
         self.config = get_config()
-        
-        # URL validation patterns
+
+        # URL path shapes per platform. The host is checked separately and
+        # exactly (see PLATFORM_HOSTS); these only confirm a video link shape.
         self.url_patterns = {
             'youtube': [
-                r'https?://(www\.)?youtube\.com/watch\?v=[\w-]+',
+                r'https?://(www\.|m\.)?youtube\.com/watch\?(?:[^#\s]*&)?v=[\w-]+',
+                r'https?://(www\.|m\.)?youtube\.com/(?:shorts|live|embed)/[\w-]+',
                 r'https?://youtu\.be/[\w-]+',
-                r'https?://m\.youtube\.com/watch\?v=[\w-]+'
             ],
             'tiktok': [
                 r'https?://(www\.)?tiktok\.com/@[\w.-]+/video/\d+',
-                r'https?://vm\.tiktok\.com/[\w-]+',
-                r'https?://m\.tiktok\.com/v/\d+'
+                r'https?://(www\.)?tiktok\.com/t/[\w-]+',
+                r'https?://v[mt]\.tiktok\.com/[\w-]+',
+                r'https?://m\.tiktok\.com/v/\d+',
             ],
             'instagram': [
-                r'https?://(www\.)?instagram\.com/p/[\w-]+',
-                r'https?://(www\.)?instagram\.com/reel/[\w-]+',
-                r'https?://(www\.)?instagram\.com/tv/[\w-]+'
+                r'https?://(www\.)?instagram\.com/(?:p|reels?|tv)/[\w-]+',
             ],
             'facebook': [
-                r'https?://(www\.)?facebook\.com/\w+/videos/\d+',
-                r'https?://fb\.com/\w+/videos/\d+',
-                r'https?://m\.facebook\.com/\w+/videos/\d+'
+                r'https?://(www\.|m\.|web\.)?facebook\.com/[\w.-]+/videos/\d+',
+                r'https?://(www\.|m\.|web\.)?facebook\.com/watch/?\?(?:[^#\s]*&)?v=\d+',
+                r'https?://(www\.|m\.|web\.)?facebook\.com/reel/\d+',
+                r'https?://(www\.)?fb\.com/[\w.-]+/videos/\d+',
+                r'https?://fb\.watch/[\w-]+',
             ],
             'douyin': [
                 r'https?://(www\.)?douyin\.com/video/\d+',
-                r'https?://v\.douyin\.com/[\w-]+'
-            ]
+                r'https?://v\.douyin\.com/[\w-]+',
+            ],
         }
         
         # Rate limiting storage (in production, use Redis/database)
@@ -70,15 +106,21 @@ class SecurityValidator:
             parsed = urlparse.urlparse(url)
             if not all([parsed.scheme, parsed.netloc]):
                 return False, 'unknown', "Invalid URL format"
-            
+
             if parsed.scheme not in ['http', 'https']:
                 return False, 'unknown', "URL must use HTTP or HTTPS"
-        except Exception as e:
-            app_logger.warning(f"URL parsing failed: {str(e)}", url=url)
-            return False, 'unknown', f"URL parsing error: {str(e)}"
-        
+
+            # Credentials or an explicit port have no place in a share link and
+            # are used to disguise the real host ("youtube.com@evil.com").
+            if parsed.username is not None or parsed.password is not None:
+                return False, 'unknown', "URLs containing credentials are not allowed"
+            if parsed.port is not None:
+                return False, 'unknown', "URLs with an explicit port are not allowed"
+            domain = (parsed.hostname or '').lower()
+        except ValueError:
+            return False, 'unknown', "Invalid URL format"
+
         # Check if URL is from supported platforms
-        domain = parsed.netloc.lower()
         platform = self._detect_platform(domain)
         
         if platform == 'unknown':
@@ -97,18 +139,11 @@ class SecurityValidator:
         
         return True, platform, None
     
-    def _detect_platform(self, domain: str) -> str:
-        """Detect platform from domain"""
-        platform_domains = {
-            'youtube': ['youtube.com', 'youtu.be', 'm.youtube.com'],
-            'tiktok': ['tiktok.com', 'vm.tiktok.com', 'm.tiktok.com'],
-            'instagram': ['instagram.com', 'www.instagram.com'],
-            'facebook': ['facebook.com', 'fb.com', 'm.facebook.com', 'www.facebook.com'],
-            'douyin': ['douyin.com', 'v.douyin.com']
-        }
-        
-        for platform, domains in platform_domains.items():
-            if any(d in domain for d in domains):
+    def _detect_platform(self, host: str) -> str:
+        """Detect platform from a bare hostname (exact or subdomain match)"""
+        host = (host or '').lower().rstrip('.')
+        for platform, domains in PLATFORM_HOSTS.items():
+            if any(_host_matches(host, d) for d in domains):
                 return platform
         return 'unknown'
     
@@ -154,28 +189,15 @@ class SecurityValidator:
             return False, "Timestamp is required and must be a string", None
         
         timestamp = timestamp.strip()
-        
-        # Pattern for different timestamp formats
-        patterns = [
-            (r'^(\d+)$', lambda m: int(m.group(1))),  # seconds only
-            (r'^(\d+):(\d{2})$', lambda m: int(m.group(1)) * 60 + int(m.group(2))),  # MM:SS
-            (r'^(\d+):(\d{2}):(\d{2})$', 
-             lambda m: int(m.group(1)) * 3600 + int(m.group(2)) * 60 + int(m.group(3)))  # HH:MM:SS
-        ]
-        
-        for pattern, converter in patterns:
-            match = re.match(pattern, timestamp)
+
+        for pattern, converter in TIMESTAMP_PATTERNS:
+            match = pattern.fullmatch(timestamp)
             if match:
-                try:
-                    seconds = converter(match)
-                    if seconds < 0:
-                        return False, "Timestamp cannot be negative", None
-                    if seconds > self.config.MAX_VIDEO_DURATION:
-                        return False, f"Timestamp exceeds maximum duration ({self.config.MAX_VIDEO_DURATION}s)", None
-                    return True, None, seconds
-                except ValueError as e:
-                    return False, f"Invalid timestamp format: {str(e)}", None
-        
+                seconds = converter(match)
+                if seconds > self.config.MAX_VIDEO_DURATION:
+                    return False, f"Timestamp exceeds maximum duration ({self.config.MAX_VIDEO_DURATION}s)", None
+                return True, None, seconds
+
         return False, "Invalid timestamp format. Use: 30, 1:23, or 1:23:45", None
     
     def validate_timestamps(self, timestamps: List[str]) -> Tuple[bool, List[str], List[int]]:
@@ -188,8 +210,8 @@ class SecurityValidator:
         if not timestamps:
             return False, ["At least one timestamp is required"], []
         
-        if len(timestamps) > 50:  # Reasonable limit
-            return False, ["Too many timestamps (max 50)"], []
+        if len(timestamps) > MAX_TIMESTAMPS:
+            return False, [f"Too many timestamps (max {MAX_TIMESTAMPS})"], []
         
         errors = []
         valid_seconds = []
@@ -208,19 +230,24 @@ class SecurityValidator:
         if not filename:
             return "unknown"
         
-        # Remove/replace dangerous characters
+        # Remove control characters, then replace dangerous ones
+        filename = re.sub(r'[\x00-\x1f\x7f]', '', filename)
         filename = re.sub(r'[<>:"/\\|?*]', '_', filename)
         filename = re.sub(r'\.\.+', '.', filename)  # Remove multiple dots
         filename = filename.strip('. ')  # Remove leading/trailing dots and spaces
-        
+
         # Limit length
-        if len(filename) > 100:
-            filename = filename[:100]
-        
+        if len(filename) > MAX_FILENAME_LENGTH:
+            filename = filename[:MAX_FILENAME_LENGTH]
+
         # Ensure it's not empty after sanitization
         if not filename:
             filename = "sanitized_file"
-        
+
+        # Windows device names (CON, NUL, COM1...) are unusable, even with an extension
+        if filename.split('.')[0].upper() in WINDOWS_RESERVED_NAMES:
+            filename = f"_{filename}"
+
         return filename
     
     def check_rate_limit(self, identifier: str, max_requests: int = None, 
@@ -309,23 +336,8 @@ class SecurityValidator:
     def get_platform_from_url(self, url: str) -> str:
         """Detect platform from URL"""
         try:
-            from urllib.parse import urlparse
-            parsed = urlparse(url)
-            domain = parsed.netloc.lower()
-            
-            if 'tiktok.com' in domain or 'vm.tiktok.com' in domain:
-                return 'tiktok'
-            elif 'youtube.com' in domain or 'youtu.be' in domain:
-                return 'youtube'
-            elif 'facebook.com' in domain or 'fb.com' in domain:
-                return 'facebook'
-            elif 'douyin.com' in domain:
-                return 'douyin'
-            elif 'instagram.com' in domain:
-                return 'instagram'
-            else:
-                return 'unknown'
-        except Exception:
+            return self._detect_platform(urlparse.urlparse(url).hostname or '')
+        except (ValueError, AttributeError):
             return 'unknown'
 
 # Global validator instance
