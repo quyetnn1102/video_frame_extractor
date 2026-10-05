@@ -69,8 +69,17 @@ test_shorts/
 # Database files
 app_data.db
 *.db
+*.db-journal
+*.db-wal
+*.db-shm
 *.sqlite
 *.sqlite3
+
+# Crash dumps from the shell
+*.stackdump
+
+# Local environment variations
+.env.*
 
 # Instagram cookies and authentication
 instagram_cookies.txt

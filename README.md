@@ -26,7 +26,7 @@ Downloads are done by [yt-dlp](https://github.com/yt-dlp/yt-dlp), frames by Open
 | Facebook | `/<page>/videos/<id>`, `/watch/?v=<id>`, `/reel/<id>`, `fb.watch/` | Public videos only |
 | Douyin | `douyin.com/video/<id>` | `v.douyin.com` short links are not supported by yt-dlp |
 
-Limits (all configurable, see [Configuration](#configuration)): the source video may be at most `MAX_VIDEO_DURATION` seconds (1 hour by default), `MAX_DOWNLOAD_MB` megabytes (500) and 720p; playlists are never downloaded; a short is 1-300 seconds. YouTube only accepts uploads of up to 60 seconds as Shorts.
+Limits (all configurable, see [Configuration](#configuration)): the source video may be at most `MAX_VIDEO_DURATION` seconds (1 hour by default) and `MAX_DOWNLOAD_MB` megabytes (500; a running download is aborted when it passes this); playlists are never downloaded; a short is 1-300 seconds. The app asks for 720p or lower, but that is a preference: some sites only offer a single quality. This app checks uploads against the 60-second limit of classic YouTube Shorts.
 
 Only the five platforms above are fetched: yt-dlp's generic extractor, which would download from arbitrary sites, is switched off.
 
@@ -121,9 +121,9 @@ Details worth knowing:
 
 - Uploads are **private** by default. Google locks videos uploaded through API projects that have not passed its compliance audit to private; see the [videos.insert reference](https://developers.google.com/youtube/v3/docs/videos/insert). Change visibility in YouTube Studio.
 - Only the `youtube.upload` scope is requested: the app cannot read or manage your channel.
-- Credentials are saved to `youtube_credentials.json` (git-ignored, owner-only permissions). Delete it to sign out. A `youtube_credentials.pickle` from an older version is ignored; sign in again.
+- Credentials are saved to `youtube_credentials.json` (git-ignored). On Linux and macOS the file is owner-only; on Windows it inherits the permissions of the project folder, so keep the project in a folder only you can read. Delete the file to sign out. A `youtube_credentials.pickle` from an older version is ignored; sign in again.
 - Quotas depend on your project, see the [quota page](https://developers.google.com/youtube/v3/determine_quota_cost).
-- Shorts must be at most 60 seconds and vertical or square.
+- The app only uploads videos of up to 60 seconds that are vertical or square (the classic Shorts rules).
 
 ## API
 
@@ -222,9 +222,16 @@ Logs are in `logs/app.log`.
 
 ## Security notes
 
-Implemented: loopback-only binding and a `Host` allow-list; exact host matching for video URLs (no lookalike domains, embedded credentials or ports); a fixed extractor allow-list so yt-dlp cannot fetch arbitrary URLs; size, duration and timeout limits; client-supplied file names resolved strictly inside the output folders; uploads by file name only; JSON error responses with no internal details; per-route rate limits; a Content-Security-Policy and other security headers; no data interpolated into HTML; YouTube credentials stored as JSON with an OAuth `state` check; browser cookies opt-in.
+Implemented:
 
-Not implemented, by design for a local tool: **user accounts or login** and **CSRF tokens** (there are no cookie sessions to attack, but add both if you ever add login). The CSP still allows inline scripts because the pages use them. Do not expose the app to a network without an authenticating proxy.
+- **Network:** loopback-only binding, a strict `Host` allow-list (blocks DNS rebinding), and `/api/*` refuses requests the browser marks cross-site (`Sec-Fetch-Site`) or whose `Origin` is not this app, so another website cannot drive the API from your browser. Requests are capped at 1 MB.
+- **Downloads:** exact host matching for video URLs (no lookalike domains, embedded credentials or ports, 2048-character limit); a fixed extractor allow-list so yt-dlp cannot fetch arbitrary URLs; size, duration and timeout limits; remote video titles never become part of a file name or a yt-dlp output template.
+- **Files:** client-supplied file names are resolved strictly inside the output folders; uploads take a file name only.
+- **Output:** JSON error responses with no exception text or server paths; a Content-Security-Policy and other security headers; Subresource Integrity on the CDN assets; no data interpolated into HTML; control characters stripped from log messages.
+- **YouTube:** OAuth with `state` and PKCE, credentials stored as JSON (never pickle) and written atomically, upload scope only.
+- **Defaults:** browser cookies are opt-in, the debugger is opt-in, and a mistyped `FLASK_ENV` is an error.
+
+Not implemented, by design for a local tool: **user accounts or login** and **CSRF tokens**. The cross-site checks above cover the browser-based attacks on `localhost`, but other users of the same machine can reach the app, and any process on the host can call it. Add authentication before sharing it. The CSP still allows inline scripts because the pages use them. Do not expose the app to a network without an authenticating proxy.
 
 Secrets (`.env`, `client_secrets.json`, `youtube_credentials.json`, `instagram_cookies.txt`) are git-ignored; never commit them. To report a vulnerability, open a private security advisory on GitHub.
 
