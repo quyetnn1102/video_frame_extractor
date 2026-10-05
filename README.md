@@ -93,6 +93,7 @@ Settings come from environment variables, which can be put in a `.env` file in t
 | `MAX_DOWNLOAD_MB` | `500` | Largest download |
 | `SOCKET_TIMEOUT` / `DOWNLOAD_RETRIES` | `30` / `2` | Network stall timeout (s) and retries for downloads |
 | `AUTO_CLEANUP_HOURS` | `24` (`4` in production) | Age after which files are deleted |
+| `MAX_CONCURRENT_JOBS` | `2` | Downloads/renders that run at the same time; more wait in line |
 | `USE_BROWSER_COOKIES` | off | Let yt-dlp read your browser's cookies for Instagram (see below) |
 | `YOUTUBE_API_KEY` | none | Trending page only |
 | `YOUTUBE_REDIRECT_URI` | `http://localhost:<PORT>/oauth2callback` | OAuth redirect for YouTube upload |
@@ -139,6 +140,11 @@ All endpoints return JSON (errors as `{"success": false, "error": "..."}`) and r
 | `POST /api/test-platform` `{url}` | Platform guidance for a link | 30/min |
 | `POST /api/extract` `{url, timestamps[]}` | Download, extract frames, delete the download | 10/min |
 | `POST /api/create-short` `{url, start_time, duration, quality, vertical_format, text_overlay}` | Create a short | 5/min |
+| `POST /api/jobs/extract` `{url, timestamps[]}` | Same as `/api/extract`, as a background job: answers `202` with the job at once | 10/min |
+| `POST /api/jobs/create-short` (same body as `/api/create-short`) | Same as `/api/create-short`, as a background job | 5/min |
+| `GET /api/jobs` | Jobs of the last hour, newest first (`state`, `stage`, `progress`, `result` or `error`) | none (polled) |
+| `GET /api/jobs/<id>` | One job; the pages poll it about once a second | none (polled) |
+| `POST /api/jobs/<id>/cancel` | Stop a job; a partial download or render is deleted | 30/min |
 | `GET /frames/<file>`, `GET /shorts/<file>` | Serve generated files | default |
 | `GET /api/shorts` | Earlier shorts in `generated_shorts/`, newest first (the Create short page shows them again after a refresh) | default |
 | `POST /api/shorts/delete` `{filename}` | Delete a short by file name | 30/min |
@@ -151,6 +157,8 @@ All endpoints return JSON (errors as `{"success": false, "error": "..."}`) and r
 | `POST /api/upload-to-youtube` `{filename, title, description, tags, privacy}` | Upload a short from `generated_shorts/` by file name | 5/min |
 | `GET /api/youtube-quota` | Pointer to the official quota rules | default |
 | `GET /api/health`, `GET /api/dashboard-data` | Health and dashboard data | default |
+
+The pages use the job routes, so a long download or render shows its stage, progress and elapsed time, can be cancelled, and keeps running if you leave the page (it shows up again when you come back). Jobs are kept in memory for an hour; restarting the app forgets them, but the files they produced stay.
 
 Example:
 
@@ -184,7 +192,7 @@ scripts/smoke_test.py  Manual check against a running server
 
 Flow: the browser calls the JSON API; the app validates the request, yt-dlp downloads the video into `downloads/` (a platform extractor only, with size, duration and timeout limits), OpenCV extracts frames or MoviePy renders a short, the source download is deleted, and the result is served from `extracted_frames/` or `generated_shorts/`.
 
-Processing runs inside the request, so a long clip can take minutes. There is no job queue.
+The pages run this as a background job (`jobs.py`, `MAX_CONCURRENT_JOBS` at a time, more wait in line) and poll it for progress, so a long clip no longer holds a request open; `/api/extract` and `/api/create-short` still do the same work inside the request for scripts. Jobs live in process memory: one app process, and a restart forgets them (partial renders are removed at the next start).
 
 ## Deployment
 

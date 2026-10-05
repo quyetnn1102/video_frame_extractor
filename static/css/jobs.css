@@ -1,0 +1,110 @@
+/* The progress card of a background job (static/js/job-progress.js): step, bar, elapsed time,
+   Cancel. Loaded by the pages that start jobs, after app.css. */
+
+.job-panel:not(:empty) {
+    margin-top: var(--space-4);
+}
+
+.job-card {
+    display: grid;
+    gap: var(--space-3);
+    padding: var(--space-4) var(--space-5);
+    background: var(--soft);
+    border: 1px solid var(--rule);
+    border-left: 4px solid var(--lime);
+    border-radius: var(--radius-sm);
+}
+
+.job-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--space-4);
+}
+
+.job-head h2 {
+    font-size: var(--text-base);
+    font-weight: 600;
+}
+
+.job-elapsed,
+.job-percent {
+    font-size: var(--text-sm);
+    color: var(--ink-soft);
+}
+
+.job-step {
+    font-size: var(--text-sm);
+}
+
+.job-meter {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+}
+
+.job-percent {
+    min-width: 2.75rem;
+    text-align: right;
+}
+
+/* <progress>: a real progressbar for assistive technology, styled to match the meters */
+.job-bar {
+    flex: 1;
+    height: 0.6rem;
+    appearance: none;
+    -webkit-appearance: none;
+    border: 0;
+    border-radius: 999px;
+    background: var(--rule);
+    overflow: hidden;
+}
+
+.job-bar::-webkit-progress-bar {
+    background: var(--rule);
+    border-radius: 999px;
+}
+
+.job-bar::-webkit-progress-value {
+    background: var(--primary);
+    border-radius: 999px;
+    transition: width 0.3s ease-out;
+}
+
+.job-bar::-moz-progress-bar {
+    background: var(--primary);
+    border-radius: 999px;
+}
+
+/* No size known yet: a band sweeps across (it stands still with reduced motion; the step
+   text and elapsed time still show that work is going on) */
+.job-bar:indeterminate {
+    background: linear-gradient(90deg, var(--rule) 0 35%, var(--primary) 35% 55%, var(--rule) 55%) 0 0 / 300% 100%;
+    animation: job-sweep 1.4s linear infinite;
+}
+
+.job-bar:indeterminate::-webkit-progress-bar {
+    background: transparent;
+}
+
+.job-bar:indeterminate::-moz-progress-bar {
+    background: transparent;
+}
+
+@keyframes job-sweep {
+    from { background-position: 100% 0; }
+    to { background-position: 0 0; }
+}
+
+.job-foot {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2) var(--space-4);
+}
+
+.job-note {
+    font-size: var(--text-sm);
+    color: var(--ink-soft);
+}

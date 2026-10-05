@@ -97,6 +97,9 @@ class Config:
     YOUTUBE_CREDENTIALS_FILE = BASE_DIR / 'youtube_credentials.json'
     YOUTUBE_REDIRECT_URI = env_str('YOUTUBE_REDIRECT_URI', f'http://localhost:{PORT}/oauth2callback')
 
+    # Background jobs (download + extract / render): how many run at once; the rest wait in line
+    MAX_CONCURRENT_JOBS = max(1, env_int('MAX_CONCURRENT_JOBS', 2))
+
     # Rate limiting
     RATE_LIMIT_PER_MINUTE = env_int('RATE_LIMIT_PER_MINUTE', 30)
     RATELIMIT_ENABLED = env_bool('RATE_LIMIT_ENABLED', True)  # Flask-Limiter switch

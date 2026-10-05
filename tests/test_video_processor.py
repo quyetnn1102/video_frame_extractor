@@ -398,6 +398,43 @@ class TestExtractorUsesCleanInput(unittest.TestCase):
         self.assertNotIn('secret', error)
 
 
+class TestDownloadProgress(unittest.TestCase):
+    """Background jobs follow the download through a yt-dlp progress hook."""
+
+    def setUp(self):
+        self.extractor = EnhancedVideoFrameExtractor()
+        self.url = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ'
+
+    def test_the_share_is_summed_over_the_video_and_audio_files(self):
+        reported = []
+        hook = video_processor.make_progress_hook(reported.append)
+        hook({'status': 'downloading', 'filename': 'a.f137.mp4', 'downloaded_bytes': 0})
+        hook({'status': 'downloading', 'filename': 'a.f137.mp4', 'downloaded_bytes': 50, 'total_bytes': 100})
+        hook({'status': 'finished', 'filename': 'a.f137.mp4', 'downloaded_bytes': 100, 'total_bytes': 100})
+        hook({'status': 'downloading', 'filename': 'a.f140.m4a', 'downloaded_bytes': 10,
+              'total_bytes_estimate': 100})
+        self.assertEqual(reported, [None, 0.5, 1.0, 110 / 200])
+
+    def test_the_progress_hook_is_added_to_the_downloads_own_hooks(self):
+        on_progress = Mock()
+        with patch.object(video_processor, 'download_with_ytdlp', return_value=('p', 't', None)) as download:
+            self.extractor.download_video(self.url, on_progress=on_progress)
+        hooks = download.call_args.args[1]['progress_hooks']
+        self.assertEqual(len(hooks), 2, 'the size limit hook stays')
+        hooks[-1]({'status': 'downloading', 'filename': 'x', 'downloaded_bytes': 1, 'total_bytes': 4})
+        on_progress.assert_called_once_with(0.25)
+        shared = self.extractor.processors['youtube'].base_opts['progress_hooks']
+        self.assertEqual(len(shared), 1, 'other downloads must not get this job\'s hook')
+
+    def test_a_cancelled_job_stops_the_download_instead_of_reporting_an_error(self):
+        from jobs import JobCancelled
+        for url in [self.url, 'https://www.instagram.com/reel/Cabc123_x/']:
+            with self.subTest(url=url):
+                with patch.object(video_processor, 'download_with_ytdlp', side_effect=JobCancelled()):
+                    with self.assertRaises(JobCancelled):
+                        self.extractor.download_video(url, on_progress=Mock())
+
+
 class TestCleanup(unittest.TestCase):
     def test_warnings_do_not_contain_server_paths(self):
         config = get_config()

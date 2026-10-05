@@ -21,6 +21,7 @@ IMPORT_TO_DIST = {
     'cv2': 'opencv-python',
     'numpy': 'numpy',
     'moviepy': 'moviepy',
+    'proglog': 'proglog',
     'imageio_ffmpeg': 'imageio-ffmpeg',
     'googleapiclient': 'google-api-python-client',
     'google': 'google-auth',  # google.auth, google.oauth2

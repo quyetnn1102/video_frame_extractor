@@ -16,8 +16,8 @@ MIN_SECRET_KEY_LENGTH = 32
 INSTALL_COMMAND = "uv sync --frozen --no-dev"
 DEPLOY_COMMAND = "uv run --frozen --no-dev python deploy.py"
 VENV_BIN = "/path/to/video_frame_extractor/.venv/bin"
-# One worker with threads: the sign-in state for YouTube and the rate-limit
-# counters live in process memory, so several workers would not share them.
+# One worker with threads: the sign-in state for YouTube, the rate-limit counters and the
+# background jobs live in process memory, so several workers would not share them.
 GUNICORN_COMMAND = (
     "gunicorn --workers 1 --threads 4 --timeout 900 "
     "--bind 127.0.0.1:8000 'app_enhanced:create_app()'"
@@ -225,7 +225,7 @@ server {
         proxy_set_header Host $host;
         proxy_set_header X-Forwarded-For $remote_addr;
         proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_read_timeout 900s;  # rendering a short happens inside the request
+        proxy_read_timeout 900s;  # /api/extract and /api/create-short still work inside the request
     }
 
     client_max_body_size 1M;  # the app accepts no uploads

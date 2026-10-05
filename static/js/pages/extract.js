@@ -2,6 +2,7 @@
     'use strict';
 
     const STORAGE_KEY = 'videoextract.lastExtraction';
+    const SHOWN_JOB_KEY = 'videoextract.shownExtractJob';  // the last job whose frames were shown
     const SAFE_FILE_NAME = /^[\w.-]+$/;
     const MAX_GHOST_FRAMES = 12;
     const MAX_TIMECODES = 50;  // MAX_TIMESTAMPS in validators.py
@@ -156,7 +157,58 @@
         return errors.length === 0;
     }
 
-    // ---- extract ----------------------------------------------------------
+    // ---- extract: a background job, followed in a progress card ---------------
+
+    function rememberShown(jobId) {
+        try {
+            localStorage.setItem(SHOWN_JOB_KEY, jobId);
+        } catch (error) {
+            // storage can be blocked; at worst the same result is shown again next time
+        }
+    }
+
+    function wasShown(jobId) {
+        try {
+            return localStorage.getItem(SHOWN_JOB_KEY) === jobId;
+        } catch (error) {
+            return false;
+        }
+    }
+
+    function setWorking(isWorking) {
+        busy = isWorking;
+        const submit = $('extractSubmit');
+        submit.textContent = isWorking ? 'Extracting...' : 'Extract frames';
+        if (isWorking) submit.setAttribute('aria-disabled', 'true');
+        else submit.removeAttribute('aria-disabled');
+    }
+
+    function showOutcome(job) {
+        const status = $('formStatus');
+        rememberShown(job.id);
+        if (job.state === 'succeeded') {
+            const warnings = Array.isArray(job.result.warnings) ? job.result.warnings : [];
+            displayResults(job.result.frames, warnings);
+            saveExtraction(job.result.url || '', job.result.frames, warnings);
+            $('stripHeading').focus({ preventScroll: true });  // where the frames are
+            return;
+        }
+        status.replaceChildren(job.state === 'cancelled'
+            ? notice('info', 'Cancelled.', 'Nothing was extracted.')
+            : notice('error', 'Extraction failed.', job.error || 'Try again in a moment.'));
+        $('extractSubmit').focus();  // the progress card, and the focus in it, is gone
+    }
+
+    function followJob(job) {
+        setWorking(true);
+        jobs.follow(job, $('jobPanel'), {
+            title: 'Extracting frames',
+            onFinish: (final) => {
+                setWorking(false);
+                showOutcome(final);
+            },
+        });
+    }
 
     $('extractForm').addEventListener('submit', async (event) => {
         event.preventDefault();
@@ -166,33 +218,28 @@
         status.replaceChildren();
         if (!formIsValid()) return;
         const url = $('videoUrl').value.trim();
-        const timestamps = timecodesFromInput();
 
-        busy = true;
-        let focusAfter;  // on success, focus moves to the results for keyboard and screen reader users
-        ui.showBusy('Downloading the video and extracting frames. This can take a minute.');
+        setWorking(true);
         try {
-            const response = await fetch('/api/extract', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ url: url, timestamps: timestamps }),
-            });
-            const result = await response.json();
-
-            if (!result.success) {
-                throw new Error(result.error || 'Extraction failed');
-            }
-            displayResults(result.frames, result.warnings || []);
-            saveExtraction(url, result.frames, result.warnings || []);
-            focusAfter = $('stripHeading');
+            followJob(await jobs.start('/api/jobs/extract', { url, timestamps: timecodesFromInput() }));
         } catch (error) {
-            console.error('Extraction error:', error);
-            status.replaceChildren(notice('error', 'Extraction failed.', error.message));
-        } finally {
-            busy = false;
-            ui.hideBusy(focusAfter);
+            setWorking(false);
+            status.replaceChildren(notice('error', 'Could not start.', error.message));
         }
     });
+
+    // A job started before this page was (re)opened: follow it, or show what it found
+    async function resumeLatestJob() {
+        const job = await jobs.latest('extract');
+        if (busy || !job || wasShown(job.id)) return;  // busy: a job was just started here
+        if (jobs.isActive(job)) {
+            followJob(job);
+        } else if (job.state === 'succeeded') {
+            rememberShown(job.id);
+            displayResults(job.result.frames, job.result.warnings || [], { restored: true });
+            saveExtraction(job.result.url || '', job.result.frames, job.result.warnings || []);
+        }
+    }
 
     // ---- prefill from ?url= (the Trending page links here) ----------------
 
@@ -211,4 +258,5 @@
     } else {
         renderPreview();
     }
+    resumeLatestJob();
 })();

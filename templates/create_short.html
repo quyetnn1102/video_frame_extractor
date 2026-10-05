@@ -6,6 +6,7 @@
     <title>Create short - VideoExtract</title>
     <link rel="stylesheet" href="/static/css/app.css">
     <link rel="stylesheet" href="/static/css/shell.css">
+    <link rel="stylesheet" href="/static/css/jobs.css">
     <script src="/static/js/shell.js"></script>
     <link rel="stylesheet" href="/static/css/pages/create-short.css">
 </head>
@@ -91,11 +92,12 @@
                         </label>
 
                         <div class="form-end">
-                            <button type="submit" class="btn btn-primary">Create short</button>
+                            <button type="submit" class="btn btn-primary" id="createSubmit">Create short</button>
                             <button type="button" class="btn" id="resetFormBtn">Reset</button>
                             <p class="hint render-note">Downloading and rendering happen on your computer, so long clips can take a few minutes.</p>
                         </div>
                         <div id="formStatus" role="alert"></div>
+                        <div class="job-panel" id="jobPanel"></div>
                     </form>
 
                     <aside class="aside card" aria-label="About the crop and YouTube upload">
@@ -143,6 +145,7 @@
     <p class="visually-hidden" id="busyStatus" role="status"></p>
 
     <script src="/static/js/ui.js"></script>
+    <script src="/static/js/job-progress.js"></script>
     <script src="/static/js/link-preview.js"></script>
     <script src="/static/js/pages/create-short.js"></script>
 </body>

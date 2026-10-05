@@ -6,6 +6,7 @@
     <title>Extract frames - VideoExtract</title>
     <link rel="stylesheet" href="/static/css/app.css">
     <link rel="stylesheet" href="/static/css/shell.css">
+    <link rel="stylesheet" href="/static/css/jobs.css">
     <script src="/static/js/shell.js"></script>
     <link rel="stylesheet" href="/static/css/pages/extract.css">
 </head>
@@ -47,8 +48,9 @@
                         <div class="go stack">
                             <div id="formStatus" role="alert"></div>
                             <div class="actions">
-                                <button type="submit" class="btn btn-primary">Extract frames</button>
+                                <button type="submit" class="btn btn-primary" id="extractSubmit">Extract frames</button>
                             </div>
+                            <div class="job-panel" id="jobPanel"></div>
                         </div>
                     </div>
                 </form>
@@ -65,17 +67,8 @@
         </div>
     </div>
 
-    <div class="loading-overlay" id="loadingOverlay" role="dialog" aria-modal="true"
-         aria-labelledby="loadingHeading" aria-describedby="loadingMessage">
-        <div class="loading-box">
-            <span class="mark is-scanning" aria-hidden="true"></span>
-            <h2 id="loadingHeading" tabindex="-1">Pulling your frames</h2>
-            <p id="loadingMessage">Downloading the video and extracting frames. This can take a minute.</p>
-        </div>
-    </div>
-    <p class="visually-hidden" id="busyStatus" role="status"></p>
-
     <script src="/static/js/ui.js"></script>
+    <script src="/static/js/job-progress.js"></script>
     <script src="/static/js/link-preview.js"></script>
     <script src="/static/js/pages/extract.js"></script>
 </body>

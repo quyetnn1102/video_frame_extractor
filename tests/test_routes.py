@@ -1,13 +1,17 @@
 """Contract tests for the Flask app: routes, security headers and error handling."""
 import tempfile
+import threading
+import time
 import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
 from urllib.parse import quote
 
 import app_enhanced
+import media_jobs
 from app_enhanced import create_app
 from config import get_config
+from jobs import JobRegistry
 from short_video import ShortVideoError
 from youtube_uploader import YouTubeUploaderError
 
@@ -43,14 +47,24 @@ class RouteTestCase(unittest.TestCase):
         self.uploader = self.patch_module('youtube_uploader')
         self.db = self.patch_module('db_manager')
         self.db.log_video_request.return_value = 7
+        # A fresh job registry per test, so jobs from other tests are not listed
+        registry = JobRegistry(max_workers=2)
+        patcher = patch.object(app_enhanced, 'job_registry', registry)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.addCleanup(registry.shutdown)
 
         self.app = create_app()
         self.client = self.app.test_client()
 
     def patch_module(self, name):
-        patcher = patch.object(app_enhanced, name, Mock())
-        mocked = patcher.start()
-        self.addCleanup(patcher.stop)
+        """One mock for the name in app_enhanced and in media_jobs (which does the downloads)."""
+        mocked = Mock()
+        for module in (app_enhanced, media_jobs):
+            if hasattr(module, name):
+                patcher = patch.object(module, name, mocked)
+                patcher.start()
+                self.addCleanup(patcher.stop)
         return mocked
 
     def make_download(self, name='download.mp4'):
@@ -477,7 +491,7 @@ class TestCreateShort(RouteTestCase):
         video = self.make_download()
         self.extractor.download_video.return_value = (str(video), 'My: Video/Title', None)
 
-        with patch.object(app_enhanced, 'create_short', side_effect=self.fake_render) as render:
+        with patch.object(media_jobs, 'create_short', side_effect=self.fake_render) as render:
             data = self.post(vertical_format=True, text_overlay={'text': 'Hi'}).get_json()
 
         self.assertTrue(data['success'])
@@ -508,7 +522,7 @@ class TestCreateShort(RouteTestCase):
     def test_legacy_overlay_text_field_is_still_accepted(self):
         video = self.make_download()
         self.extractor.download_video.return_value = (str(video), 'T', None)
-        with patch.object(app_enhanced, 'create_short', side_effect=self.fake_render) as render:
+        with patch.object(media_jobs, 'create_short', side_effect=self.fake_render) as render:
             self.post(overlay_text='Legacy')
         self.assertEqual(render.call_args.kwargs['text_overlay']['text'], 'Legacy')
 
@@ -520,7 +534,7 @@ class TestCreateShort(RouteTestCase):
     def test_render_problems_are_reported_and_the_download_is_removed(self):
         video = self.make_download()
         self.extractor.download_video.return_value = (str(video), 'T', None)
-        with patch.object(app_enhanced, 'create_short',
+        with patch.object(media_jobs, 'create_short',
                           side_effect=ShortVideoError('Start time (30s) exceeds video duration (10.0s)')):
             response = self.post()
         self.assertEqual(response.status_code, 400)
@@ -530,7 +544,7 @@ class TestCreateShort(RouteTestCase):
     def test_unexpected_render_errors_are_generic_and_the_download_is_removed(self):
         video = self.make_download()
         self.extractor.download_video.return_value = (str(video), 'T', None)
-        with patch.object(app_enhanced, 'create_short', side_effect=RuntimeError(r'C:\secret\path')):
+        with patch.object(media_jobs, 'create_short', side_effect=RuntimeError(r'C:\secret\path')):
             response = self.post()
         self.assertEqual(response.status_code, 500)
         self.assertNotIn('secret', response.get_data(as_text=True))
@@ -544,7 +558,7 @@ class TestCreateShort(RouteTestCase):
             Path(args[1]).write_bytes(b'x')
             return {'start_time': 0, 'duration': 1, 'warnings': ['Text overlay was skipped']}
 
-        with patch.object(app_enhanced, 'create_short', side_effect=render):
+        with patch.object(media_jobs, 'create_short', side_effect=render):
             data = self.post(text_overlay={'text': 'Hi'}).get_json()
         self.assertEqual(data['warnings'], ['Text overlay was skipped'])
 
@@ -709,6 +723,162 @@ class TestFileRoutesAreNotRateLimited(RouteTestCase):
                 self.assertEqual(statuses, {404})
 
 
+class TestJobs(RouteTestCase):
+    """The pages start downloads and renders as background jobs and poll them."""
+
+    def wait_for(self, job_id, states=('succeeded', 'failed', 'cancelled')):
+        deadline = time.time() + 5
+        while time.time() < deadline:
+            job = self.client.get(f'/api/jobs/{job_id}').get_json()['job']
+            if job['state'] in states:
+                return job
+            time.sleep(0.02)
+        self.fail(f'job {job_id} did not reach {states}')
+
+    def start(self, kind, body):
+        response = self.client.post(f'/api/jobs/{kind}', json=body)
+        self.assertEqual(response.status_code, 202, response.get_data(as_text=True))
+        return response.get_json()['job']
+
+    def test_an_extract_job_reports_progress_and_returns_the_frames(self):
+        video = self.make_download()
+        self.extractor.download_video.return_value = (str(video), 'Title', None)
+        self.extractor.extract_frame_at_timestamp.return_value = (True, None)
+
+        started = self.start('extract', {'url': VALID_URL, 'timestamps': ['5', '1:10']})
+        self.assertEqual((started['kind'], started['stage_count']), ('extract', 2))
+        job = self.wait_for(started['id'])
+
+        self.assertEqual(job['state'], 'succeeded')
+        self.assertEqual([frame['timestamp'] for frame in job['result']['frames']], [5, 70])
+        self.assertEqual(job['result']['url'], VALID_URL, 'a page picking the job up saves it under its link')
+        self.assertEqual(job['progress'], 1)
+        self.assertFalse(video.exists())
+        self.assertEqual(self.db.update_video_request.call_args.args[:2], (7, 'completed'))
+        on_progress = self.extractor.download_video.call_args.kwargs['on_progress']
+        self.assertTrue(callable(on_progress), 'the download reports its progress to the job')
+
+    def test_bad_requests_are_rejected_before_a_job_starts(self):
+        for kind, body in [('extract', {'url': VALID_URL, 'timestamps': ['1:60']}),
+                           ('extract', {'url': 'https://example.com/x', 'timestamps': ['5']}),
+                           ('create-short', {'url': VALID_URL, 'duration': 9999}),
+                           ('create-short', {'url': VALID_URL, 'vertical_format': 'true'})]:
+            with self.subTest(kind=kind, body=body):
+                self.assertEqual(self.client.post(f'/api/jobs/{kind}', json=body).status_code, 400)
+        self.extractor.download_video.assert_not_called()
+        self.assertEqual(self.client.get('/api/jobs').get_json()['jobs'], [])
+
+    def test_a_failed_download_fails_the_job_with_its_reason(self):
+        self.extractor.download_video.return_value = (None, None, 'Video unavailable')
+        job = self.wait_for(self.start('create-short', {'url': VALID_URL})['id'])
+        self.assertEqual((job['state'], job['error']), ('failed', 'Video unavailable'))
+        self.assertEqual(self.db.update_video_request.call_args.args[:2], (7, 'failed'))
+
+    def test_unexpected_errors_fail_the_job_without_details(self):
+        video = self.make_download()
+        self.extractor.download_video.return_value = (str(video), 'T', None)
+        with patch.object(media_jobs, 'create_short', side_effect=RuntimeError(r'C:\secret\path')):
+            job = self.wait_for(self.start('create-short', {'url': VALID_URL})['id'])
+        self.assertEqual(job['state'], 'failed')
+        self.assertNotIn('secret', job['error'])
+        self.assertFalse(video.exists())
+
+    def test_a_render_can_be_cancelled_and_leaves_no_files(self):
+        video = self.make_download()
+        self.extractor.download_video.return_value = (str(video), 'T', None)
+        rendering = threading.Event()
+
+        def endless_render(source, output, **kwargs):
+            Path(output).write_bytes(b'partial')
+            try:
+                while True:  # like MoviePy: progress after every frame, until cancelled
+                    rendering.set()
+                    kwargs['on_progress'](0.5)
+                    time.sleep(0.01)
+            finally:
+                Path(output).unlink(missing_ok=True)
+
+        with patch.object(media_jobs, 'create_short', side_effect=endless_render):
+            job_id = self.start('create-short', {'url': VALID_URL})['id']
+            self.assertTrue(rendering.wait(5))
+            running = self.client.get(f'/api/jobs/{job_id}').get_json()['job']
+            self.assertEqual((running['state'], running['stage'], running['progress']), ('running', 'render', 0.5))
+
+            cancel = self.client.post(f'/api/jobs/{job_id}/cancel')
+            self.assertEqual(cancel.status_code, 200)
+            job = self.wait_for(job_id)
+
+        self.assertEqual(job['state'], 'cancelled')
+        self.assertFalse(video.exists())
+        self.assertEqual(list(self.shorts.iterdir()), [])
+        self.assertEqual(self.db.update_video_request.call_args.args[:2], (7, 'cancelled'))
+
+    def test_cancelling_an_extraction_removes_the_frames_it_already_wrote(self):
+        video = self.make_download()
+        self.extractor.download_video.return_value = (str(video), 'T', None)
+        second_frame = threading.Event()
+
+        def extract(path, seconds, output):
+            Path(output).write_bytes(b'jpeg')
+            if seconds == 70:
+                second_frame.set()
+                time.sleep(0.5)  # the cancel arrives while this frame is written
+            return True, None
+
+        self.extractor.extract_frame_at_timestamp.side_effect = extract
+        job_id = self.start('extract', {'url': VALID_URL, 'timestamps': ['5', '1:10', '2:00']})['id']
+        self.assertTrue(second_frame.wait(5))
+        self.client.post(f'/api/jobs/{job_id}/cancel')
+        self.assertEqual(self.wait_for(job_id)['state'], 'cancelled')
+        self.assertEqual(list(self.frames.iterdir()), [])
+        self.assertFalse(video.exists())
+
+    def test_a_job_cancelled_before_it_starts_is_recorded_as_cancelled(self):
+        registry = JobRegistry(max_workers=1)
+        self.addCleanup(registry.shutdown)
+        release = threading.Event()
+        self.addCleanup(release.set)
+        with patch.object(app_enhanced, 'job_registry', registry):
+            registry.submit('short', ['render'], lambda reporter: release.wait(5) or {})
+            waiting = self.start('create-short', {'url': VALID_URL})
+            self.assertEqual(waiting['state'], 'queued')
+            self.client.post(f"/api/jobs/{waiting['id']}/cancel")
+        self.assertEqual(self.db.update_video_request.call_args.args[:2], (7, 'cancelled'))
+        self.extractor.download_video.assert_not_called()
+
+    def test_too_many_waiting_jobs_are_refused_with_429(self):
+        with patch.object(app_enhanced.job_registry, '_max_unfinished', 0):
+            response = self.client.post('/api/jobs/extract', json={'url': VALID_URL, 'timestamps': ['5']})
+        self.assertEqual(response.status_code, 429)
+        self.assertFalse(response.get_json()['success'])
+        self.assertEqual(self.db.update_video_request.call_args.args[:2], (7, 'failed'))
+
+    def test_unknown_and_malformed_job_ids_are_404(self):
+        for job_id in ['0' * 32, 'not-a-job', '../etc']:
+            with self.subTest(job_id=job_id):
+                self.assertEqual(self.client.get(f'/api/jobs/{job_id}').status_code, 404)
+                self.assertEqual(self.client.post(f'/api/jobs/{job_id}/cancel').status_code, 404)
+
+    def test_jobs_are_listed_newest_first(self):
+        self.extractor.download_video.return_value = (None, None, 'Video unavailable')
+        first = self.start('extract', {'url': VALID_URL, 'timestamps': ['5']})['id']
+        self.wait_for(first)
+        second = self.start('create-short', {'url': VALID_URL})['id']
+        self.wait_for(second)
+        listed = [job['id'] for job in self.client.get('/api/jobs').get_json()['jobs']]
+        self.assertEqual(listed[:2], [second, first])
+
+
+class TestJobPollingIsNotRateLimited(RouteTestCase):
+    """An open page asks about its job about once a second."""
+    rate_limit_enabled = True
+
+    def test_polling_does_not_use_up_the_api_rate_limit(self):
+        statuses = {self.client.get('/api/jobs').status_code for _ in range(60)}
+        statuses |= {self.client.get(f'/api/jobs/{"0" * 32}').status_code for _ in range(60)}
+        self.assertEqual(statuses, {200, 404})
+
+
 class TestStartupCleanup(RouteTestCase):
     """Leftovers are swept when the app is created, so gunicorn gets it too."""
 
@@ -716,6 +886,14 @@ class TestStartupCleanup(RouteTestCase):
         self.extractor.cleanup_old_files.reset_mock()
         create_app()
         self.extractor.cleanup_old_files.assert_called_once()
+
+    def test_renders_cut_off_by_a_stop_are_removed_at_startup(self):
+        rendering = self.shorts / '.rendering'
+        rendering.mkdir()
+        (rendering / 'Clip_abcd1234_short.mp4').write_bytes(b'half a video')
+        (rendering / 'Clip_abcd1234_short.tmp-audio.m4a').write_bytes(b'audio')
+        create_app()
+        self.assertEqual(list(rendering.iterdir()), [])
 
     def test_a_failing_sweep_does_not_prevent_startup(self):
         self.extractor.cleanup_old_files.side_effect = OSError('disk')

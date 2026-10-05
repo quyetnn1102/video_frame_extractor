@@ -33,6 +33,8 @@ dependencies = [
     # opencv-python 4.8 is built against NumPy 1.x and fails to import under NumPy 2
     "numpy==1.26.4",
     "moviepy==1.0.3",
+    # MoviePy's progress logger; subclassed to report render progress and cancel jobs
+    "proglog==0.1.12",
     "imageio-ffmpeg>=0.4",
     "pillow==10.0.1",
 

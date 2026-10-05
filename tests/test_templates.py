@@ -71,7 +71,7 @@ class TestTemplates(unittest.TestCase):
         for field in ['shortVideoUrl', 'startTime', 'selectedDuration', 'quality',
                       'overlayText', 'verticalFormat', 'loadingOverlay', 'resultsSection']:
             self.assertIn(f'id="{field}"', text)
-        self.assertIn("'/api/create-short'", text)
+        self.assertIn("'/api/jobs/create-short'", text)
         self.assertIn("'/api/upload-to-youtube'", text)
         self.assertNotIn('video_path', text, 'the upload API takes a file name, not a server path')
         self.assertNotIn('type="file"', text, 'the API takes a URL, not an uploaded file')
@@ -158,23 +158,36 @@ class TestTemplates(unittest.TestCase):
         self.assertIn('menuButton.focus()', shell, 'closing the drawer must return focus to the menu button')
 
     def test_the_busy_overlay_is_a_modal_that_is_announced(self):
+        """Only the YouTube sign-in and upload still block the page; renders are background jobs."""
         ui = (STATIC_DIR / 'js' / 'ui.js').read_text(encoding='utf-8')
         self.assertIn(".inert = true", ui, 'the page behind the overlay must not be reachable')
-        for page in ['extract.html', 'create_short.html']:
+        text = page_source(TEMPLATES_DIR / 'create_short.html')
+        overlay = re.search(r'<div class="loading-overlay"[^>]*>', text).group(0)
+        self.assertIn('role="dialog"', overlay)
+        self.assertIn('aria-modal="true"', overlay)
+        # a live region that is itself shown and hidden is not read out reliably
+        self.assertNotIn('role="status"', overlay)
+        self.assertIn('id="busyStatus" role="status"', text)
+        self.assertIn('ui.showBusy(', text)
+        self.assertIn('ui.hideBusy(', text)
+        self.assertNotIn('loading-overlay', page_source(TEMPLATES_DIR / 'extract.html'))
+
+    def test_long_work_runs_as_a_background_job_with_progress_and_cancel(self):
+        for page, route, kind in [('extract.html', '/api/jobs/extract', "'extract'"),
+                                  ('create_short.html', '/api/jobs/create-short', "'short'")]:
             with self.subTest(template=page):
                 text = page_source(TEMPLATES_DIR / page)
-                overlay = re.search(r'<div class="loading-overlay"[^>]*>', text).group(0)
-                self.assertIn('role="dialog"', overlay)
-                self.assertIn('aria-modal="true"', overlay)
-                # a live region that is itself shown and hidden is not read out reliably
-                self.assertNotIn('role="status"', overlay)
-                self.assertIn('id="busyStatus" role="status"', text)
-                self.assertIn('src="/static/js/ui.js"', text)
-                self.assertIn('ui.showBusy(', text)
-                self.assertIn('ui.hideBusy(', text)
-        # Focus cannot move into the page while it is inert, so the results take focus via hideBusy
-        extract = page_source(TEMPLATES_DIR / 'extract.html')
-        self.assertIn('ui.hideBusy(focusAfter)', extract)
+                self.assertIn(f"jobs.start('{route}'", text)
+                self.assertIn(f'jobs.latest({kind})', text, 'a job started earlier is picked up again')
+                self.assertIn('id="jobPanel"', text)
+                self.assertIn('href="/static/css/jobs.css"', text)
+                self.assertLess(text.index('src="/static/js/ui.js"'), text.index('src="/static/js/job-progress.js"'))
+                # the progress card and the focus in it go away when the job ends
+                self.assertRegex(text, r"\$\('(extractSubmit|createSubmit)'\)\.focus\(\)")
+        script = (STATIC_DIR / 'js' / 'job-progress.js').read_text(encoding='utf-8')
+        self.assertIn("element('progress'", script, 'a real progressbar for assistive technology')
+        self.assertIn("setAttribute('role', 'status')", script)
+        self.assertIn("'/cancel'", script)
 
     def test_forms_show_their_own_errors_at_each_field(self):
         for page in ['extract.html', 'create_short.html']:
@@ -254,7 +267,7 @@ class TestTemplates(unittest.TestCase):
         root_end = app.index('\n}\n', app.index(':root {'))
         stylesheets = [('app.css (after :root)', app[root_end:])]
         stylesheets += [(css.name, css.read_text(encoding='utf-8'))
-                        for css in [SHELL_STYLESHEET, *sorted((STATIC_DIR / 'css' / 'pages').glob('*.css'))]]
+                        for css in sorted((STATIC_DIR / 'css').rglob('*.css')) if css != STYLESHEET]
         for name, text in stylesheets:
             with self.subTest(stylesheet=name):
                 self.assertEqual(colour.findall(text), [])

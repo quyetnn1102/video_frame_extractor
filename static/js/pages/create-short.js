@@ -7,7 +7,8 @@
     const AUTH_POLL_MS = 1000;
     const BYTES_PER_MB = 1024 * 1024;
     const $ = (id) => document.getElementById(id);
-    let busy = false;
+    let busy = false;              // the YouTube sign-in/upload overlay is open
+    let rendering = false;         // a short is being made (a background job)
     let signedIn = false;          // set once the server confirms the YouTube sign-in
     let cancelRequested = false;   // set by the Cancel button while waiting for sign-in
 
@@ -117,11 +118,43 @@
         return errors.length === 0;
     }
 
-    // ---- create a short ---------------------------------------------------
+    // ---- create a short: a background job, followed in a progress card ----------
+
+    function setRendering(isRendering) {
+        rendering = isRendering;
+        const submit = $('createSubmit');
+        submit.textContent = isRendering ? 'Creating...' : 'Create short';
+        if (isRendering) submit.setAttribute('aria-disabled', 'true');
+        else submit.removeAttribute('aria-disabled');
+    }
+
+    async function showOutcome(job) {
+        const status = $('formStatus');
+        if (job.state === 'succeeded') {
+            await showNewShort(job.result);
+            $('resultHeading').focus({ preventScroll: true });  // the new short is first in this list
+            return;
+        }
+        status.replaceChildren(job.state === 'cancelled'
+            ? notice('info', 'Cancelled.', 'No short was made.')
+            : notice('error', 'Could not create the short.', job.error || 'Try again in a moment.'));
+        $('createSubmit').focus();  // the progress card, and the focus in it, is gone
+    }
+
+    function followJob(job) {
+        setRendering(true);
+        jobs.follow(job, $('jobPanel'), {
+            title: 'Creating your short',
+            onFinish: (final) => {
+                setRendering(false);
+                showOutcome(final);
+            },
+        });
+    }
 
     $('shortVideoForm').addEventListener('submit', async (event) => {
         event.preventDefault();
-        if (busy) return;
+        if (rendering) return;
 
         const status = $('formStatus');
         status.replaceChildren();
@@ -137,22 +170,21 @@
         const overlayText = $('overlayText').value.trim();
         if (overlayText) body.text_overlay = { text: overlayText };
 
-        busy = true;
-        showLoading('Creating the short. Downloading and rendering can take a few minutes.');
+        setRendering(true);
         try {
-            const { ok, data } = await postJson('/api/create-short', body);
-            if (!ok || !data.success) {
-                throw new Error(data.error || 'Short video creation failed');
-            }
-            await showNewShort(data);
+            followJob(await jobs.start('/api/jobs/create-short', body));
         } catch (error) {
-            console.error('Short video creation error:', error);
-            status.replaceChildren(notice('error', 'Could not create the short.', error.message));
-        } finally {
-            busy = false;
-            hideLoading();
+            setRendering(false);
+            status.replaceChildren(notice('error', 'Could not start.', error.message));
         }
     });
+
+    // A short still being made when this page was (re)opened: follow it. Finished ones are
+    // already in "Your shorts", which is read from disk.
+    async function resumeRunningJob() {
+        const job = await jobs.latest('short');
+        if (!rendering && job && jobs.isActive(job)) followJob(job);  // rendering: just started here
+    }
 
     // ---- your shorts: kept on disk, listed again after a refresh ------------
 
@@ -415,4 +447,5 @@
     window.attachLinkPreview($('shortVideoUrl'), $('shortLinkPreview'));
     updateCropDiagram();
     loadLibrary();
+    resumeRunningJob();
 })();

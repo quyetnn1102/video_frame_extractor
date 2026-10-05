@@ -6,9 +6,10 @@ can be tested separately. All user-controlled values (start time, duration,
 quality and the text overlay) are validated here before MoviePy sees them.
 """
 import math
+import os
 import re
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from config import get_config
 from logger import app_logger
@@ -184,11 +185,61 @@ def _close_all(clips) -> None:
                 app_logger.warning(f"Could not close clip ({type(error).__name__})")
 
 
+RENDERING_FOLDER = '.rendering'  # inside the shorts folder; holds shorts until they are complete
+VIDEO_FRAMES_BAR = 't'  # MoviePy's progress bar for the video pass; 'chunk' is the audio pass
+# proglog reports the first frame, then at most once per interval, then the end (1.0)
+PROGRESS_INTERVAL_SECONDS = 0.1
+
+
+def remove_partial_renders(shorts_folder: Path) -> int:
+    """
+    Deletes what renders left in the shorts' working folder when the app stopped mid-render.
+    Only call it when no render can be running (at startup). Returns the number of files removed.
+    """
+    folder = Path(shorts_folder) / RENDERING_FOLDER
+    if not folder.is_dir():
+        return 0
+    removed = 0
+    for entry in folder.iterdir():
+        if entry.is_file():
+            try:
+                entry.unlink()
+                removed += 1
+            except OSError as error:
+                app_logger.warning(f"Could not remove a partial render ({type(error).__name__})")
+    return removed
+
+
+def render_progress_logger(on_progress: Callable[[Optional[float]], None]):
+    """
+    A MoviePy logger that reports the share of video frames written.
+
+    Only the video pass reports (and so can be cancelled): MoviePy's audio writer does not
+    close its FFmpeg process when interrupted, while the video writer does. The audio pass
+    comes first and is short, so a cancel during it takes effect at the first video frame.
+    """
+    from proglog import ProgressBarLogger
+
+    class RenderProgress(ProgressBarLogger):
+        def bars_callback(self, bar, attr, value, old_value=None):
+            if bar != VIDEO_FRAMES_BAR or attr != 'index':
+                return
+            total = self.bars[bar].get('total') or 0
+            on_progress(value / total if total else None)
+
+    # logged_bars=[]: proglog would otherwise keep a text line per update in memory
+    return RenderProgress(min_time_interval=PROGRESS_INTERVAL_SECONDS, logged_bars=[])
+
+
 def create_short(source_path: Path, output_path: Path, *, start: float, duration: float,
                  vertical: bool = False, quality: str = DEFAULT_QUALITY,
-                 text_overlay: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+                 text_overlay: Optional[Dict[str, Any]] = None,
+                 on_progress: Optional[Callable[[Optional[float]], None]] = None) -> Dict[str, Any]:
     """
     Cut `duration` seconds from `source_path` starting at `start` into `output_path`.
+
+    `on_progress` gets the share of frames rendered; it may raise (JobCancelled) to stop the
+    render, which then removes the partial output like any other failure.
 
     Returns:
         {'start_time', 'duration', 'warnings'} describing what was rendered.
@@ -198,7 +249,11 @@ def create_short(source_path: Path, output_path: Path, *, start: float, duration
     from moviepy.editor import CompositeVideoClip, TextClip, VideoFileClip
 
     output_path = Path(output_path)
-    temp_audio_path = output_path.with_suffix('.tmp-audio.m4a')
+    # Rendered beside the library, then moved in: a short that is still being written (or was
+    # cancelled) never shows up in "Your shorts", which lists only the folder's top level
+    partial_path = output_path.parent / RENDERING_FOLDER / output_path.name
+    partial_path.parent.mkdir(exist_ok=True)
+    temp_audio_path = partial_path.with_suffix('.tmp-audio.m4a')
     warnings: List[str] = []
     video = clip = text_clip = final = None
     try:
@@ -227,18 +282,19 @@ def create_short(source_path: Path, output_path: Path, *, start: float, duration
                 warnings.append("Text overlay was skipped (ImageMagick is required for text)")
 
         final.write_videofile(
-            str(output_path),
+            str(partial_path),
             codec='libx264',
             audio_codec='aac',
             bitrate=QUALITY_BITRATES[quality],
             temp_audiofile=str(temp_audio_path),
             remove_temp=True,
             verbose=False,
-            logger=None,
+            logger=render_progress_logger(on_progress) if on_progress else None,
         )
+        os.replace(partial_path, output_path)  # same folder tree, so the move is atomic
     except Exception:
         # MoviePy only removes its temp audio after a successful render
-        output_path.unlink(missing_ok=True)
+        partial_path.unlink(missing_ok=True)
         temp_audio_path.unlink(missing_ok=True)
         raise
     finally:

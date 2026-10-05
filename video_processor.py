@@ -7,10 +7,11 @@ import cv2
 import yt_dlp
 import uuid
 from pathlib import Path
-from typing import Optional, Tuple, Dict, List, Any
+from typing import Optional, Tuple, Dict, List, Any, Callable, Sequence
 from datetime import datetime, timedelta
 
 from config import get_config
+from jobs import JobCancelled
 from link_resolver import resolve_short_url
 from logger import video_logger, LogContext
 from validators import validator, ValidationError
@@ -132,6 +133,28 @@ def make_size_limit_hook(limit_bytes: int):
     return hook
 
 
+def make_progress_hook(on_progress: Callable[[Optional[float]], None]):
+    """
+    yt-dlp progress hook that reports the share downloaded so far (None while unknown).
+
+    `bv*+ba` fetches video and audio as separate files, so the share is summed over every
+    file seen; it dips a little when the audio starts instead of jumping back to zero.
+    `on_progress` may raise (JobCancelled) to stop the download; yt-dlp lets it through.
+    """
+    sizes: Dict[str, Tuple[int, Optional[int]]] = {}
+
+    def hook(status: Dict[str, Any]) -> None:
+        done = status.get('downloaded_bytes') or 0
+        total = status.get('total_bytes') or status.get('total_bytes_estimate')
+        if status.get('status') == 'finished':
+            done = total = total or done
+        sizes[status.get('filename') or ''] = (done, total)
+        known = [(part_done, part_total) for part_done, part_total in sizes.values() if part_total]
+        fraction = sum(part[0] for part in known) / sum(part[1] for part in known) if known else None
+        on_progress(fraction)
+    return hook
+
+
 def browser_impersonation_available() -> bool:
     """
     True when yt-dlp can imitate a real browser's connection, which needs the curl_cffi
@@ -239,6 +262,8 @@ class InstagramProcessor(PlatformProcessor):
                 if result[0]:
                     video_logger.info("Success with manual cookie file!", platform=self.platform)
                     return result
+            except JobCancelled:
+                raise  # the user stopped the job: no further attempts
             except Exception as e:
                 video_logger.warning(f"Manual cookie failed: {str(e)}", platform=self.platform)
         
@@ -253,6 +278,8 @@ class InstagramProcessor(PlatformProcessor):
                     if result[0]:
                         video_logger.info(f"Success with {browser} cookies!", platform=self.platform)
                         return result
+                except JobCancelled:
+                    raise
                 except Exception as e:
                     video_logger.warning(f"{browser} cookies failed: {str(e)}", platform=self.platform)
 
@@ -333,14 +360,19 @@ class EnhancedVideoFrameExtractor:
                 video_logger.warning(f"URL validation failed: {str(e)}", url=validator.hash_sensitive_data(url))
                 return False, 'unknown', str(e)
     
-    def download_video(self, url: str) -> Tuple[Optional[str], Optional[str], Optional[str]]:
+    def download_video(self, url: str, on_progress: Optional[Callable[[Optional[float]], None]] = None
+                       ) -> Tuple[Optional[str], Optional[str], Optional[str]]:
         """
         Download video and return path, title, and any error
-        
+
+        Args:
+            on_progress: called with the share downloaded (0..1, None while unknown); it may
+                raise JobCancelled, which stops the download and is passed on to the caller.
         Returns:
             (file_path, title, error_message)
         """
         start_time = datetime.now()
+        hooks = [make_progress_hook(on_progress)] if on_progress else []
         
         with LogContext(video_logger, "Video download", url=validator.hash_sensitive_data(url)):
             try:
@@ -362,11 +394,13 @@ class EnhancedVideoFrameExtractor:
                 
                 # Special handling for Instagram
                 if platform == 'instagram':
-                    return self._download_instagram_video(url, processor)
-                
+                    return self._download_instagram_video(url, processor, hooks)
+
                 # Standard download process
-                return self._download_standard_video(url, processor)
-                
+                return self._download_standard_video(url, processor, hooks)
+
+            except JobCancelled:
+                raise  # not a failure: download_with_ytdlp has already removed the partial files
             except yt_dlp.utils.DownloadError as e:
                 error_msg = str(e)
                 platform = self.get_platform_from_url(url)
@@ -391,24 +425,35 @@ class EnhancedVideoFrameExtractor:
                                      error=str(e))
                 return None, None, "Unexpected error during download. See the application log."
     
-    def _download_standard_video(self, url: str, processor: PlatformProcessor) -> Tuple[Optional[str], Optional[str], Optional[str]]:
-        """Download video using standard process"""
+    @staticmethod
+    def _options_with_hooks(processor: PlatformProcessor, url: str, hooks: Sequence) -> Dict[str, Any]:
+        # A new list: the processor's options are shared by every download (and thread)
         opts = processor.get_download_options(url)
+        opts['progress_hooks'] = [*opts.get('progress_hooks', []), *hooks]
+        return opts
+
+    def _download_standard_video(self, url: str, processor: PlatformProcessor,
+                                 hooks: Sequence = ()) -> Tuple[Optional[str], Optional[str], Optional[str]]:
+        """Download video using standard process"""
+        opts = self._options_with_hooks(processor, url, hooks)
         file_path, title, error = download_with_ytdlp(url, opts, self.config.DOWNLOAD_FOLDER)
         if file_path:
             video_logger.log_video_processing(processor.platform, url, 'download', 'success')
         return file_path, title, error
     
-    def _download_instagram_video(self, url: str, processor: InstagramProcessor) -> Tuple[Optional[str], Optional[str], Optional[str]]:
+    def _download_instagram_video(self, url: str, processor: InstagramProcessor,
+                                  hooks: Sequence = ()) -> Tuple[Optional[str], Optional[str], Optional[str]]:
         """Download Instagram video with cookie fallback"""
-        base_opts = processor.get_download_options(url)
-        
+        base_opts = self._options_with_hooks(processor, url, hooks)
+
         try:
             file_path, title = processor.try_with_cookies(url, base_opts)
             if file_path:
                 return file_path, title, None
             else:
                 return None, None, title or "Instagram download failed with all methods"
+        except JobCancelled:
+            raise
         except yt_dlp.utils.DownloadError as e:
             return None, None, processor.process_download_error(str(e))
         except Exception as e:

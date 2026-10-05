@@ -6,14 +6,12 @@ youtube_uploader); this module validates requests, calls them, and shapes the
 responses. It is built for local use: it listens on loopback by default and
 only answers requests whose Host header is on the allow-list.
 """
-import os
 import re
 import time
 import uuid
 from datetime import datetime
-from pathlib import Path
 from typing import Any, Dict, Optional
-from urllib.parse import quote, urlsplit
+from urllib.parse import urlsplit
 
 from flask import (Flask, jsonify, render_template, render_template_string, request,
                    send_from_directory)
@@ -22,12 +20,15 @@ from flask_limiter.util import get_remote_address
 from werkzeug.exceptions import HTTPException
 from werkzeug.middleware.proxy_fix import ProxyFix
 
+import media_jobs
 from config import get_config
 from database import db_manager, get_analytics, get_recent_requests
+from jobs import JobFailed, JobQueueFull, JobRegistry, NullReporter
 from library import list_shorts
 from logger import LogContext, api_logger, app_logger
-from short_video import (ShortVideoError, create_short, normalize_quality,
-                         normalize_text_overlay, parse_duration, parse_start_time)
+from media_jobs import (EXTRACT_STAGES, SHORT_STAGES, finish_request_record, parse_extract_request,
+                        parse_short_request, run_recorded)
+from short_video import remove_partial_renders
 from trending import VIDEO_CATEGORIES, get_youtube_trending
 from validators import resolve_in_folder, validator
 from video_processor import extractor
@@ -38,9 +39,11 @@ LOOPBACK_HOSTS = ('127.0.0.1', 'localhost', '::1')
 HOST_HEADER = re.compile(r'(?P<host>\[[0-9a-f:.]+\]|[a-z0-9.-]+)(?::(?P<port>\d{1,5}))?')
 MAX_PORT = 65535
 CROSS_SITE_VALUES = ('cross-site', 'same-site')
-MAX_FRAME_FILENAME_TITLE = 50
-DEFAULT_SHORT_DURATION = 30
+JOB_ID_PATTERN = re.compile(r'[0-9a-f]{32}')
 MAX_TRENDING_RESULTS = 50
+
+# One registry per process: deploy.py runs a single worker, so every request sees the same jobs
+job_registry = JobRegistry(max_workers=get_config().MAX_CONCURRENT_JOBS)
 
 CONTENT_SECURITY_POLICY = "; ".join([
     "default-src 'self'",
@@ -144,21 +147,6 @@ def origin_is_allowed(origin: str, allowed_hosts) -> bool:
             and host_is_allowed(parsed.netloc, allowed_hosts))
 
 
-def remove_quietly(path) -> None:
-    """Delete a temporary file; a failure is logged, never raised."""
-    try:
-        Path(path).unlink(missing_ok=True)
-    except OSError as error:
-        app_logger.warning(f"Could not remove temporary file ({type(error).__name__})")
-
-
-def file_size_or_none(path) -> Optional[int]:
-    try:
-        return os.path.getsize(path)
-    except OSError:
-        return None
-
-
 def collect_system_info(base_dir, include_uptime: bool = False) -> Dict[str, Any]:
     import psutil
 
@@ -179,13 +167,6 @@ def start_request_record(url: str, platform: str) -> int:
         user_ip=request.remote_addr,
         user_agent=(request.headers.get('User-Agent') or '')[:200],
     )
-
-
-def finish_request_record(request_id: int, status: str, started: float,
-                          error: Optional[str] = None) -> None:
-    if request_id:
-        db_manager.update_video_request(
-            request_id, status, error, int((time.time() - started) * 1000))
 
 
 def create_app() -> Flask:
@@ -414,64 +395,17 @@ def create_app() -> Flask:
     @app.route('/api/extract', methods=['POST'])
     @limiter.limit("10 per minute")
     def extract_frames():
-        data = get_json_body()
-        if data is None:
-            return json_error('No data provided', 400)
-
-        url = data.get('url')
-        if not isinstance(url, str) or not url.strip():
-            return json_error('URL is required', 400)
-        url = url.strip()
-
-        is_valid, platform, url_error = validator.validate_url(url)
-        if not is_valid:
-            return json_error(url_error, 400)
-
-        timestamps = data.get('timestamps', [])
-        if not isinstance(timestamps, list):
-            return json_error('timestamps must be a list', 400)
-        timestamps_valid, timestamp_errors, seconds_list = validator.validate_timestamps(timestamps)
-        if not timestamps_valid:
-            return json_error('; '.join(timestamp_errors), 400)
-
-        started = time.time()
-        record_id = start_request_record(url, platform)
-        video_path, title, download_error = extractor.download_video(url)
-        if not video_path:
-            message = download_error or 'Download failed'
-            finish_request_record(record_id, 'failed', started, message)
-            return json_error(message, 400)
-
-        frames, errors = [], []
+        """Synchronous: answers when the frames are ready. The pages use /api/jobs/extract."""
+        extract_request, error = parse_extract_request(get_json_body())
+        if error:
+            return json_error(error, 400)
+        record_id = start_request_record(extract_request.url, extract_request.platform)
         try:
-            for seconds in seconds_list:
-                frame_filename = f"frame_{seconds}s_{uuid.uuid4().hex[:8]}.jpg"
-                frame_path = config.FRAMES_FOLDER / frame_filename
-                success, frame_error = extractor.extract_frame_at_timestamp(
-                    video_path, seconds, str(frame_path))
-                if success:
-                    frames.append({'timestamp': seconds, 'filename': frame_filename,
-                                   'url': f'/frames/{frame_filename}'})
-                    db_manager.log_extracted_frame(
-                        record_id, seconds, frame_filename, file_size_or_none(frame_path))
-                else:
-                    errors.append(f"Timestamp {seconds}s: {frame_error}")
-        except Exception:
-            finish_request_record(record_id, 'failed', started, 'Frame extraction crashed')
-            raise
-        finally:
-            remove_quietly(video_path)
-
-        if not frames:
-            message = 'Frame extraction failed: ' + '; '.join(errors)
-            finish_request_record(record_id, 'failed', started, message)
-            return json_error(message, 400)
-
-        finish_request_record(record_id, 'completed', started)
-        response = {'success': True, 'title': title, 'frames': frames, 'platform': platform}
-        if errors:
-            response['warnings'] = errors
-        return jsonify(response)
+            result = run_recorded(record_id, 'Frame extraction crashed',
+                                  lambda: media_jobs.extract_frames(extract_request, record_id, NullReporter()))
+        except JobFailed as failure:
+            return json_error(failure.message, 400)
+        return jsonify(result)
 
     # The file routes are cheap and a results page loads up to 50 frames at once (and
     # videos are fetched in ranges), so they are exempt from the API rate limit.
@@ -488,75 +422,75 @@ def create_app() -> Flask:
     @app.route('/api/create-short', methods=['POST'])
     @limiter.limit("5 per minute")
     def create_short_video():
-        data = get_json_body()
-        if data is None:
-            return json_error('JSON body required', 400)
-
-        url = data.get('url')
-        if not isinstance(url, str) or not url.strip():
-            return json_error('URL is required', 400)
-        url = url.strip()
-        is_valid, platform, url_error = validator.validate_url(url)
-        if not is_valid:
-            return json_error(f'Invalid URL: {url_error}', 400)
-
-        overlay_request = data.get('text_overlay')
-        if overlay_request is None:
-            overlay_request = data.get('overlay_text')  # field name of the older page
-        try:
-            start = parse_start_time(data.get('start_time'))
-            duration = parse_duration(data.get('duration', DEFAULT_SHORT_DURATION))
-            quality = normalize_quality(data.get('quality'))
-            text_overlay = normalize_text_overlay(overlay_request)
-        except ShortVideoError as error:
-            return json_error(str(error), 400)
-        vertical = data.get('vertical_format', False)
-        if not isinstance(vertical, bool):
-            return json_error('vertical_format must be true or false', 400)
-
+        """Synchronous: answers when the short is rendered. The pages use /api/jobs/create-short."""
+        short_request, error = parse_short_request(get_json_body())
+        if error:
+            return json_error(error, 400)
         with LogContext(api_logger, "Short video creation"):
-            started = time.time()
-            record_id = start_request_record(url, platform)
-            video_path, video_title, download_error = extractor.download_video(url)
-            if not video_path:
-                message = download_error or 'Failed to download video'
-                finish_request_record(record_id, 'failed', started, message)
-                return json_error(message, 400)
-
-            safe_title = "".join(
-                c for c in (video_title or "short")[:MAX_FRAME_FILENAME_TITLE]
-                if c.isalnum() or c in ' -_').strip() or 'short'
-            output_name = f"{safe_title}_{uuid.uuid4().hex[:8]}_short.mp4"
-            output_path = config.SHORTS_FOLDER / output_name
-
+            record_id = start_request_record(short_request.url, short_request.platform)
             try:
-                result = create_short(Path(video_path), output_path, start=start,
-                                      duration=duration, vertical=vertical, quality=quality,
-                                      text_overlay=text_overlay)
-            except ShortVideoError as error:
-                finish_request_record(record_id, 'failed', started, str(error))
-                return json_error(str(error), 400)
-            except Exception:
-                finish_request_record(record_id, 'failed', started, 'Rendering failed')
-                raise
-            finally:
-                remove_quietly(video_path)
+                result = run_recorded(record_id, 'Rendering failed',
+                                      lambda: media_jobs.render_short(short_request, NullReporter()))
+            except JobFailed as failure:
+                return json_error(failure.message, 400)
+            return jsonify(result)
 
-            finish_request_record(record_id, 'completed', started)
-            response = {
-                'success': True,
-                'message': 'Short video created successfully',
-                'filename': output_name,
-                'title': video_title,
-                'duration': result['duration'],
-                'start_time': result['start_time'],
-                'quality': quality,
-                'file_size': file_size_or_none(output_path),
-                'download_url': f'/shorts/{quote(output_name)}',
-            }
-            if result['warnings']:
-                response['warnings'] = result['warnings']
-            return jsonify(response)
+    # -- API: background jobs (download + extract / render, with progress and cancel) ----
+
+    def start_job(kind: str, stages, record_id: int, work):
+        """Queues `work` (it records its own outcome); answers 202 with the job, or 429."""
+        queued_at = time.time()
+        try:
+            job = job_registry.submit(kind, stages, work, on_cancel_while_queued=lambda: finish_request_record(
+                record_id, 'cancelled', queued_at, 'Cancelled by the user'))
+        except JobQueueFull:
+            finish_request_record(record_id, 'failed', queued_at, 'Too many jobs waiting')
+            return json_error('Too many jobs are running or waiting. Wait for one to finish.', 429)
+        return jsonify({'success': True, 'job': job_registry.snapshot(job.id)}), 202
+
+    @app.route('/api/jobs/extract', methods=['POST'])
+    @limiter.limit("10 per minute")
+    def start_extract_job():
+        extract_request, error = parse_extract_request(get_json_body())
+        if error:
+            return json_error(error, 400)
+        # Recorded here: the request (IP, user agent) is gone by the time the job runs
+        record_id = start_request_record(extract_request.url, extract_request.platform)
+        return start_job('extract', EXTRACT_STAGES, record_id, lambda reporter: run_recorded(
+            record_id, 'Frame extraction crashed',
+            lambda: media_jobs.extract_frames(extract_request, record_id, reporter)))
+
+    @app.route('/api/jobs/create-short', methods=['POST'])
+    @limiter.limit("5 per minute")
+    def start_short_job():
+        short_request, error = parse_short_request(get_json_body())
+        if error:
+            return json_error(error, 400)
+        record_id = start_request_record(short_request.url, short_request.platform)
+        return start_job('short', SHORT_STAGES, record_id, lambda reporter: run_recorded(
+            record_id, 'Rendering failed', lambda: media_jobs.render_short(short_request, reporter)))
+
+    # Polled about once a second by an open page, so not counted against the API limit
+    @app.route('/api/jobs')
+    @limiter.exempt
+    def list_jobs():
+        return jsonify({'success': True, 'jobs': job_registry.snapshots()})
+
+    @app.route('/api/jobs/<job_id>')
+    @limiter.exempt
+    def job_status(job_id):
+        job = job_registry.snapshot(job_id) if JOB_ID_PATTERN.fullmatch(job_id) else None
+        if job is None:
+            return json_error('Job not found', 404)
+        return jsonify({'success': True, 'job': job})
+
+    @app.route('/api/jobs/<job_id>/cancel', methods=['POST'])
+    @limiter.limit("30 per minute")
+    def cancel_job(job_id):
+        job = job_registry.cancel(job_id) if JOB_ID_PATTERN.fullmatch(job_id) else None
+        if job is None:
+            return json_error('Job not found', 404)
+        return jsonify({'success': True, 'job': job})
 
     @app.route('/shorts/<filename>')
     @limiter.exempt
@@ -701,10 +635,12 @@ def create_app() -> Flask:
 
 
 def run_startup_cleanup() -> None:
-    """Sweep files older than AUTO_CLEANUP_HOURS left by earlier runs."""
+    """Sweep files older than AUTO_CLEANUP_HOURS, and renders cut off when the app last stopped."""
     try:
         deleted, freed_mb, _ = extractor.cleanup_old_files()
-        app_logger.info("Startup cleanup finished", files_deleted=deleted, space_freed_mb=freed_mb)
+        partial = remove_partial_renders(get_config().SHORTS_FOLDER)
+        app_logger.info("Startup cleanup finished", files_deleted=deleted, space_freed_mb=freed_mb,
+                        partial_renders_removed=partial)
     except (OSError, ValueError) as error:
         app_logger.warning(f"Startup cleanup failed ({type(error).__name__})")
 

@@ -166,7 +166,7 @@ class TestCreateShort(unittest.TestCase):
         width, height, length = self.video_size_and_length(output)
         self.assertEqual((width, height), short_video.SHORT_SIZE)
         self.assertAlmostEqual(length, 2, delta=0.3)
-        self.assertEqual(list(self.folder.glob('*.tmp-audio.*')), [])
+        self.assertEqual(list(self.folder.rglob('*.tmp-audio.*')), [])
 
     def test_duration_is_clamped_to_the_end_of_the_video(self):
         output = self.folder / 'short.mp4'
@@ -211,6 +211,51 @@ class TestCreateShort(unittest.TestCase):
                 self.assertEqual(result['warnings'], [])
                 self.assertGreater(output.stat().st_size, 0)
 
+    def test_render_progress_is_reported_up_to_the_last_frame(self):
+        output = self.folder / 'short.mp4'
+        reported = []
+        short_video.create_short(self.source, output, start=0, duration=2, quality='low',
+                                 on_progress=reported.append)
+        # proglog always reports the first frame and the end; how many in between depends on speed
+        self.assertGreaterEqual(len(reported), 2)
+        self.assertEqual(reported[0], 0)
+        self.assertEqual(reported[-1], 1)
+        self.assertEqual(reported, sorted(reported))
+
+    def test_a_short_is_listed_only_once_it_is_complete(self):
+        """Jobs render in the background, so the library is read while a render is running."""
+        from library import list_shorts
+        output = self.folder / 'short.mp4'
+        listed_during_render = []
+
+        def look_at_the_library(fraction):
+            listed_during_render.append((output.exists(), list_shorts(self.folder)))
+
+        with patch('library.video_duration', return_value=1.0):
+            short_video.create_short(self.source, output, start=0, duration=1, quality='low',
+                                     on_progress=look_at_the_library)
+            self.assertTrue(listed_during_render)
+            self.assertEqual([entry for entry in listed_during_render if entry != (False, [])], [])
+            self.assertEqual([item['filename'] for item in list_shorts(self.folder)], ['short.mp4'])
+        self.assertEqual(list((self.folder / short_video.RENDERING_FOLDER).iterdir()), [])
+
+    def test_cancelling_stops_the_render_and_leaves_no_output(self):
+        from jobs import JobCancelled
+        output = self.folder / 'short.mp4'
+        calls = []
+
+        def cancel_at_once(fraction):
+            calls.append(fraction)
+            raise JobCancelled()
+
+        with self.assertRaises(JobCancelled):
+            short_video.create_short(self.source, output, start=0, duration=3, quality='low',
+                                     on_progress=cancel_at_once)
+        self.assertEqual(calls, [0], 'stopped at the first frame, not after the render')
+        self.assertFalse(output.exists())
+        self.assertEqual(list(self.folder.rglob('*.tmp-audio.*')), [])
+        self.assertEqual(list((self.folder / short_video.RENDERING_FOLDER).iterdir()), [])
+
     def test_failed_renders_leave_no_output_or_temp_audio(self):
         output = self.folder / 'short.mp4'
         temp_audio = output.with_suffix('.tmp-audio.m4a')
@@ -226,6 +271,7 @@ class TestCreateShort(unittest.TestCase):
 
         self.assertFalse(output.exists())
         self.assertFalse(temp_audio.exists())
+        self.assertEqual(list((self.folder / short_video.RENDERING_FOLDER).iterdir()), [])
 
 
 if __name__ == '__main__':

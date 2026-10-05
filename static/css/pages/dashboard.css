@@ -201,6 +201,8 @@ td.when {
 .status-failed { color: var(--danger); }
 .status-processing { color: var(--warn); }
 .status-processing::before { border-radius: 50%; background: transparent; }
+.status-cancelled { color: var(--ink-soft); }
+.status-cancelled::before { background: transparent; }
 
 .empty-row {
     padding: 1.5rem 0;
