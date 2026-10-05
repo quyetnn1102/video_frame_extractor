@@ -317,8 +317,10 @@ class TestExtractFrames(RouteTestCase):
 
         response = self.post()
 
-        self.assertIn(response.status_code, (400, 500))
+        self.assertEqual(response.status_code, 500)  # unexpected: generic error, not a 400
+        self.assertNotIn('boom', response.get_data(as_text=True))
         self.assertFalse(video.exists())
+        self.assertEqual(self.db.update_video_request.call_args.args[:2], (7, 'failed'))
 
     def test_partial_failures_become_warnings(self):
         video = self.make_download()

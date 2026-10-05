@@ -150,29 +150,6 @@ app_logger = StructuredLogger('app')
 video_logger = StructuredLogger('video_processing')
 api_logger = StructuredLogger('api')
 
-def log_function_call(func):
-    """Decorator to log function calls"""
-    def wrapper(*args, **kwargs):
-        start_time = datetime.now()
-        try:
-            result = func(*args, **kwargs)
-            duration = (datetime.now() - start_time).total_seconds() * 1000
-            app_logger.debug(
-                f"Function call: {func.__name__}",
-                duration_ms=duration,
-                success=True
-            )
-            return result
-        except Exception as e:
-            duration = (datetime.now() - start_time).total_seconds() * 1000
-            app_logger.error(
-                f"Function call failed: {func.__name__}",
-                duration_ms=duration,
-                error=str(e)
-            )
-            raise
-    return wrapper
-
 class LogContext:
     """Context manager for logging operations"""
     

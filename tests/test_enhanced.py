@@ -9,25 +9,8 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 from config import DevelopmentConfig, ProductionConfig
-from validators import SecurityValidator
 from video_processor import EnhancedVideoFrameExtractor
 from database import DatabaseManager
-
-
-class TestRateLimiting(unittest.TestCase):
-    def test_denies_requests_over_the_limit(self):
-        validator = SecurityValidator()
-        identifier = 'test_user'
-        max_requests = 3
-
-        for _ in range(max_requests):
-            is_allowed, remaining = validator.check_rate_limit(identifier, max_requests)
-            self.assertTrue(is_allowed)
-            self.assertGreaterEqual(remaining, 0)
-
-        is_allowed, remaining = validator.check_rate_limit(identifier, max_requests)
-        self.assertFalse(is_allowed)
-        self.assertEqual(remaining, 0)
 
 
 class TestVideoProcessor(unittest.TestCase):

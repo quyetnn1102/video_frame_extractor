@@ -5,7 +5,6 @@ Provides comprehensive input validation, sanitization, and security checks
 import re
 import urllib.parse as urlparse
 from typing import List, Tuple, Optional
-from datetime import datetime, timedelta
 import hashlib
 from pathlib import Path
 
@@ -113,9 +112,6 @@ class SecurityValidator:
                 r'https?://(www\.)?douyin\.com/video/\d+',
             ],
         }
-        
-        # Rate limiting storage (in production, use Redis/database)
-        self._rate_limit_cache = {}
         
     def validate_url(self, url: str) -> Tuple[bool, str, Optional[str]]:
         """
@@ -280,39 +276,7 @@ class SecurityValidator:
             filename = f"_{filename}"
 
         return filename
-    
-    def check_rate_limit(self, identifier: str, max_requests: int = None, 
-                        window_minutes: int = 1) -> Tuple[bool, int]:
-        """
-        Check rate limit for an identifier (IP, user, etc.)
-        
-        Returns:
-            (is_allowed, requests_remaining)
-        """
-        if max_requests is None:
-            max_requests = self.config.RATE_LIMIT_PER_MINUTE
-        
-        now = datetime.now()
-        window_start = now - timedelta(minutes=window_minutes)
-        
-        # Clean old entries
-        if identifier in self._rate_limit_cache:
-            self._rate_limit_cache[identifier] = [
-                req_time for req_time in self._rate_limit_cache[identifier]
-                if req_time > window_start
-            ]
-        else:
-            self._rate_limit_cache[identifier] = []
-        
-        current_requests = len(self._rate_limit_cache[identifier])
-        
-        if current_requests >= max_requests:
-            return False, 0
-        
-        # Add current request
-        self._rate_limit_cache[identifier].append(now)
-        return True, max_requests - current_requests - 1
-    
+
     def validate_file_path(self, file_path: str, allowed_extensions: List[str] = None) -> Tuple[bool, str]:
         """
         Validate file path for security
@@ -343,27 +307,13 @@ class SecurityValidator:
             
             return True, ""
             
-        except Exception as e:
-            return False, f"Invalid file path: {str(e)}"
-    
+        except (OSError, ValueError):
+            return False, "Invalid file path"
+
     def hash_sensitive_data(self, data: str) -> str:
         """Hash sensitive data for logging"""
         return hashlib.sha256(data.encode()).hexdigest()[:8]
-    
-    def sanitize_user_input(self, text: str, max_length: int = 1000) -> str:
-        """Sanitize user input text"""
-        if not text:
-            return ""
-        
-        # Basic HTML tag removal and character filtering
-        clean_text = re.sub(r'<[^>]+>', '', text)  # Remove HTML tags
-        clean_text = re.sub(r'[<>"\'&]', '', clean_text)  # Remove dangerous characters
-        
-        if len(clean_text) > max_length:
-            clean_text = clean_text[:max_length]
-        
-        return clean_text.strip()
-    
+
     def get_platform_from_url(self, url: str) -> str:
         """Detect platform from URL"""
         try:
