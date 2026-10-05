@@ -13,9 +13,9 @@ from logger import app_logger
 class DatabaseManager:
     """Enhanced database management with connection pooling and migration support"""
     
-    def __init__(self):
+    def __init__(self, db_path=None):
         self.config = get_config()
-        self.db_path = self.config.BASE_DIR / 'app_data.db'
+        self.db_path = db_path or self.config.BASE_DIR / 'app_data.db'
         self.init_database()
     
     def init_database(self):
