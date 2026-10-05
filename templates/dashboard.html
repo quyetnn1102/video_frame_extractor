@@ -272,17 +272,24 @@
                         // Update platform stats
                         const platformStats = document.getElementById('platformStats');
                         if (data.analytics.platform_stats && Object.keys(data.analytics.platform_stats).length > 0) {
-                            platformStats.innerHTML = '';
-                            Object.entries(data.analytics.platform_stats).forEach(([platform, count]) => {
-                                platformStats.innerHTML += `
-                                    <div class="d-flex justify-content-between align-items-center mb-2">
-                                        <span class="text-capitalize">${platform}</span>
-                                        <span class="badge bg-primary">${count}</span>
-                                    </div>
-                                `;
+                            const rows = Object.entries(data.analytics.platform_stats).map(([platform, count]) => {
+                                const name = document.createElement('span');
+                                name.className = 'text-capitalize';
+                                name.textContent = platform;
+                                const badge = document.createElement('span');
+                                badge.className = 'badge bg-primary';
+                                badge.textContent = count;
+                                const row = document.createElement('div');
+                                row.className = 'd-flex justify-content-between align-items-center mb-2';
+                                row.append(name, badge);
+                                return row;
                             });
+                            platformStats.replaceChildren(...rows);
                         } else {
-                            platformStats.innerHTML = '<p class="text-muted">No data available</p>';
+                            const empty = document.createElement('p');
+                            empty.className = 'text-muted';
+                            empty.textContent = 'No data available';
+                            platformStats.replaceChildren(empty);
                         }
                     }
                     

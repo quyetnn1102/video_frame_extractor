@@ -217,53 +217,87 @@
             return num.toString();
         }
 
+        // Video titles, descriptions and channel names come from YouTube and are
+        // untrusted. Everything below is built with textContent and addEventListener,
+        // never by interpolating data into HTML or inline handlers.
+        function element(tag, className, text) {
+            const node = document.createElement(tag);
+            if (className) node.className = className;
+            if (text !== undefined) node.textContent = text;
+            return node;
+        }
+
+        function withIcon(parent, iconClasses, text) {
+            parent.append(element('i', iconClasses), document.createTextNode(text));
+            return parent;
+        }
+
+        function safeHttpsUrl(value) {
+            try {
+                const url = new URL(value);
+                return url.protocol === 'https:' ? url.href : '';
+            } catch (error) {
+                return '';
+            }
+        }
+
         function createVideoCard(video) {
-            return `
-                <div class="col-lg-4 col-md-6">
-                    <div class="card video-card">
-                        <img src="${video.thumbnail}" class="video-thumbnail" alt="${video.title}" loading="lazy">
-                        <div class="video-info">
-                            <div class="video-title">${video.title}</div>
-                            <div class="video-description">${video.description}</div>
-                            <div class="video-meta">
-                                <div><i class="fas fa-user mr-1"></i>${video.channel}</div>
-                                <div class="video-stats">
-                                    <div>
-                                        <i class="fas fa-eye mr-1"></i>${formatViews(video.views)} views
-                                        <span class="ms-2"><i class="fas fa-clock mr-1"></i>${video.duration}</span>
-                                    </div>
-                                    <span class="category-badge">${video.category}</span>
-                                </div>
-                                <div class="mt-2">
-                                    <small class="text-muted"><i class="fas fa-calendar mr-1"></i>${video.published}</small>
-                                </div>
-                            </div>
-                            <div class="mt-3 d-flex gap-2">
-                                <button class="btn extract-button flex-grow-1" onclick="extractFromVideo('${video.url}', '${video.title}')">
-                                    <i class="fas fa-images mr-1"></i>Extract Frames
-                                </button>
-                                <a href="${video.url}" target="_blank" class="btn btn-outline-primary">
-                                    <i class="fas fa-external-link-alt"></i>
-                                </a>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            `;
+            const videoUrl = safeHttpsUrl(video.url);
+
+            const thumbnail = element('img', 'video-thumbnail');
+            thumbnail.loading = 'lazy';
+            thumbnail.alt = video.title || '';
+            const thumbnailUrl = safeHttpsUrl(video.thumbnail);
+            if (thumbnailUrl) thumbnail.src = thumbnailUrl;
+
+            const views = withIcon(element('div'), 'fas fa-eye mr-1', `${formatViews(video.views)} views `);
+            views.append(withIcon(element('span', 'ms-2'), 'fas fa-clock mr-1', String(video.duration)));
+            const stats = element('div', 'video-stats');
+            stats.append(views, element('span', 'category-badge', video.category));
+
+            const published = element('div', 'mt-2');
+            published.append(withIcon(element('small', 'text-muted'), 'fas fa-calendar mr-1', video.published));
+            const meta = element('div', 'video-meta');
+            meta.append(withIcon(element('div'), 'fas fa-user mr-1', video.channel), stats, published);
+
+            const extractButton = withIcon(element('button', 'btn extract-button flex-grow-1'),
+                                           'fas fa-images mr-1', 'Extract Frames');
+            extractButton.type = 'button';
+            extractButton.addEventListener('click', () => extractFromVideo(videoUrl, video.title));
+
+            const openLink = element('a', 'btn btn-outline-primary');
+            openLink.append(element('i', 'fas fa-external-link-alt'));
+            openLink.target = '_blank';
+            openLink.rel = 'noopener noreferrer';
+            if (videoUrl) openLink.href = videoUrl;
+
+            const actions = element('div', 'mt-3 d-flex gap-2');
+            actions.append(extractButton, openLink);
+
+            const info = element('div', 'video-info');
+            info.append(element('div', 'video-title', video.title),
+                        element('div', 'video-description', video.description),
+                        meta, actions);
+
+            const card = element('div', 'card video-card');
+            card.append(thumbnail, info);
+            const column = element('div', 'col-lg-4 col-md-6');
+            column.append(card);
+            return column;
         }
 
         function displayVideos(videos) {
             const videosGrid = document.getElementById('videosGrid');
             const noResults = document.getElementById('noResults');
-            
+
             if (videos.length === 0) {
-                videosGrid.innerHTML = '';
+                videosGrid.replaceChildren();
                 noResults.style.display = 'block';
                 return;
             }
-            
+
             noResults.style.display = 'none';
-            videosGrid.innerHTML = videos.map(createVideoCard).join('');
+            videosGrid.replaceChildren(...videos.map(createVideoCard));
         }
 
         function loadTrendingVideos() {
@@ -323,19 +357,15 @@
             const videosGrid = document.getElementById('videosGrid');
             const noResults = document.getElementById('noResults');
             
-            videosGrid.innerHTML = `
-                <div class="col-12">
-                    <div class="alert alert-warning" role="alert">
-                        <i class="fas fa-exclamation-triangle mr-2"></i>
-                        ${message}
-                        <br><br>
-                        <small class="text-muted">
-                            <i class="fas fa-info-circle mr-1"></i>
-                            We're working on adding support for more platforms. Stay tuned!
-                        </small>
-                    </div>
-                </div>
-            `;
+            const alertBox = element('div', 'alert alert-warning');
+            alertBox.setAttribute('role', 'alert');
+            withIcon(alertBox, 'fas fa-exclamation-triangle mr-2', message);  // message may be server text
+            const note = withIcon(element('small', 'text-muted'), 'fas fa-info-circle mr-1',
+                                  "We're working on adding support for more platforms. Stay tuned!");
+            alertBox.append(element('br'), element('br'), note);
+            const column = element('div', 'col-12');
+            column.append(alertBox);
+            videosGrid.replaceChildren(column);
             noResults.style.display = 'none';
         }
 

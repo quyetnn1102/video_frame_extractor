@@ -626,7 +626,7 @@
                 const result = await response.json();
                 
                 if (result.valid) {
-                    alert(`✅ URL is valid!\n\nPlatform: ${result.platform}\nStatus: ${result.info.status}\nReliability: ${result.info.reliability}\n\nTips: ${result.info.tips.join(', ')}`);
+                    alert(`✅ URL is valid!\n\nPlatform: ${result.platform}\nStatus: ${result.info.status}\n${result.info.notes}\n\nTips: ${result.info.tips.join(', ')}`);
                 } else {
                     alert(`❌ URL validation failed:\n${result.info.notes || 'Invalid or unsupported URL'}`);
                 }
@@ -692,23 +692,36 @@
             const container = document.getElementById('framesContainer');
             const resultsSection = document.getElementById('resultsSection');
             
-            container.innerHTML = '';
-            
-            frames.forEach((frame, index) => {
-                const frameCard = `
-                    <div class="frame-card">
-                        <img src="/frames/${frame.filename}" class="frame-image" alt="Frame ${frame.timestamp}">
-                        <div class="frame-info">
-                            <h5 class="frame-title">Frame at ${frame.timestamp}</h5>
-                            <a href="/frames/${frame.filename}" download class="frame-download">
-                                <i class="fas fa-download"></i>
-                                Download
-                            </a>
-                        </div>
-                    </div>
-                `;
-                container.innerHTML += frameCard;
+            const cards = frames.map(frame => {
+                const frameUrl = '/frames/' + encodeURIComponent(frame.filename);
+
+                const image = document.createElement('img');
+                image.className = 'frame-image';
+                image.src = frameUrl;
+                image.alt = 'Frame ' + frame.timestamp;
+
+                const title = document.createElement('h5');
+                title.className = 'frame-title';
+                title.textContent = 'Frame at ' + frame.timestamp;
+
+                const download = document.createElement('a');
+                download.className = 'frame-download';
+                download.href = frameUrl;
+                download.download = '';
+                const downloadIcon = document.createElement('i');
+                downloadIcon.className = 'fas fa-download';
+                download.append(downloadIcon, ' Download');
+
+                const info = document.createElement('div');
+                info.className = 'frame-info';
+                info.append(title, download);
+
+                const card = document.createElement('div');
+                card.className = 'frame-card';
+                card.append(image, info);
+                return card;
             });
+            container.replaceChildren(...cards);
             
             resultsSection.style.display = 'block';
             resultsSection.scrollIntoView({ behavior: 'smooth' });

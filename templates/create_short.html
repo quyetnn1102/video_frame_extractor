@@ -460,8 +460,14 @@
             color: #ff0050;
         }
 
-        /* Loading Overlay */
+        /* Loading Overlay: a full-screen layer, hidden until a request is running */
         .loading-overlay {
+            position: fixed;
+            inset: 0;
+            z-index: 2000;
+            display: none;
+            align-items: center;
+            justify-content: center;
             background: rgba(0, 0, 0, 0.9);
             backdrop-filter: blur(5px);
         }
@@ -471,6 +477,10 @@
             border: 1px solid #333;
             border-radius: 20px;
             color: var(--youtube-text);
+            padding: 32px;
+            max-width: 440px;
+            width: 90%;
+            text-align: center;
         }
 
         .loading-progress {
@@ -478,9 +488,12 @@
             border-radius: 10px;
             overflow: hidden;
             margin-top: 16px;
+            height: 8px;
         }
 
-        .progress-bar {
+        .loading-progress .progress-bar {
+            width: 100%;
+            height: 100%;
             background: var(--tiktok-gradient);
             animation: loading-pulse 2s ease-in-out infinite;
         }
@@ -495,19 +508,19 @@
             .hero-title {
                 font-size: 2rem;
             }
-            
+
             .upload-section, .results-section {
                 padding: 24px;
             }
-            
+
             .features-grid {
                 grid-template-columns: 1fr;
             }
-            
+
             .action-buttons {
                 justify-content: stretch;
             }
-            
+
             .action-buttons .btn-download,
             .action-buttons .btn-share {
                 flex: 1;
@@ -539,7 +552,7 @@
                         </a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link" href="#" onclick="showTrending()">
+                        <a class="nav-link" href="/trending">
                             <i class="fas fa-fire"></i> Trending
                         </a>
                     </li>
@@ -553,21 +566,21 @@
         <div class="hero-section">
             <div class="hero-content">
                 <h1 class="hero-title">
-                    <i class="fab fa-tiktok"></i> Create Viral Shorts
+                    <i class="fab fa-tiktok"></i> Create Vertical Shorts
                 </h1>
-                <p class="hero-subtitle">Transform any video into addictive short-form content that goes viral on TikTok, YouTube Shorts, and Instagram Reels</p>
+                <p class="hero-subtitle">Cut any moment of a video into a short clip in the vertical 9:16 format used by TikTok, YouTube Shorts and Instagram Reels</p>
                 <div class="quality-badges">
                     <span class="quality-badge">
-                        <i class="fas fa-robot"></i> AI-Powered
+                        <i class="fas fa-crop-alt"></i> 9:16 Crop
                     </span>
                     <span class="quality-badge">
                         <i class="fas fa-mobile-alt"></i> Mobile First
                     </span>
                     <span class="quality-badge">
-                        <i class="fas fa-fire"></i> Viral Ready
+                        <i class="fas fa-font"></i> Text Overlay
                     </span>
                     <span class="quality-badge">
-                        <i class="fas fa-hd-video"></i> HD Quality
+                        <i class="fas fa-hd-video"></i> Up to 720p Source
                     </span>
                 </div>
             </div>
@@ -579,57 +592,62 @@
                 <div class="feature-icon">
                     <i class="fas fa-scissors"></i>
                 </div>
-                <h5 class="feature-title">Smart Clipping</h5>
-                <p class="feature-description">AI identifies the most engaging moments and creates perfectly timed clips</p>
+                <h5 class="feature-title">Precise Clipping</h5>
+                <p class="feature-description">Choose the start time and the length of your clip, from 1 to 300 seconds</p>
             </div>
             <div class="feature-card">
                 <div class="feature-icon">
                     <i class="fas fa-mobile-alt"></i>
                 </div>
-                <h5 class="feature-title">Mobile Optimized</h5>
-                <p class="feature-description">Perfect 9:16 vertical format optimized for mobile viewing and social feeds</p>
+                <h5 class="feature-title">Vertical Format</h5>
+                <p class="feature-description">Wide and tall videos are cropped around the center to 9:16 and scaled to 1080x1920</p>
             </div>
             <div class="feature-card">
                 <div class="feature-icon">
                     <i class="fas fa-rocket"></i>
                 </div>
-                <h5 class="feature-title">Platform Ready</h5>
-                <p class="feature-description">Export formats optimized for TikTok, YouTube Shorts, and Instagram Reels</p>
+                <h5 class="feature-title">Share Anywhere</h5>
+                <p class="feature-description">Download the MP4 or upload it to your own YouTube channel from here</p>
             </div>
             <div class="feature-card">
                 <div class="feature-icon">
                     <i class="fas fa-bolt"></i>
                 </div>
-                <h5 class="feature-title">Lightning Fast</h5>
-                <p class="feature-description">Advanced processing algorithms deliver results in seconds, not minutes</p>
+                <h5 class="feature-title">Runs Locally</h5>
+                <p class="feature-description">Downloading and rendering happen on your own computer, so long clips take a few minutes</p>
             </div>
         </div>
 
-        <!-- Upload Section - Modern Card Style -->
+        <!-- Form Section - Modern Card Style -->
         <div class="upload-section">
             <h2 class="section-title">
-                <i class="fas fa-upload"></i> Upload & Create
+                <i class="fas fa-cut"></i> Create a Short
             </h2>
-            <p class="section-subtitle">Drop your video and watch the magic happen in seconds</p>
-            
+            <p class="section-subtitle">Paste a video link, choose the moment, and get a short clip.</p>
+
             <!-- YouTube Setup Alert -->
             <div class="alert alert-info d-flex align-items-center" style="background: rgba(255, 0, 80, 0.1); border: 1px solid #ff0050; border-radius: 12px; margin-bottom: 24px;">
                 <i class="fab fa-youtube text-danger me-3" style="font-size: 1.5rem;"></i>
                 <div>
-                    <strong>YouTube Upload Available!</strong><br>
-                    <small class="text-muted">Set up YouTube API credentials to upload directly to your channel. See YOUTUBE_UPLOAD_SETUP.md for instructions.</small>
+                    <strong>YouTube upload is optional.</strong><br>
+                    <small class="text-muted">To upload a finished short to your own channel, set up Google API credentials (see "YouTube upload" in the README). Uploads start as private.</small>
                 </div>
             </div>
-            
-            <form id="shortVideoForm" enctype="multipart/form-data">
+
+            <form id="shortVideoForm" novalidate>
                 <div class="mb-4">
-                    <label for="videoFile" class="form-label">
-                        <i class="fas fa-file-video"></i> Choose Your Video
+                    <label for="shortVideoUrl" class="form-label">
+                        <i class="fas fa-link"></i> Video URL
                     </label>
-                    <input type="file" class="form-control" id="videoFile" name="video" 
-                           accept="video/*" required>
+                    <div class="d-flex gap-2">
+                        <input type="url" class="form-control" id="shortVideoUrl" required
+                               placeholder="https://www.youtube.com/watch?v=...">
+                        <button type="button" class="btn btn-outline-primary" id="validateShortBtn">
+                            <i class="fas fa-check"></i> Check
+                        </button>
+                    </div>
                     <div class="form-text">
-                        <i class="fas fa-info-circle"></i> Supported: MP4, AVI, MOV, MKV • Max size: 500MB
+                        <i class="fas fa-info-circle"></i> YouTube, TikTok, Instagram, Facebook or Douyin. Only use videos you own or have permission to use.
                     </div>
                 </div>
 
@@ -640,7 +658,7 @@
                     <div class="duration-grid">
                         <div class="duration-option" data-duration="15">
                             <div><strong>15s</strong></div>
-                            <small>TikTok Perfect</small>
+                            <small>TikTok</small>
                         </div>
                         <div class="duration-option selected" data-duration="30">
                             <div><strong>30s</strong></div>
@@ -655,33 +673,62 @@
                             <small>Your Choice</small>
                         </div>
                     </div>
-                    <input type="hidden" id="selectedDuration" name="duration" value="30">
+                    <input type="hidden" id="selectedDuration" value="30">
                 </div>
 
                 <div class="mb-4" id="customDurationDiv" style="display: none;">
                     <label for="customDuration" class="form-label">
                         <i class="fas fa-edit"></i> Custom Duration
                     </label>
-                    <input type="number" class="form-control" id="customDuration" 
-                           name="custom_duration" min="5" max="300" placeholder="Duration in seconds (5-300)">
+                    <input type="number" class="form-control" id="customDuration"
+                           min="1" max="300" placeholder="Duration in seconds (1-300)">
+                    <div class="form-text">YouTube only accepts uploads of up to 60 seconds as Shorts.</div>
                 </div>
 
                 <div class="mb-4">
                     <label for="startTime" class="form-label">
                         <i class="fas fa-play"></i> Start Time <small class="text-muted">(optional)</small>
                     </label>
-                    <input type="text" class="form-control" id="startTime" name="start_time" 
-                           placeholder="00:01:30 or 90 (seconds)">
+                    <input type="text" class="form-control" id="startTime"
+                           placeholder="1:30 or 90 (seconds)">
                     <div class="form-text">
-                        <i class="fas fa-magic"></i> Leave blank for AI to find the best moments automatically
+                        <i class="fas fa-info-circle"></i> Leave blank to start from the beginning
                     </div>
+                </div>
+
+                <div class="row mb-4">
+                    <div class="col-md-6 mb-3 mb-md-0">
+                        <label for="quality" class="form-label">
+                            <i class="fas fa-sliders-h"></i> Quality
+                        </label>
+                        <select class="form-select form-control" id="quality">
+                            <option value="low">Low (smaller file)</option>
+                            <option value="medium" selected>Medium</option>
+                            <option value="high">High (larger file)</option>
+                        </select>
+                    </div>
+                    <div class="col-md-6">
+                        <label for="overlayText" class="form-label">
+                            <i class="fas fa-font"></i> Text Overlay <small class="text-muted">(optional)</small>
+                        </label>
+                        <input type="text" class="form-control" id="overlayText" maxlength="100"
+                               placeholder="Caption shown at the bottom">
+                        <div class="form-text">Needs ImageMagick installed; otherwise the clip is made without text.</div>
+                    </div>
+                </div>
+
+                <div class="form-check mb-4">
+                    <input class="form-check-input" type="checkbox" id="verticalFormat" checked>
+                    <label class="form-check-label" for="verticalFormat">
+                        Crop to vertical 9:16 (1080x1920)
+                    </label>
                 </div>
 
                 <div class="text-center">
                     <button type="submit" class="btn btn-primary">
-                        <i class="fas fa-magic"></i> Create Viral Short
+                        <i class="fas fa-magic"></i> Create Short
                     </button>
-                    <button type="button" class="btn btn-outline-primary ms-3" onclick="resetForm()">
+                    <button type="button" class="btn btn-outline-primary ms-3" id="resetFormBtn">
                         <i class="fas fa-redo"></i> Reset
                     </button>
                 </div>
@@ -691,18 +738,21 @@
         <!-- Results Section -->
         <div class="results-section" id="resultsSection">
             <h2 class="section-title">
-                <i class="fas fa-check-circle" style="color: #00f2ea;"></i> Your Viral Short is Ready!
+                <i class="fas fa-check-circle" style="color: #00f2ea;"></i> Your Short is Ready
             </h2>
             <div id="resultsContent"></div>
+        </div>
+    </div>
+
     <!-- Loading Overlay -->
-    <div class="loading-overlay" id="loadingOverlay">
+    <div class="loading-overlay" id="loadingOverlay" role="status" aria-live="polite">
         <div class="loading-content">
             <div class="spinner-border text-primary mb-3" style="width: 3rem; height: 3rem;">
                 <span class="visually-hidden">Loading...</span>
             </div>
-            <h4>Creating Viral Short...</h4>
-            <p id="loadingMessage">AI is processing your video and finding the best moments...</p>
-            <div class="loading-progress mt-3">
+            <h4>Working...</h4>
+            <p id="loadingMessage">Please wait.</p>
+            <div class="loading-progress">
                 <div class="progress-bar"></div>
             </div>
         </div>
@@ -710,458 +760,327 @@
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/js/bootstrap.bundle.min.js"></script>
     <script>
-        // Duration selection logic
-        document.addEventListener('DOMContentLoaded', function() {
-            const durationOptions = document.querySelectorAll('.duration-option');
-            const selectedDurationInput = document.getElementById('selectedDuration');
-            const customDurationDiv = document.getElementById('customDurationDiv');
-            
-            durationOptions.forEach(option => {
-                option.addEventListener('click', function() {
-                    // Remove selected class from all options
-                    durationOptions.forEach(opt => opt.classList.remove('selected'));
-                    
-                    // Add selected class to clicked option
-                    this.classList.add('selected');
-                    
-                    const duration = this.dataset.duration;
-                    selectedDurationInput.value = duration;
-                    
-                    // Show/hide custom duration input
-                    if (duration === 'custom') {
-                        customDurationDiv.style.display = 'block';
+        (function () {
+            'use strict';
+
+            const MAX_DURATION_SECONDS = 300;
+            const DEFAULT_DURATION = '30';
+            const AUTH_TIMEOUT_MS = 300000;
+            const AUTH_POLL_MS = 1000;
+            const BYTES_PER_MB = 1024 * 1024;
+            const $ = (id) => document.getElementById(id);
+            let busy = false;
+
+            // Server text is untrusted for display purposes: everything below is built
+            // with textContent / addEventListener instead of HTML strings.
+            function element(tag, className, text) {
+                const node = document.createElement(tag);
+                if (className) node.className = className;
+                if (text !== undefined) node.textContent = text;
+                return node;
+            }
+
+            function withIcon(parent, iconClasses, text) {
+                parent.append(element('i', iconClasses), document.createTextNode(' ' + text));
+                return parent;
+            }
+
+            function safeUrl(value, allowedPrefixes) {
+                return allowedPrefixes.some((prefix) => typeof value === 'string' && value.startsWith(prefix))
+                    ? value : '';
+            }
+
+            function showLoading(message) {
+                $('loadingMessage').textContent = message;
+                $('loadingOverlay').style.display = 'flex';
+            }
+
+            function hideLoading() {
+                $('loadingOverlay').style.display = 'none';
+            }
+
+            async function postJson(url, body) {
+                const response = await fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body),
+                });
+                let data = {};
+                try {
+                    data = await response.json();
+                } catch (error) {
+                    // a non-JSON reply is reported through the generic message below
+                }
+                return { ok: response.ok, data };
+            }
+
+            // ---- duration options -------------------------------------------------
+
+            function selectDuration(option) {
+                document.querySelectorAll('.duration-option').forEach((item) => item.classList.remove('selected'));
+                option.classList.add('selected');
+                const duration = option.dataset.duration;
+                $('selectedDuration').value = duration;
+                $('customDurationDiv').style.display = duration === 'custom' ? 'block' : 'none';
+            }
+
+            function getDuration() {
+                const selected = $('selectedDuration').value;
+                const value = selected === 'custom' ? Number($('customDuration').value) : Number(selected);
+                if (!Number.isFinite(value) || value < 1 || value > MAX_DURATION_SECONDS) {
+                    throw new Error(`Duration must be between 1 and ${MAX_DURATION_SECONDS} seconds`);
+                }
+                return value;
+            }
+
+            document.querySelectorAll('.duration-option').forEach((option) => {
+                option.addEventListener('click', () => selectDuration(option));
+            });
+
+            // ---- URL check --------------------------------------------------------
+
+            $('validateShortBtn').addEventListener('click', async () => {
+                const url = $('shortVideoUrl').value.trim();
+                if (!url) {
+                    alert('Please enter a video URL first');
+                    return;
+                }
+                try {
+                    const { ok, data } = await postJson('/api/test-platform', { url });
+                    if (ok && data.valid) {
+                        alert(`✅ URL is valid\n\nPlatform: ${data.platform}\nStatus: ${data.info.status}\n${data.info.notes}\n\nTips: ${data.info.tips.join(', ')}`);
                     } else {
-                        customDurationDiv.style.display = 'none';
+                        const reason = data.info ? data.info.notes : data.error;
+                        alert(`❌ URL validation failed:\n${reason || 'Invalid or unsupported URL'}`);
                     }
-                });
-            });
-        });
-
-        // Form submission
-        document.getElementById('shortVideoForm').addEventListener('submit', function(e) {
-            e.preventDefault();
-            
-            const loadingOverlay = document.getElementById('loadingOverlay');
-            const resultsSection = document.getElementById('resultsSection');
-            const resultsContent = document.getElementById('resultsContent');
-            
-            // Show loading overlay
-            loadingOverlay.style.display = 'flex';
-            
-            // Get form data
-            const formData = new FormData(this);
-            
-            // Update loading message
-            const loadingMessage = document.getElementById('loadingMessage');
-            loadingMessage.textContent = 'Uploading your video...';
-            
-            fetch('/api/create-short', {
-                method: 'POST',
-                body: formData
-            })
-            .then(response => response.json())
-            .then(data => {
-                loadingOverlay.style.display = 'none';
-                
-                if (data.success) {
-                    displayShortVideoResults(data);
-                    resultsSection.style.display = 'block';
-                    resultsSection.scrollIntoView({ behavior: 'smooth' });
-                } else {
-                    alert('Error creating short video: ' + data.error);
+                } catch (error) {
+                    console.error('Validation error:', error);
+                    alert('❌ Error validating URL. Please try again.');
                 }
-            })
-            .catch(error => {
-                loadingOverlay.style.display = 'none';
-                console.error('Error:', error);
-                alert('An error occurred while creating the short video. Please try again.');
             });
-        });
 
-        function displayShortVideoResults(data) {
-            const resultsContent = document.getElementById('resultsContent');
-            const fileSize = (data.file_size / (1024 * 1024)).toFixed(2);
-            
-            resultsContent.innerHTML = `
-                <div class="video-preview">
-                    <video controls>
-                        <source src="${data.video_url}" type="video/mp4">
-                        Your browser does not support the video tag.
-                    </video>
-                    <div class="video-info">
-                        <h4 class="video-title">
-                            <i class="fab fa-tiktok"></i> ${data.title || 'Viral Short Video'}
-                        </h4>
-                        <div class="video-stats">
-                            <div class="stat-item">
-                                <span class="stat-label">Duration</span>
-                                <span class="stat-value">${data.duration}s</span>
-                            </div>
-                            <div class="stat-item">
-                                <span class="stat-label">Quality</span>
-                                <span class="stat-value">${data.quality}</span>
-                            </div>
-                            <div class="stat-item">
-                                <span class="stat-label">Size</span>
-                                <span class="stat-value">${fileSize} MB</span>
-                            </div>
-                            <div class="stat-item">
-                                <span class="stat-label">Format</span>
-                                <span class="stat-value">MP4</span>
-                            </div>
-                        </div>
-                        <div class="action-buttons">
-                            <a href="${data.download_url}" class="btn-download">
-                                <i class="fas fa-download"></i> Download
-                            </a>
-                            <button class="btn-share" onclick="shareVideo('${data.video_url}')">
-                                <i class="fas fa-share"></i> Share
-                            </button>
-                            <button class="btn-share" onclick="uploadToYouTube('${data.video_path}', '${data.title}')">
-                                <i class="fab fa-youtube"></i> Upload to YouTube
-                            </button>
-                            <button class="btn-share" onclick="createAnother()">
-                                <i class="fas fa-plus"></i> Create Another
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            `;
-        }
+            // ---- create a short ---------------------------------------------------
 
-        function shareVideo(videoUrl) {
-            if (navigator.share) {
-                navigator.share({
-                    title: 'Check out my viral short video!',
-                    text: 'Created with VideoExtract - AI-powered short video generator',
-                    url: videoUrl
-                });
-            } else {
-                // Fallback: copy to clipboard
-                navigator.clipboard.writeText(videoUrl).then(() => {
-                    alert('Video link copied to clipboard!');
-                });
-            }
-        }
+            $('shortVideoForm').addEventListener('submit', async (event) => {
+                event.preventDefault();
+                if (busy) return;
 
-        function createAnother() {
-            // Reset form and hide results
-            document.getElementById('shortVideoForm').reset();
-            document.getElementById('resultsSection').style.display = 'none';
-            
-            // Reset duration selection
-            document.querySelectorAll('.duration-option').forEach(opt => {
-                opt.classList.remove('selected');
-            });
-            document.querySelector('[data-duration="30"]').classList.add('selected');
-            document.getElementById('selectedDuration').value = '30';
-            document.getElementById('customDurationDiv').style.display = 'none';
-        }
-
-        function resetForm() {
-            createAnother();
-        }
-
-        // Show trending function for navigation
-        function showTrending() {
-            // This would navigate to trending page or show trending videos
-            window.location.href = '/trending';
-        }
-
-        // YouTube Upload Functions
-        let isYouTubeAuthenticated = false;
-
-        async function checkYouTubeAuth() {
-            try {
-                const response = await fetch('/api/youtube-auth');
-                const data = await response.json();
-                isYouTubeAuthenticated = data.authenticated;
-                return data;
-            } catch (error) {
-                console.error('YouTube auth check failed:', error);
-                return { authenticated: false, error: error.message };
-            }
-        }
-
-        async function authenticateYouTube() {
-            try {
-                const authData = await checkYouTubeAuth();
-                
-                if (authData.authenticated) {
-                    return true;
-                }
-
-                if (authData.auth_url) {
-                    // Open OAuth2 flow in a new window
-                    const authWindow = window.open(
-                        authData.auth_url,
-                        'youtube_auth',
-                        'width=600,height=600,scrollbars=yes,resizable=yes'
-                    );
-
-                    // Wait for OAuth2 completion
-                    return new Promise((resolve, reject) => {
-                        const checkClosed = setInterval(() => {
-                            if (authWindow.closed) {
-                                clearInterval(checkClosed);
-                                // Check if authentication was successful
-                                checkYouTubeAuth().then(result => {
-                                    resolve(result.authenticated);
-                                });
-                            }
-                        }, 1000);
-
-                        // Timeout after 5 minutes
-                        setTimeout(() => {
-                            clearInterval(checkClosed);
-                            if (!authWindow.closed) {
-                                authWindow.close();
-                            }
-                            reject(new Error('Authentication timeout'));
-                        }, 300000);
-                    });
-                } else {
-                    throw new Error('Failed to get authentication URL');
-                }
-            } catch (error) {
-                console.error('YouTube authentication failed:', error);
-                alert('YouTube authentication failed: ' + error.message);
-                return false;
-            }
-        }
-
-        async function uploadToYouTube(videoPath, videoTitle) {
-            try {
-                // Show loading state
-                const loadingOverlay = document.getElementById('loadingOverlay');
-                const loadingMessage = document.getElementById('loadingMessage');
-                loadingMessage.textContent = 'Authenticating with YouTube...';
-                loadingOverlay.style.display = 'flex';
-
-                // Check/perform authentication
-                const authenticated = await authenticateYouTube();
-                
-                if (!authenticated) {
-                    loadingOverlay.style.display = 'none';
-                    alert('YouTube authentication required. Please try again.');
+                const url = $('shortVideoUrl').value.trim();
+                if (!url) {
+                    alert('Please enter a video URL');
                     return;
                 }
 
-                // Prepare upload data
-                loadingMessage.textContent = 'Uploading to YouTube...';
-                
-                const uploadData = {
-                    video_path: videoPath,
-                    title: videoTitle || 'Viral Short Video - Created with VideoExtract',
-                    description: 'Created with VideoExtract - AI-powered short video generator\\n\\n#Shorts #VideoExtract #Viral #AI',
-                    tags: ['Shorts', 'VideoExtract', 'AI', 'viral', 'trending'],
-                    privacy: 'private'  // Start as private, user can change in YouTube Studio
-                };
-
-                const response = await fetch('/api/upload-to-youtube', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify(uploadData)
-                });
-
-                const result = await response.json();
-                loadingOverlay.style.display = 'none';
-
-                if (result.success) {
-                    // Show success modal
-                    showYouTubeSuccessModal(result);
-                } else {
-                    alert('Upload failed: ' + result.error);
+                let duration;
+                try {
+                    duration = getDuration();
+                } catch (error) {
+                    alert(error.message);
+                    return;
                 }
 
-            } catch (error) {
-                document.getElementById('loadingOverlay').style.display = 'none';
-                console.error('YouTube upload failed:', error);
-                alert('Upload failed: ' + error.message);
-            }
-        }
-
-        function showYouTubeSuccessModal(result) {
-            const modal = document.createElement('div');
-            modal.className = 'modal fade show';
-            modal.style.display = 'block';
-            modal.innerHTML = `
-                <div class="modal-dialog modal-dialog-centered">
-                    <div class="modal-content" style="background: var(--youtube-dark-secondary); border: 1px solid #333; color: var(--youtube-text);">
-                        <div class="modal-header" style="border-bottom: 1px solid #333;">
-                            <h5 class="modal-title">
-                                <i class="fab fa-youtube" style="color: var(--youtube-red);"></i>
-                                YouTube Upload Successful!
-                            </h5>
-                            <button type="button" class="btn-close btn-close-white" onclick="this.closest('.modal').remove()"></button>
-                        </div>
-                        <div class="modal-body">
-                            <div class="text-center mb-3">
-                                <div class="alert alert-success" style="background: rgba(0, 242, 234, 0.1); border: 1px solid #00f2ea; color: #00f2ea;">
-                                    <i class="fas fa-check-circle"></i> Your video has been uploaded to YouTube!
-                                </div>
-                                <p style="color: var(--youtube-text-secondary);">
-                                    Your video was uploaded as <strong>Private</strong>. You can change the privacy settings in YouTube Studio.
-                                </p>
-                            </div>
-                            <div class="d-grid gap-2">
-                                <a href="${result.youtube_url}" target="_blank" class="btn btn-primary">
-                                    <i class="fab fa-youtube"></i> View on YouTube
-                                </a>
-                                <a href="${result.studio_url}" target="_blank" class="btn btn-outline-primary">
-                                    <i class="fas fa-edit"></i> Edit in YouTube Studio
-                                </a>
-                                <button class="btn btn-outline-secondary" onclick="this.closest('.modal').remove()">
-                                    <i class="fas fa-times"></i> Close
-                                </button>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            `;
-            
-            document.body.appendChild(modal);
-        }
-    </script>
-</body>
-</html>
-            
-            if (url) {
-                document.getElementById('shortVideoUrl').value = url;
-            }
-            
-            if (title) {
-                console.log('Video title:', title);
-            }
-        });
-
-        // URL Validation
-        document.getElementById('validateShortBtn').addEventListener('click', async function() {
-            const url = document.getElementById('shortVideoUrl').value.trim();
-            if (!url) {
-                alert('Please enter a video URL first');
-                return;
-            }
-
-            try {
-                const response = await fetch('/api/test-platform', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({ url })
-                });
-
-                const result = await response.json();
-                
-                if (result.valid) {
-                    alert(`✅ URL is valid!\n\nPlatform: ${result.platform}\nStatus: ${result.info.status}\nReliability: ${result.info.reliability}\n\nTips: ${result.info.tips.join(', ')}`);
-                } else {
-                    alert(`❌ URL validation failed:\n${result.info.notes || 'Invalid or unsupported URL'}`);
-                }
-            } catch (error) {
-                console.error('Validation error:', error);
-                alert('❌ Error validating URL. Please try again.');
-            }
-        });
-
-        // Short Video Form Submission
-        document.getElementById('shortVideoForm').addEventListener('submit', async function(e) {
-            e.preventDefault();
-            
-            const url = document.getElementById('shortVideoUrl').value.trim();
-            const startTime = document.getElementById('startTime').value.trim();
-            const duration = parseInt(document.getElementById('duration').value);
-            const quality = document.getElementById('quality').value;
-            const overlayText = document.getElementById('overlayText').value.trim();
-            
-            if (!url || !startTime || !duration) {
-                alert('Please fill in all required fields');
-                return;
-            }
-            
-            // Show loading overlay
-            document.getElementById('loadingOverlay').style.display = 'flex';
-            document.getElementById('loadingMessage').textContent = 'Creating short video, this may take a few minutes...';
-            
-            try {
-                const requestBody = {
+                const body = {
                     url: url,
-                    start_time: startTime,
+                    start_time: $('startTime').value.trim() || '0',
                     duration: duration,
-                    quality: quality
+                    quality: $('quality').value,
+                    vertical_format: $('verticalFormat').checked,
                 };
-                
-                if (overlayText) {
-                    requestBody.overlay_text = overlayText;
-                }
+                const overlayText = $('overlayText').value.trim();
+                if (overlayText) body.text_overlay = { text: overlayText };
 
-                const response = await fetch('/api/create-short', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify(requestBody)
-                });
-                
-                const result = await response.json();
-                
-                if (result.success) {
-                    displayShortVideoResult(result);
-                } else {
-                    throw new Error(result.error || 'Short video creation failed');
+                busy = true;
+                showLoading('Creating the short. Downloading and rendering can take a few minutes...');
+                try {
+                    const { ok, data } = await postJson('/api/create-short', body);
+                    if (!ok || !data.success) {
+                        throw new Error(data.error || 'Short video creation failed');
+                    }
+                    displayResult(data);
+                } catch (error) {
+                    console.error('Short video creation error:', error);
+                    alert(`❌ Error: ${error.message}`);
+                } finally {
+                    busy = false;
+                    hideLoading();
                 }
-                
-            } catch (error) {
-                console.error('Short video creation error:', error);
-                alert(`❌ Error: ${error.message}`);
-            } finally {
-                // Hide loading overlay
-                document.getElementById('loadingOverlay').style.display = 'none';
+            });
+
+            function statItem(label, value) {
+                const item = element('div', 'stat-item');
+                item.append(element('span', 'stat-label', label), element('span', 'stat-value', value));
+                return item;
             }
-        });
-        
-        function displayShortVideoResult(result) {
-            const container = document.getElementById('shortVideoContainer');
-            const resultsSection = document.getElementById('shortVideoResultsSection');
-            
-            const videoCard = `
-                <div class="card" style="max-width: 600px; margin: 0 auto;">
-                    <video controls class="card-img-top" style="max-height: 400px;">
-                        <source src="/shorts/${result.filename}" type="video/mp4">
-                        Your browser does not support the video tag.
-                    </video>
-                    <div class="card-body">
-                        <h5 class="card-title">🎬 Short Video Created Successfully!</h5>
-                        <p class="card-text">
-                            <strong>📊 Duration:</strong> ${result.duration} seconds<br>
-                            <strong>🎥 Quality:</strong> ${result.quality}<br>
-                            <strong>📁 File Size:</strong> ${result.file_size}
-                        </p>
-                        <div class="d-flex justify-content-center gap-2 flex-wrap">
-                            <a href="/shorts/${result.filename}" download class="btn btn-primary">
-                                <i class="fas fa-download mr-1"></i>
-                                Download Video
-                            </a>
-                            <button class="btn btn-outline-secondary" onclick="navigator.share && navigator.share({title: 'My Short Video', url: window.location.origin + '/shorts/${result.filename}'})">
-                                <i class="fas fa-share mr-1"></i>
-                                Share
-                            </button>
-                            <a href="/?url=${encodeURIComponent(document.getElementById('shortVideoUrl').value)}" class="btn btn-outline-info">
-                                <i class="fas fa-images mr-1"></i>
-                                Extract Frames
-                            </a>
-                        </div>
-                    </div>
-                </div>
-            `;
-            
-            container.innerHTML = videoCard;
-            resultsSection.style.display = 'block';
-            resultsSection.scrollIntoView({ behavior: 'smooth' });
-        }
+
+            function displayResult(result) {
+                const shortUrl = '/shorts/' + encodeURIComponent(result.filename);
+
+                const video = element('video');
+                video.controls = true;
+                const source = element('source');
+                source.src = shortUrl;
+                source.type = 'video/mp4';
+                video.append(source, document.createTextNode('Your browser does not support the video tag.'));
+
+                const sizeMb = result.file_size ? (result.file_size / BYTES_PER_MB).toFixed(2) + ' MB' : 'n/a';
+                const stats = element('div', 'video-stats');
+                stats.append(statItem('Duration', `${result.duration}s`), statItem('Quality', result.quality),
+                             statItem('Size', sizeMb), statItem('Format', 'MP4'));
+
+                const download = withIcon(element('a', 'btn-download'), 'fas fa-download', 'Download');
+                download.href = shortUrl;
+                download.download = result.filename;
+
+                const upload = withIcon(element('button', 'btn-share'), 'fab fa-youtube', 'Upload to YouTube');
+                upload.type = 'button';
+                upload.addEventListener('click', () => uploadToYouTube(result.filename, result.title));
+
+                const another = withIcon(element('button', 'btn-share'), 'fas fa-plus', 'Create Another');
+                another.type = 'button';
+                another.addEventListener('click', resetForm);
+
+                const actions = element('div', 'action-buttons');
+                actions.append(download, upload, another);
+
+                const info = element('div', 'video-info');
+                info.append(withIcon(element('h4', 'video-title'), 'fas fa-film', result.title || 'Short video'), stats);
+                (result.warnings || []).forEach((warning) => {
+                    const note = withIcon(element('div', 'alert alert-warning'), 'fas fa-exclamation-triangle', warning);
+                    info.append(note);
+                });
+                info.append(actions);
+
+                const preview = element('div', 'video-preview');
+                preview.append(video, info);
+                $('resultsContent').replaceChildren(preview);
+                $('resultsSection').style.display = 'block';
+                $('resultsSection').scrollIntoView({ behavior: 'smooth' });
+            }
+
+            function resetForm() {
+                $('shortVideoForm').reset();
+                $('resultsSection').style.display = 'none';
+                selectDuration(document.querySelector(`.duration-option[data-duration="${DEFAULT_DURATION}"]`));
+            }
+
+            $('resetFormBtn').addEventListener('click', resetForm);
+
+            // ---- YouTube upload ---------------------------------------------------
+
+            async function checkYouTubeAuth() {
+                const response = await fetch('/api/youtube-auth');
+                const data = await response.json();
+                if (!response.ok && data.error) throw new Error(data.error);
+                return data;
+            }
+
+            async function authenticateYouTube() {
+                const status = await checkYouTubeAuth();
+                if (status.authenticated) return true;
+                if (!status.auth_url) throw new Error('Could not start the YouTube sign-in');
+
+                const authWindow = window.open(status.auth_url, 'youtube_auth',
+                                               'width=600,height=700,scrollbars=yes,resizable=yes');
+                if (!authWindow) throw new Error('Please allow pop-ups for this page and try again');
+
+                return new Promise((resolve, reject) => {
+                    const timeout = setTimeout(() => {
+                        clearInterval(poll);
+                        if (!authWindow.closed) authWindow.close();
+                        reject(new Error('Sign-in timed out'));
+                    }, AUTH_TIMEOUT_MS);
+                    const poll = setInterval(async () => {
+                        if (!authWindow.closed) return;
+                        clearInterval(poll);
+                        clearTimeout(timeout);
+                        try {
+                            resolve((await checkYouTubeAuth()).authenticated === true);
+                        } catch (error) {
+                            reject(error);
+                        }
+                    }, AUTH_POLL_MS);
+                });
+            }
+
+            async function uploadToYouTube(filename, title) {
+                if (busy) return;
+                busy = true;
+                showLoading('Signing in to YouTube...');
+                try {
+                    if (!(await authenticateYouTube())) {
+                        alert('YouTube sign-in was not completed. Please try again.');
+                        return;
+                    }
+                    showLoading('Uploading to YouTube...');
+                    const { ok, data } = await postJson('/api/upload-to-youtube', {
+                        filename: filename,
+                        title: title || 'Short video',
+                        description: 'Created with VideoExtract',
+                        tags: ['Shorts'],
+                        privacy: 'private',  // change it in YouTube Studio when you are ready
+                    });
+                    if (!ok || !data.success) throw new Error(data.error || 'Upload failed');
+                    showYouTubeSuccess(data);
+                } catch (error) {
+                    console.error('YouTube upload failed:', error);
+                    alert(`❌ Upload failed: ${error.message}`);
+                } finally {
+                    busy = false;
+                    hideLoading();
+                }
+            }
+
+            function showYouTubeSuccess(result) {
+                const close = () => modal.remove();
+
+                const heading = withIcon(element('h5', 'modal-title'), 'fab fa-youtube', 'Uploaded to YouTube');
+                const closeButton = element('button', 'btn-close btn-close-white');
+                closeButton.type = 'button';
+                closeButton.setAttribute('aria-label', 'Close');
+                closeButton.addEventListener('click', close);
+                const header = element('div', 'modal-header');
+                header.style.borderBottom = '1px solid #333';
+                header.append(heading, closeButton);
+
+                const note = element('p', undefined,
+                    `Your video was uploaded as ${result.privacy}. You can change this in YouTube Studio.`);
+                note.style.color = 'var(--youtube-text-secondary)';
+
+                const links = element('div', 'd-grid gap-2');
+                const watchUrl = safeUrl(result.youtube_url, ['https://www.youtube.com/']);
+                const studioUrl = safeUrl(result.studio_url, ['https://studio.youtube.com/']);
+                [[watchUrl, 'btn btn-primary', 'fab fa-youtube', 'View on YouTube'],
+                 [studioUrl, 'btn btn-outline-primary', 'fas fa-edit', 'Edit in YouTube Studio']].forEach(([href, classes, iconClasses, label]) => {
+                    if (!href) return;
+                    const link = withIcon(element('a', classes), iconClasses, label);
+                    link.href = href;
+                    link.target = '_blank';
+                    link.rel = 'noopener noreferrer';
+                    links.append(link);
+                });
+                const closeAction = withIcon(element('button', 'btn btn-outline-secondary'), 'fas fa-times', 'Close');
+                closeAction.type = 'button';
+                closeAction.addEventListener('click', close);
+                links.append(closeAction);
+
+                const body = element('div', 'modal-body');
+                body.append(note, links);
+                const content = element('div', 'modal-content');
+                content.style.cssText = 'background: var(--youtube-dark-secondary); border: 1px solid #333; color: var(--youtube-text);';
+                content.append(header, body);
+                const dialog = element('div', 'modal-dialog modal-dialog-centered');
+                dialog.append(content);
+                const modal = element('div', 'modal fade show');
+                modal.style.cssText = 'display: block; background: rgba(0, 0, 0, 0.6);';
+                modal.append(dialog);
+                document.body.append(modal);
+            }
+
+            // ---- prefill from ?url= -----------------------------------------------
+
+            const prefill = new URLSearchParams(window.location.search).get('url');
+            if (prefill) $('shortVideoUrl').value = prefill;
+        })();
     </script>
 </body>
 </html>
