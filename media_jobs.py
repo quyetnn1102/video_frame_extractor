@@ -16,6 +16,7 @@ from urllib.parse import quote
 from config import get_config
 from database import db_manager
 from jobs import JobCancelled, JobFailed
+from library import make_poster
 from logger import app_logger
 from short_video import (ShortVideoError, create_short, normalize_quality, normalize_text_overlay,
                          parse_duration, parse_start_time)
@@ -213,6 +214,7 @@ def render_short(request: ShortRequest, reporter) -> Dict[str, Any]:
     finally:
         remove_quietly(video_path)
 
+    make_poster(output_path)  # the thumbnail lists show; without one they fall back to the video
     response = {
         'success': True,
         'message': 'Short video created successfully',

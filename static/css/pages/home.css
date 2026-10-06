@@ -78,6 +78,7 @@
     background: var(--strip);
 }
 
+.recent-thumb img,
 .recent-thumb video {
     display: block;
     width: 100%;

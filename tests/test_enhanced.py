@@ -82,6 +82,19 @@ class TestDatabaseManager(unittest.TestCase):
         self.assertRegex(row['created_at'], r'^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$', 'UTC, readable by browsers')
         self.assertNotIn('user_ip', row)
 
+    def test_analytics_count_how_requests_ended_per_platform(self):
+        import database
+        for platform, status in [('youtube', 'completed'), ('youtube', 'failed'), ('youtube', 'completed'),
+                                 ('tiktok', 'cancelled'), ('tiktok', None)]:
+            request_id = self.db_manager.log_video_request(url_hash='h', platform=platform)
+            if status:
+                self.db_manager.update_video_request(request_id, status)
+        with patch.object(database, 'db_manager', self.db_manager):
+            outcomes = database.get_analytics()['platform_outcomes']
+        self.assertEqual(outcomes['youtube'], {'completed': 2, 'failed': 1, 'cancelled': 0, 'other': 0})
+        self.assertEqual(outcomes['tiktok'], {'completed': 0, 'failed': 0, 'cancelled': 1, 'other': 1},
+                         'a request still pending (or cut off by a restart) is "other"')
+
     def test_get_platform_statistics(self):
         stats = self.db_manager.get_platform_statistics(days=7)
         self.assertIn('period_days', stats)

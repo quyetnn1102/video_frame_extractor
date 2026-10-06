@@ -146,6 +146,7 @@ All endpoints return JSON (errors as `{"success": false, "error": "..."}`) and r
 | `GET /api/jobs/<id>` | One job; the pages poll it about once a second | none (polled) |
 | `POST /api/jobs/<id>/cancel` | Stop a job; a partial download or render is deleted | 30/min |
 | `GET /frames/<file>`, `GET /shorts/<file>` | Serve generated files | default |
+| `GET /shorts/posters/<file>` | A short's thumbnail (made when the short is created, or at startup for older ones) | none (file) |
 | `POST /api/frames/archive` `{filenames[]}` | The named frames (up to 50) as one `frames.zip` | 10/min |
 | `GET /api/shorts` | Earlier shorts in `generated_shorts/`, newest first (the Create short page shows them again after a refresh) | default |
 | `POST /api/shorts/delete` `{filename}` | Delete a short by file name | 30/min |

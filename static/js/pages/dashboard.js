@@ -23,38 +23,50 @@
         bar.classList.toggle('is-high', isHigh);
     }
 
-    function platformRow(platform, count, busiest) {
-        const name = document.createElement('span');
-        name.className = 'name';
-        name.textContent = platform;
+    // How requests ended, in bar order: [key, words, segment class]
+    const OUTCOMES = [['completed', 'succeeded', 'is-ok'], ['failed', 'failed', 'is-failed'],
+                      ['cancelled', 'cancelled', 'is-other'], ['other', 'not finished', 'is-other']];
 
-        const fill = document.createElement('span');
-        fill.className = 'fill';
-        fill.style.width = (count / busiest * 100).toFixed(1) + '%';
-        const track = document.createElement('span');
-        track.className = 'track';
-        track.append(fill);
+    function outcomeTotal(outcome) {
+        return OUTCOMES.reduce((sum, [key]) => sum + (Number(outcome[key]) || 0), 0);
+    }
 
-        const total = document.createElement('span');
-        total.className = 'count';
-        total.textContent = count;
+    // One platform: a bar split by outcome (scaled to the busiest platform), and the same in words
+    function platformRow(platform, outcome, busiest) {
+        const track = element('span', 'track');
+        track.setAttribute('aria-hidden', 'true');  // the words below say the same
+        OUTCOMES.forEach(([key, , segmentClass]) => {
+            const count = Number(outcome[key]) || 0;
+            if (!count) return;
+            const segment = element('span', 'fill ' + segmentClass);
+            segment.style.width = (count / busiest * 100).toFixed(1) + '%';
+            track.append(segment);
+        });
+        const words = OUTCOMES.filter(([key]) => Number(outcome[key]))
+            .map(([key, label]) => `${outcome[key]} ${label}`).join(', ');
 
-        const row = document.createElement('li');
-        row.append(name, track, total);
+        const row = element('li');
+        row.append(element('span', 'name', platform), track,
+                   element('span', 'count', String(outcomeTotal(outcome))),
+                   element('span', 'outcomes', words));
         return row;
     }
 
-    function showPlatforms(stats) {
-        const entries = Object.entries(stats || {});
+    function showPlatforms(outcomes) {
+        const entries = Object.entries(outcomes || {}).sort((a, b) => outcomeTotal(b[1]) - outcomeTotal(a[1]));
         if (entries.length === 0) {
-            const empty = document.createElement('li');
-            empty.className = 'muted';
-            empty.textContent = 'No requests yet.';
-            $('platformStats').replaceChildren(empty);
+            $('platformStats').replaceChildren(element('li', 'muted', 'No requests yet.'));
             return;
         }
-        const busiest = Math.max(1, ...entries.map(([, count]) => Number(count) || 0));
-        $('platformStats').replaceChildren(...entries.map(([platform, count]) => platformRow(platform, Number(count) || 0, busiest)));
+        const busiest = Math.max(1, ...entries.map(([, outcome]) => outcomeTotal(outcome)));
+        $('platformStats').replaceChildren(...entries.map(([platform, outcome]) => platformRow(platform, outcome, busiest)));
+    }
+
+    // First view: the numbers the server put in the page
+    try {
+        showPlatforms(JSON.parse($('platformStats').dataset.outcomes || '{}'));
+    } catch (error) {
+        showPlatforms({});
     }
 
     // ---- recent requests: rebuilt on every update, times shown as "5 minutes ago" ----
@@ -173,7 +185,7 @@
                     $('recentRequests').textContent = data.analytics.recent_requests_24h || 0;
                     $('totalFrames').textContent = data.analytics.total_frames_extracted || 0;
                     $('avgProcessingTime').textContent = Math.round(data.analytics.avg_processing_time_ms || 0) + 'ms';
-                    showPlatforms(data.analytics.platform_stats);
+                    showPlatforms(data.analytics.platform_outcomes);
                 }
 
                 if (data.system_info) {
