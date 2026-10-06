@@ -53,7 +53,6 @@
     --topbar-bg: rgba(255, 255, 255, 0.94);
     --chip-bg: rgba(0, 0, 0, 0.78);
     --scrim: rgba(20, 20, 20, 0.55);
-    --focus-ring: 0 0 0 3px rgba(27, 27, 27, 0.18);
     --crop-keep: rgba(255, 255, 255, 0.14);
     --crop-shade: rgba(14, 17, 21, 0.6);
     --dialog-shadow: 0 20px 50px -12px rgba(0, 0, 0, 0.35);
@@ -399,7 +398,7 @@ textarea:focus-visible {
     outline: 2px solid transparent;
     outline-offset: 2px;
     border-color: var(--ink);
-    box-shadow: var(--focus-ring);
+    box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--ink);
 }
 
 select {

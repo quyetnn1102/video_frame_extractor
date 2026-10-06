@@ -6,7 +6,13 @@
 
     // Titles come from other sites: everything is built with textContent, never HTML strings.
     const { element, notice, relativeTime } = ui;
-    const DEFAULT_HINT = 'YouTube, TikTok, Instagram, Facebook or Douyin';
+    const HINTS = {
+        checking: 'Analyzing the link...',
+        invalid: 'This link cannot be used: see above.',
+        ready: 'Choose what to make from it.',
+        unreadable: 'Choose what to make from it.',
+    };
+    const START_HINT = 'Paste a link from YouTube, TikTok, Instagram, Facebook or Douyin to start.';
 
     // ---- paste a link; the actions open once it has been analyzed ------------------
 
@@ -17,7 +23,7 @@
             if (usable) $(id).removeAttribute('aria-disabled');
             else $(id).setAttribute('aria-disabled', 'true');
         });
-        $('launchHint').textContent = state.status === 'checking' ? 'Analyzing the link...' : DEFAULT_HINT;
+        $('launchHint').textContent = HINTS[state.status] || START_HINT;
     }
 
     const source = videoSource.attach({ input: $('launchUrl'), panel: $('launchPreview'), onChange: syncButtons });
@@ -54,6 +60,7 @@
             video.muted = true;
             video.playsInline = true;
             video.src = item.url + '#t=0.1';  // shows the first moment as the cover
+            video.setAttribute('aria-hidden', 'true');  // a still inside the link, which has the title
             thumb.append(video);
         }
         thumb.append(element('span', 'tag', 'Short'));

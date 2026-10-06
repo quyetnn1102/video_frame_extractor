@@ -24,12 +24,13 @@
                 <form class="card launcher" id="launchForm" novalidate>
                     <h2 class="launcher-title">Turn videos into short clips and frames</h2>
                     <label class="launcher-label" for="launchUrl">Paste a video link</label>
-                    <input type="url" id="launchUrl" autocomplete="off" placeholder="https://www.youtube.com/watch?v=...">
+                    <input type="url" id="launchUrl" autocomplete="off" placeholder="https://www.youtube.com/watch?v=..."
+                           aria-describedby="launchHint">
                     <div class="preview-slot" id="launchPreview" aria-live="polite"></div>
                     <div class="launch-actions">
                         <button type="submit" class="btn btn-primary" id="launchShort" aria-disabled="true">Create short</button>
                         <button type="button" class="btn" id="launchFrames" aria-disabled="true">Extract frames</button>
-                        <p class="hint" id="launchHint" aria-live="polite">YouTube, TikTok, Instagram, Facebook or Douyin</p>
+                        <p class="hint" id="launchHint" aria-live="polite">Paste a link from YouTube, TikTok, Instagram, Facebook or Douyin to start.</p>
                     </div>
                 </form>
 
