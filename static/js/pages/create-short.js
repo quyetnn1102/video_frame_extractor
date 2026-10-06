@@ -119,6 +119,93 @@
         return errors.length === 0;
     }
 
+    // ---- suggest moments: the parts of a YouTube video people replay most -------
+
+    const PRESET_LENGTHS = [15, 30, 60];
+    const LENGTH_MATCH_SECONDS = 0.5;
+
+    function clock(totalSeconds) {
+        const seconds = Math.floor(totalSeconds);
+        return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+    }
+
+    // Fills in the start and length; a suggestion that ends on a line may be a little shorter
+    function useSuggestion(clip) {
+        $('startTime').value = clock(clip.start);
+        ui.clearFieldError($('startTime'));
+        const preset = PRESET_LENGTHS.find((length) => Math.abs(length - clip.duration) < LENGTH_MATCH_SECONDS);
+        if (preset) {
+            selectDuration(document.querySelector(`.duration-option[data-duration="${preset}"]`));
+        } else {
+            selectDuration(document.querySelector('.duration-option[data-duration="custom"]'));
+            $('customDuration').value = String(clip.duration);
+        }
+        $('suggestStatus').replaceChildren(notice('ok', 'Moment chosen.',
+            `Starts at ${clock(clip.start)}, ${Math.round(clip.duration)} seconds. Press Create short when ready.`));
+        $('createSubmit').focus();
+    }
+
+    function suggestionItem(clip) {
+        const time = element('span', 'suggestion-time',
+            `${clock(clip.start)} to ${clock(clip.start + clip.duration)}`);
+        const bar = element('span', 'suggestion-bar');
+        bar.style.width = Math.round(Math.max(0.1, clip.score) * 100) + '%';
+        bar.setAttribute('aria-hidden', 'true');  // the reason says the same in words
+        const head = element('div');
+        head.append(time, bar);
+
+        const use = element('button', 'btn btn-sm', 'Use this');
+        use.type = 'button';
+        use.setAttribute('aria-label', `Use the moment from ${clock(clip.start)}`);
+        use.addEventListener('click', () => useSuggestion(clip));
+
+        const item = element('li', 'suggestion');
+        item.append(head, use, element('p', 'suggestion-reason', clip.reason));
+        if (clip.excerpt) item.append(element('p', 'suggestion-excerpt clamp', `"${clip.excerpt}"`));
+        return item;
+    }
+
+    async function suggestMoments() {
+        const status = $('suggestStatus');
+        const url = $('shortVideoUrl').value.trim();
+        $('suggestions').replaceChildren();
+        if (!ui.isLink(url)) {
+            ui.setFieldError($('shortVideoUrl'), 'Enter a YouTube link first');
+            $('shortVideoUrl').focus();
+            status.replaceChildren();
+            return;
+        }
+        let duration;
+        try {
+            duration = getDuration();
+        } catch (error) {
+            status.replaceChildren(notice('error', 'Check the length.', error.message));
+            return;
+        }
+        const scanner = element('span', 'mark is-scanning');
+        scanner.setAttribute('aria-hidden', 'true');
+        const loading = element('p', 'inline-loading');
+        loading.append(scanner, document.createTextNode("Reading the video's replay data..."));
+        status.replaceChildren(loading);
+
+        const { ok, data, parsed } = await postJson('/api/clip-suggestions', { url, duration })
+            .catch(() => ({ ok: false, data: {}, parsed: false }));
+        if (!ok || !data.success) {
+            status.replaceChildren(notice('error', 'No suggestions.',
+                parsed ? (data.error || 'Try again in a moment.') : 'The app did not answer. Try again in a moment.'));
+            return;
+        }
+        const count = data.clips.length === 1 ? '1 moment' : `${data.clips.length} moments`;
+        const signals = data.signals || {};
+        const note = signals.captions ? ''
+            : signals.captions_unreadable ? ' YouTube did not let the app read the captions this time, so a clip may start mid-sentence.'
+                : ' This video has no captions, so a clip may start mid-sentence.';
+        status.replaceChildren(notice('info', `${count}, best first.`, `Choose one to fill in the start and length.${note}`));
+        $('suggestions').replaceChildren(...data.clips.map(suggestionItem));
+    }
+
+    $('suggestBtn').addEventListener('click', () => ui.whileWorking($('suggestBtn'), 'Looking...', suggestMoments));
+
     // ---- create a short: a background job, followed in a progress card ----------
 
     function setRendering(isRendering) {

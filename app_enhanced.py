@@ -24,14 +24,16 @@ from werkzeug.exceptions import HTTPException
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 import media_jobs
+from clip_finder import ClipFinderError, suggest_clips
 from config import get_config
 from database import db_manager, get_analytics, get_recent_requests
 from jobs import JobFailed, JobQueueFull, JobRegistry, NullReporter
 from library import POSTER_FOLDER, folder_size_bytes, list_shorts, remove_poster, sync_posters
 from logger import LogContext, api_logger, app_logger
-from media_jobs import (EXTRACT_STAGES, SHORT_STAGES, finish_request_record, parse_extract_request,
-                        parse_short_request, run_recorded)
-from short_video import remove_partial_renders, text_overlay_available
+from media_jobs import (DEFAULT_SHORT_DURATION, EXTRACT_STAGES, SHORT_STAGES, finish_request_record,
+                        parse_extract_request, parse_short_request, run_recorded)
+from short_video import (MAX_SHORT_DURATION, MIN_SHORT_DURATION, ShortVideoError, parse_duration,
+                         remove_partial_renders, text_overlay_available)
 from trending import VIDEO_CATEGORIES, get_youtube_trending
 from validators import MAX_TIMESTAMPS, resolve_in_folder, validator
 from video_processor import extractor
@@ -460,6 +462,29 @@ def create_app() -> Flask:
         return send_file(buffer, mimetype='application/zip', as_attachment=True, download_name='frames.zip')
 
     # -- API: short videos --------------------------------------------------------
+
+    @app.route('/api/clip-suggestions', methods=['POST'])
+    @limiter.limit("10 per minute")
+    def clip_suggestions():
+        """The most replayed moments of a YouTube video, from its heatmap and captions."""
+        data = get_json_body()
+        url = data.get('url') if data else None
+        if not isinstance(url, str) or not url.strip():
+            return json_error('URL is required', 400)
+        is_valid, platform, url_error = validator.validate_url(url.strip())
+        if not is_valid:
+            return json_error(url_error, 400)
+        if platform != 'youtube':
+            return json_error('Suggestions need YouTube data, so they work for YouTube links only.', 400)
+        try:
+            duration = parse_duration(data.get('duration', DEFAULT_SHORT_DURATION))
+        except ShortVideoError:
+            return json_error(f'Length must be between {MIN_SHORT_DURATION} and {MAX_SHORT_DURATION} seconds', 400)
+        try:
+            result = suggest_clips(url.strip(), duration, config.MAX_VIDEO_DURATION)
+        except ClipFinderError as error:
+            return json_error(error.user_message, 400)
+        return jsonify({'success': True, **result})
 
     @app.route('/api/create-short', methods=['POST'])
     @limiter.limit("5 per minute")

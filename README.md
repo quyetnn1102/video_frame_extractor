@@ -140,6 +140,7 @@ All endpoints return JSON (errors as `{"success": false, "error": "..."}`) and r
 | `POST /api/test-platform` `{url}` | Platform guidance for a link | 30/min |
 | `POST /api/extract` `{url, timestamps[]}` | Download, extract frames, delete the download | 10/min |
 | `POST /api/create-short` `{url, start_time, duration, quality, vertical_format, text_overlay}` | Create a short | 5/min |
+| `POST /api/clip-suggestions` `{url, duration}` | Up to 5 moments of a YouTube video worth a short, from its "Most replayed" heatmap and captions (read without downloading the video) | 10/min |
 | `POST /api/jobs/extract` `{url, timestamps[]}` | Same as `/api/extract`, as a background job: answers `202` with the job at once | 10/min |
 | `POST /api/jobs/create-short` (same body as `/api/create-short`) | Same as `/api/create-short`, as a background job | 5/min |
 | `GET /api/jobs` | Jobs of the last hour, newest first (`state`, `stage`, `progress`, `result` or `error`) | none (polled) |
@@ -263,6 +264,7 @@ This is a personal tool. Downloading a video does not give you the right to use 
 - The app does not and must not be used to bypass DRM, paywalls, age or region restrictions, or access controls.
 - Prefer official routes where they exist: download your own videos from YouTube Studio, use the platforms' APIs or embeds, or work from files you already have.
 - Do not republish other people's content without a licence or their permission; the app adds no attribution for you.
+- "Suggest moments" reads a YouTube video's public "Most replayed" data and captions to rank moments. It picks *where* to cut; it does not change who owns the video or what you may do with it.
 
 This section is general information, not legal advice.
 

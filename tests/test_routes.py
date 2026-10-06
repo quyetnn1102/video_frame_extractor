@@ -979,6 +979,37 @@ class TestPhaseFourRoutes(RouteTestCase):
                 self.assertEqual('id="overlayText" maxlength="100" autocomplete="off" disabled' in page, not available)
 
 
+class TestClipSuggestions(RouteTestCase):
+    def post(self, **body):
+        return self.client.post('/api/clip-suggestions', json={'url': VALID_URL, 'duration': 30, **body})
+
+    def test_returns_the_suggested_moments(self):
+        result = {'clips': [{'start': 31.1, 'duration': 28.2, 'score': 1.0, 'ratio': 1.6,
+                             'reason': 'Most replayed part', 'excerpt': 'hello'}],
+                  'video_duration': 213.0, 'signals': {'heatmap': True, 'captions': True}}
+        with patch.object(app_enhanced, 'suggest_clips', return_value=result) as suggest:
+            data = self.post().get_json()
+        self.assertTrue(data['success'])
+        self.assertEqual(data['clips'][0]['start'], 31.1)
+        self.assertEqual(suggest.call_args.args[1], 30)
+
+    def test_bad_requests_never_reach_youtube(self):
+        with patch.object(app_enhanced, 'suggest_clips') as suggest:
+            for body in [{'url': ''}, {'url': 'https://example.com/x'}, {'duration': 0}, {'duration': 'long'},
+                         {'url': 'https://www.tiktok.com/@user/video/1234567890123456789'}]:
+                with self.subTest(body=body):
+                    self.assertEqual(self.post(**body).status_code, 400)
+            suggest.assert_not_called()
+        self.assertIn('YouTube links only',
+                      self.post(url='https://www.tiktok.com/@user/video/1234567890123456789').get_json()['error'])
+
+    def test_problems_come_back_as_the_written_message(self):
+        from clip_finder import ClipFinderError
+        with patch.object(app_enhanced, 'suggest_clips', side_effect=ClipFinderError('No replay data yet.')):
+            response = self.post()
+        self.assertEqual((response.status_code, response.get_json()['error']), (400, 'No replay data yet.'))
+
+
 class TestStartupCleanup(RouteTestCase):
     """Leftovers are swept when the app is created, so gunicorn gets it too."""
 
