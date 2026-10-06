@@ -128,6 +128,12 @@ class Config:
     # Douyin refuses plain clients; cookies exported from your own browser may get through
     DOUYIN_COOKIE_FILE_PATH = BASE_DIR / 'douyin_cookies.txt'
 
+    # Vietnamese subtitles: models are downloaded here on first use and kept.
+    # WHISPER_MODEL is a faster-whisper size: tiny, base, small, medium or large-v3
+    # (larger understands speech better, but is slower and a bigger download).
+    MODELS_FOLDER = BASE_DIR / 'models'
+    WHISPER_MODEL = env_str('WHISPER_MODEL', 'small')
+
     # Cleanup settings
     AUTO_CLEANUP_HOURS = env_int('AUTO_CLEANUP_HOURS', 24)
 

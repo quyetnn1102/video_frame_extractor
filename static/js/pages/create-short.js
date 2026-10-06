@@ -10,6 +10,7 @@
     const $ = (id) => document.getElementById(id);
     let busy = false;              // the YouTube sign-in/upload overlay is open
     let rendering = false;         // a short is being made (a background job)
+    let subtitling = false;        // a subtitled copy is being made (one at a time)
     let signedIn = false;          // set once the server confirms the YouTube sign-in
     let cancelRequested = false;   // set by the Cancel button while waiting for sign-in
 
@@ -270,8 +271,9 @@
     // A short still being made when this page was (re)opened: follow it. Finished ones are
     // already in "Your shorts", which is read from disk.
     async function resumeRunningJob() {
-        const job = await jobs.latest('short');
+        const [job, subtitleJob] = await Promise.all([jobs.latest('short'), jobs.latest('subtitles')]);
         if (!rendering && job && jobs.isActive(job)) followJob(job);  // rendering: just started here
+        if (!subtitling && subtitleJob && jobs.isActive(subtitleJob)) followSubtitleJob(subtitleJob);
     }
 
     // ---- your shorts: kept on disk, listed again after a refresh ------------
@@ -349,13 +351,19 @@
         upload.setAttribute('aria-label', `Upload ${item.title} to YouTube`);
         upload.addEventListener('click', () => reviewUpload(item));
 
+        const subtitle = element('button', 'btn btn-sm subtitle-btn', 'Vietnamese subtitles');
+        subtitle.type = 'button';
+        subtitle.setAttribute('aria-label', `Add Vietnamese subtitles to a copy of ${item.title}`);
+        if (subtitling) subtitle.setAttribute('aria-disabled', 'true');
+        subtitle.addEventListener('click', () => addSubtitles(item));
+
         const remove = element('button', 'btn btn-sm btn-quiet', 'Delete');
         remove.type = 'button';
         remove.setAttribute('aria-label', `Delete ${item.title}`);
         remove.addEventListener('click', () => confirmDelete(item));
 
         const actions = element('div', 'short-actions');
-        actions.append(download, upload, remove);
+        actions.append(download, upload, subtitle, remove);
 
         const card = element('li', isNew ? 'card card-flush short-card is-new' : 'card card-flush short-card');
         const body = element('div', 'short-body');
@@ -387,12 +395,60 @@
         }
     }
 
-    async function showNewShort(result) {
+    async function showNewShort(result, heading = 'Your short is ready.',
+        detail = 'It is first in the list below, and it stays there after you leave this page.') {
         $('resultsStatus').replaceChildren(
-            notice('ok', 'Your short is ready.', 'It is first in the list below, and it stays there after you leave this page.'),
+            notice('ok', heading, detail),
             ...(result.warnings || []).map((warning) => notice('warn', 'Note.', warning)));
         const cards = await loadLibrary(result.filename);
         if (cards.length) cards[0].scrollIntoView({ behavior: scrollBehavior(), block: 'center' });
+    }
+
+    // ---- Vietnamese subtitles: a copy of a short, made by a background job -------
+
+    function setSubtitling(isSubtitling) {
+        subtitling = isSubtitling;
+        document.querySelectorAll('.subtitle-btn').forEach((button) => {
+            if (isSubtitling) button.setAttribute('aria-disabled', 'true');
+            else button.removeAttribute('aria-disabled');
+        });
+    }
+
+    async function showSubtitleOutcome(job) {
+        if (job.state === 'succeeded') {
+            const count = job.result.subtitle_count;
+            await showNewShort(job.result, 'Vietnamese subtitles added.',
+                `${count} ${count === 1 ? 'line' : 'lines'} translated from ${job.result.language}. ` +
+                'The subtitled copy is first in the list below; the original is unchanged.');
+        } else {
+            $('resultsStatus').replaceChildren(job.state === 'cancelled'
+                ? notice('info', 'Cancelled.', 'No subtitled copy was made.')
+                : notice('error', 'Could not add subtitles.', job.error || 'Try again in a moment.'));
+        }
+        $('resultHeading').focus({ preventScroll: job.state === 'succeeded' });  // the progress card is gone
+    }
+
+    function followSubtitleJob(job) {
+        setSubtitling(true);
+        jobs.follow(job, $('subtitleJobPanel'), {
+            title: 'Adding Vietnamese subtitles',
+            onFinish: (final) => {
+                setSubtitling(false);
+                showSubtitleOutcome(final);
+            },
+        });
+    }
+
+    async function addSubtitles(item) {
+        if (subtitling) return;
+        setSubtitling(true);  // before the request, so a second click does nothing
+        $('resultsStatus').replaceChildren();
+        try {
+            followSubtitleJob(await jobs.start('/api/jobs/subtitles', { filename: item.filename }));
+        } catch (error) {
+            setSubtitling(false);
+            $('resultsStatus').replaceChildren(notice('error', 'Could not start.', error.message));
+        }
     }
 
 

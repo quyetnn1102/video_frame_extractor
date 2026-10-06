@@ -27,11 +27,11 @@ import media_jobs
 from clip_finder import ClipFinderError, suggest_clips
 from config import get_config
 from database import db_manager, get_analytics, get_recent_requests
-from jobs import JobFailed, JobQueueFull, JobRegistry, NullReporter
+from jobs import QUEUED, RUNNING, JobFailed, JobQueueFull, JobRegistry, NullReporter
 from library import POSTER_FOLDER, folder_size_bytes, list_shorts, remove_poster, sync_posters
 from logger import LogContext, api_logger, app_logger
-from media_jobs import (DEFAULT_SHORT_DURATION, EXTRACT_STAGES, SHORT_STAGES, finish_request_record,
-                        parse_extract_request, parse_short_request, run_recorded)
+from media_jobs import (DEFAULT_SHORT_DURATION, EXTRACT_STAGES, SHORT_STAGES, SUBTITLE_STAGES,
+                        finish_request_record, parse_extract_request, parse_short_request, run_recorded)
 from short_video import (MAX_SHORT_DURATION, MIN_SHORT_DURATION, ShortVideoError, parse_duration,
                          remove_partial_renders, text_overlay_available)
 from trending import VIDEO_CATEGORIES, get_youtube_trending
@@ -542,6 +542,31 @@ def create_app() -> Flask:
         return start_job('short', SHORT_STAGES, record_id, lambda reporter: run_recorded(
             record_id, 'Rendering failed', lambda: media_jobs.render_short(short_request, reporter)))
 
+    def requested_short():
+        """(path, None) for the short named in the JSON body, or (None, an error response)."""
+        data = get_json_body()
+        filename = data.get('filename') if data else None
+        if not isinstance(filename, str):
+            return None, json_error('filename is required', 400)
+        path = resolve_in_folder(config.SHORTS_FOLDER, filename, ('.mp4',))
+        if path is None:
+            return None, json_error('Not found', 404)
+        return path, None
+
+    @app.route('/api/jobs/subtitles', methods=['POST'])
+    @limiter.limit("5 per minute")
+    def start_subtitle_job():
+        """A copy of a short in the library with Vietnamese subtitles (not on the request log)."""
+        path, error = requested_short()
+        if error:
+            return error
+        # One at a time: each loads speech and translation models (hundreds of MB)
+        if any(job['kind'] == 'subtitles' and job['state'] in (QUEUED, RUNNING)
+               for job in job_registry.snapshots()):
+            return json_error('Subtitles are already being added to a short. Wait for it to finish.', 409)
+        return start_job('subtitles', SUBTITLE_STAGES, 0,
+                         lambda reporter: media_jobs.add_vietnamese_subtitles(path, reporter))
+
     # Polled about once a second by an open page, so not counted against the API limit
     @app.route('/api/jobs')
     @limiter.exempt
@@ -589,13 +614,9 @@ def create_app() -> Flask:
     @app.route('/api/shorts/delete', methods=['POST'])
     @limiter.limit("30 per minute")
     def delete_generated_short():
-        data = get_json_body()
-        filename = data.get('filename') if data else None
-        if not isinstance(filename, str):
-            return json_error('filename is required', 400)
-        path = resolve_in_folder(config.SHORTS_FOLDER, filename, ('.mp4',))
-        if path is None:
-            return json_error('Not found', 404)
+        path, error = requested_short()
+        if error:
+            return error
         try:
             path.unlink()
         except PermissionError:

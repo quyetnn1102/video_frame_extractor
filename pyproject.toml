@@ -19,7 +19,6 @@ dependencies = [
     "python-dotenv>=1.0.0,<2",
     "requests>=2.32.4,<3",
     "psutil>=6.1,<8",
-
     # Video download. Platform extractors change often: upgrade yt-dlp first when downloads
     # break (uv lock --upgrade-package yt-dlp).
     # The curl-cffi extra lets yt-dlp present itself as a real browser. TikTok sends plain
@@ -29,7 +28,6 @@ dependencies = [
     # (run by Deno or Node.js, see video_processor.JS_RUNTIMES). Without them YouTube cuts
     # downloads off part-way with "HTTP Error 403: Forbidden".
     "yt-dlp[default,curl-cffi]==2026.8.19",
-
     # Frame extraction and short-video rendering. MoviePy bundles its own FFmpeg through
     # imageio-ffmpeg, which the app also uses directly to merge downloaded streams.
     "opencv-python==4.8.1.78",
@@ -40,7 +38,6 @@ dependencies = [
     "proglog==0.1.12",
     "imageio-ffmpeg>=0.4",
     "pillow==12.3.0",
-
     # YouTube upload (optional feature)
     "google-api-python-client==2.100.0",
     "google-auth-oauthlib==1.2.2",
@@ -51,6 +48,13 @@ dependencies = [
     # at the token exchange, go back to oauthlib 3.2.2 first.
     "requests-oauthlib==2.0.0",
     "oauthlib==4.0.0",
+
+    # Vietnamese subtitles (subtitles.py), all offline: faster-whisper turns the speech into
+    # text, the Argos Translate models (run directly by CTranslate2 and SentencePiece, without
+    # the argostranslate package and its PyTorch dependency) translate it.
+    "faster-whisper==1.2.1",
+    "ctranslate2==4.8.2",
+    "sentencepiece==0.2.2",
 
     # Production server (Linux/macOS only; use `uv run python app_enhanced.py` on Windows)
     "gunicorn==26.2.0; sys_platform != 'win32'",

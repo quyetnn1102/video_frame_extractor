@@ -89,5 +89,8 @@ douyin_cookies.txt
 generated_shorts/*
 !generated_shorts/.gitkeep
 
+# Speech and translation models, downloaded on first use (hundreds of MB)
+models/
+
 # Log directories
 logs/

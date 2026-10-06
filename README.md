@@ -71,6 +71,8 @@ Open <http://localhost:5000>. Downloads, frames and shorts are stored in `downlo
 
 **Create a short** (`/create-short`): paste a link, choose the length and an optional start time (`90` or `1:30`; blank starts at the beginning), quality, vertical crop and caption. Wide or tall sources are cropped around the center to 9:16 and scaled to 1080x1920. Then download the MP4 or upload it to YouTube.
 
+**Vietnamese subtitles**: under any short in "Your shorts", **Vietnamese subtitles** makes a copy (titled "... Vietsub") with the speech subtitled in Vietnamese; the original is kept. It works on this computer, without an online service: [faster-whisper](https://github.com/SYSTRAN/faster-whisper) writes down the speech (Chinese, English or Vietnamese), the [Argos Translate](https://github.com/argosopentech/argos-translate) models translate it (Chinese through English), subtitles already burned into the picture (white text with a dark outline, as on Douyin and TikTok) are found and blurred while they show, and the Vietnamese lines are drawn in their place. The first run downloads the models into `models/` (about 500 MB for speech, 70 MB per translation model); after that it needs no network. A 1-minute short takes about 2 minutes on a laptop CPU. Machine translation is understandable but not polished, and names or wordplay come out literally.
+
 **Trending** (`/trending`): browse popular YouTube videos by region and category, and send one to the extractor.
 
 **Dashboard** (`/dashboard`): request counts per platform, success rate, extracted frames, and CPU/memory/disk usage. Frame extraction and short creation are recorded; other calls are not.
@@ -94,6 +96,7 @@ Settings come from environment variables, which can be put in a `.env` file in t
 | `SOCKET_TIMEOUT` / `DOWNLOAD_RETRIES` | `30` / `2` | Network stall timeout (s) and retries for downloads |
 | `AUTO_CLEANUP_HOURS` | `24` (`4` in production) | Age after which files are deleted |
 | `MAX_CONCURRENT_JOBS` | `2` | Downloads/renders that run at the same time; more wait in line |
+| `WHISPER_MODEL` | `small` | Speech model for Vietnamese subtitles: `tiny`, `base`, `small`, `medium` or `large-v3` (larger hears better but is slower and a bigger download) |
 | `USE_BROWSER_COOKIES` | off | Let yt-dlp read your browser's cookies for Instagram (see below) |
 | `YOUTUBE_API_KEY` | none | Trending page only |
 | `YOUTUBE_REDIRECT_URI` | `http://localhost:<PORT>/oauth2callback` | OAuth redirect for YouTube upload |
@@ -151,6 +154,7 @@ All endpoints return JSON (errors as `{"success": false, "error": "..."}`) and r
 | `POST /api/clip-suggestions` `{url, duration}` | Up to 5 moments of a YouTube video worth a short, from its "Most replayed" heatmap and captions (read without downloading the video) | 10/min |
 | `POST /api/jobs/extract` `{url, timestamps[]}` | Same as `/api/extract`, as a background job: answers `202` with the job at once | 10/min |
 | `POST /api/jobs/create-short` (same body as `/api/create-short`) | Same as `/api/create-short`, as a background job | 5/min |
+| `POST /api/jobs/subtitles` `{filename}` | Background job: a copy of a short in `generated_shorts/` with Vietnamese subtitles (old burned-in subtitles blurred) | 5/min |
 | `GET /api/jobs` | Jobs of the last hour, newest first (`state`, `stage`, `progress`, `result` or `error`) | none (polled) |
 | `GET /api/jobs/<id>` | One job; the pages poll it about once a second | none (polled) |
 | `POST /api/jobs/<id>/cancel` | Stop a job; a partial download or render is deleted | 30/min |
@@ -190,6 +194,8 @@ validators.py        URL / timestamp / filename validation, safe path resolution
 link_resolver.py     Safe resolution of fb.watch short links
 video_processor.py   yt-dlp download (with limits) and OpenCV frame extraction
 short_video.py       MoviePy short rendering and request validation
+subtitles.py         Vietnamese subtitles: speech to text, burned-in subtitle detection and blur, drawing
+translation.py       Offline translation with the Argos models (downloaded once into models/)
 trending.py          YouTube trending via the Data API
 youtube_uploader.py  OAuth sign-in and upload
 database.py          SQLite request log used by the dashboard (app_data.db)
@@ -197,6 +203,7 @@ logger.py            Logging
 deploy.py            Production helper (Linux): checks, systemd and nginx config
 templates/           index (home), extract, create_short, trending, dashboard pages; partials/ holds the shared sidebar and top bar
 static/              Shared stylesheet (css/app.css), scripts (js/) and the self-hosted font (fonts/, SIL OFL)
+assets/fonts/        Be Vietnam Pro, the subtitle font (every Vietnamese accent; SIL OFL)
 tests/               Offline unit tests
 scripts/smoke_test.py  Manual check against a running server
 ```
@@ -275,6 +282,7 @@ This is a personal tool. Downloading a video does not give you the right to use 
 - Prefer official routes where they exist: download your own videos from YouTube Studio, use the platforms' APIs or embeds, or work from files you already have.
 - Do not republish other people's content without a licence or their permission; the app adds no attribution for you.
 - "Suggest moments" reads a YouTube video's public "Most replayed" data and captions to rank moments. It picks *where* to cut; it does not change who owns the video or what you may do with it.
+- A subtitled copy ("Vietsub") is still the original creator's video: translating it does not give you the right to publish it. The translation is made by a machine and can be wrong; check it before you share it.
 
 This section is general information, not legal advice.
 
@@ -296,4 +304,4 @@ Licensed under the [Apache License 2.0](LICENSE).
 
 ## Acknowledgments
 
-[yt-dlp](https://github.com/yt-dlp/yt-dlp), [OpenCV](https://opencv.org/), [MoviePy](https://zulko.github.io/moviepy/), [Flask](https://flask.palletsprojects.com/), [Flask-Limiter](https://flask-limiter.readthedocs.io/), the Google API client libraries, and the typeface [Inter](https://rsms.me/inter/) (SIL Open Font License, copy in `static/fonts/`).
+[yt-dlp](https://github.com/yt-dlp/yt-dlp), [OpenCV](https://opencv.org/), [MoviePy](https://zulko.github.io/moviepy/), [Flask](https://flask.palletsprojects.com/), [Flask-Limiter](https://flask-limiter.readthedocs.io/), the Google API client libraries, [faster-whisper](https://github.com/SYSTRAN/faster-whisper) and [CTranslate2](https://github.com/OpenNMT/CTranslate2), the [Argos Translate](https://github.com/argosopentech/argos-translate) packages of the [OPUS-MT](https://github.com/Helsinki-NLP/Opus-MT) translation models by Jörg Tiedemann and Santhosh Thottingal (CC BY 4.0), and the typefaces [Inter](https://rsms.me/inter/) and [Be Vietnam Pro](https://github.com/bettergui/BeVietnamPro) (SIL Open Font License, copies in `static/fonts/` and `assets/fonts/`).

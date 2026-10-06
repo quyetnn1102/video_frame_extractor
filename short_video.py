@@ -178,7 +178,7 @@ def _build_text_clip(text_clip_class, overlay: Dict[str, Any], duration: float):
     return clip.set_duration(duration)
 
 
-def _close_all(clips) -> None:
+def close_clips(clips) -> None:
     for clip in clips:
         if clip is not None:
             try:
@@ -268,12 +268,6 @@ def create_short(source_path: Path, output_path: Path, *, start: float, duration
     """
     from moviepy.editor import CompositeVideoClip, TextClip, VideoFileClip
 
-    output_path = Path(output_path)
-    # Rendered beside the library, then moved in: a short that is still being written (or was
-    # cancelled) never shows up in "Your shorts", which lists only the folder's top level
-    partial_path = output_path.parent / RENDERING_FOLDER / output_path.name
-    partial_path.parent.mkdir(exist_ok=True)
-    temp_audio_path = partial_path.with_suffix('.tmp-audio.m4a')
     warnings: List[str] = []
     video = clip = text_clip = final = None
     try:
@@ -301,7 +295,28 @@ def create_short(source_path: Path, output_path: Path, *, start: float, duration
                 app_logger.warning(f"Text overlay skipped ({type(error).__name__})")
                 warnings.append("Text overlay was skipped (ImageMagick is required for text)")
 
-        final.write_videofile(
+        write_video(final, output_path, quality, on_progress)
+    finally:
+        close_clips((final if final is not clip else None, text_clip, clip, video))
+
+    return {'start_time': start, 'duration': round(actual_duration, 2), 'warnings': warnings}
+
+
+def write_video(clip, output_path: Path, quality: str = DEFAULT_QUALITY,
+                on_progress: Optional[Callable[[Optional[float]], None]] = None) -> None:
+    """
+    Renders a MoviePy clip to `output_path` (H.264 + AAC).
+
+    The file is written beside the library, then moved in: a short that is still being written
+    (or was cancelled) never shows up in "Your shorts", which lists only the folder's top level.
+    On any failure, including a cancel raised by `on_progress`, nothing is left behind.
+    """
+    output_path = Path(output_path)
+    partial_path = output_path.parent / RENDERING_FOLDER / output_path.name
+    partial_path.parent.mkdir(exist_ok=True)
+    temp_audio_path = partial_path.with_suffix('.tmp-audio.m4a')
+    try:
+        clip.write_videofile(
             str(partial_path),
             codec='libx264',
             audio_codec='aac',
@@ -312,12 +327,8 @@ def create_short(source_path: Path, output_path: Path, *, start: float, duration
             logger=render_progress_logger(on_progress) if on_progress else None,
         )
         os.replace(partial_path, output_path)  # same folder tree, so the move is atomic
-    except Exception:
+    except BaseException:
         # MoviePy only removes its temp audio after a successful render
         partial_path.unlink(missing_ok=True)
         temp_audio_path.unlink(missing_ok=True)
         raise
-    finally:
-        _close_all((final if final is not clip else None, text_clip, clip, video))
-
-    return {'start_time': start, 'duration': round(actual_duration, 2), 'warnings': warnings}
