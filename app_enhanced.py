@@ -9,6 +9,7 @@ only answers requests whose Host header is on the allow-list.
 import io
 import os
 import re
+import threading
 import time
 import zipfile
 import uuid
@@ -50,6 +51,8 @@ MAX_TRENDING_RESULTS = 50
 
 # One registry per process: deploy.py runs a single worker, so every request sees the same jobs
 job_registry = JobRegistry(max_workers=get_config().MAX_CONCURRENT_JOBS)
+# Held while checking for a running subtitle job and starting one, so two requests cannot both start
+subtitle_start_lock = threading.Lock()
 
 CONTENT_SECURITY_POLICY = "; ".join([
     "default-src 'self'",
@@ -561,11 +564,12 @@ def create_app() -> Flask:
         if error:
             return error
         # One at a time: each loads speech and translation models (hundreds of MB)
-        if any(job['kind'] == 'subtitles' and job['state'] in (QUEUED, RUNNING)
-               for job in job_registry.snapshots()):
-            return json_error('Subtitles are already being added to a short. Wait for it to finish.', 409)
-        return start_job('subtitles', SUBTITLE_STAGES, 0,
-                         lambda reporter: media_jobs.add_vietnamese_subtitles(path, reporter))
+        with subtitle_start_lock:
+            if any(job['kind'] == 'subtitles' and job['state'] in (QUEUED, RUNNING)
+                   for job in job_registry.snapshots()):
+                return json_error('Subtitles are already being added to a short. Wait for it to finish.', 409)
+            return start_job('subtitles', SUBTITLE_STAGES, 0,
+                             lambda reporter: media_jobs.add_vietnamese_subtitles(path, reporter))
 
     # Polled about once a second by an open page, so not counted against the API limit
     @app.route('/api/jobs')

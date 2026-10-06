@@ -184,6 +184,27 @@ class TestTranslateToVietnamese(TranslationTestCase):
         self.assertEqual(result, ['你好>en>vi', '再见>en>vi'])
         self.assertEqual([call.args[0] for call in ensure.call_args_list], [('zh', 'en'), ('en', 'vi')])
 
+    def test_two_downloads_fill_one_progress_bar(self):
+        reports = []
+
+        def fake_ensure(pair, on_progress):
+            on_progress(0.5)
+            on_progress(None)
+
+        with patch.object(translation, 'ensure_model', side_effect=fake_ensure), \
+                patch.object(translation, 'translate_lines', side_effect=lambda lines, pair: lines):
+            translation.translate_to_vietnamese(['你好'], 'zh', on_download=reports.append)
+        self.assertEqual(reports, [0.25, None, 0.75, None])
+
+    def test_a_model_that_cannot_be_loaded_is_removed_to_be_fetched_again(self):
+        folder = translation.model_folder(('en', 'vi'))
+        (folder / 'model').mkdir(parents=True)
+        with patch('sentencepiece.SentencePieceProcessor', side_effect=RuntimeError('damaged')):
+            with self.assertRaises(translation.TranslationError) as raised:
+                translation.translate_lines(['Hello'], ('en', 'vi'))
+        self.assertIn('downloaded again', raised.exception.message)
+        self.assertFalse(folder.exists())
+
     def test_vietnamese_speech_is_kept_as_it_is(self):
         with patch.object(translation, 'translate_lines') as translate:
             self.assertEqual(translation.translate_to_vietnamese(['Xin chào'], 'vi'), ['Xin chào'])

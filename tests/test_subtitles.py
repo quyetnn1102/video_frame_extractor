@@ -155,10 +155,24 @@ class TestCaptions(unittest.TestCase):
 
 
 class TestTranscribe(unittest.TestCase):
-    def fake_model(self, language, segments):
+    def fake_model(self, language, segments, speech=True):
         model = Mock()
-        model.transcribe.return_value = (iter(segments), SimpleNamespace(language=language, duration=10.0))
+        model.transcribe.return_value = (iter(segments), SimpleNamespace(
+            language=language, duration=10.0, duration_after_vad=10.0 if speech else 0.0))
         return model
+
+    def test_no_speech_gives_no_lines_before_the_language_is_checked(self):
+        model = self.fake_model('nn', [], speech=False)
+        with patch.object(subtitles, 'load_speech_model', return_value=model):
+            self.assertEqual(subtitles.transcribe(Path('video.mp4'), lambda _: None), ('nn', []))
+
+    def test_unreadable_sound_is_explained(self):
+        model = Mock()
+        model.transcribe.side_effect = IndexError('no audio stream')
+        with patch.object(subtitles, 'load_speech_model', return_value=model):
+            with self.assertRaises(SubtitleError) as raised:
+                subtitles.transcribe(Path('video.mp4'), lambda _: None)
+        self.assertIn('no audio', raised.exception.message)
 
     def test_speech_becomes_cleaned_timed_lines_with_progress(self):
         segments = [SimpleNamespace(start=0.0, end=2.0, text=' 人不能进入 '),
