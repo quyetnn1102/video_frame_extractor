@@ -10,7 +10,7 @@ requires-python = ">=3.10"
 dependencies = [
     # Web app
     "flask==2.3.3",
-    "werkzeug==2.3.7",
+    "werkzeug==3.1.9",
     "flask-limiter==3.12",
     "limits>=3.13",
     # Ranges, not exact pins, for libraries that other tools commonly share an environment
@@ -36,7 +36,7 @@ dependencies = [
     # MoviePy's progress logger; subclassed to report render progress and cancel jobs
     "proglog==0.1.12",
     "imageio-ffmpeg>=0.4",
-    "pillow==10.0.1",
+    "pillow==12.3.0",
 
     # YouTube upload (optional feature)
     "google-api-python-client==2.100.0",
@@ -46,10 +46,10 @@ dependencies = [
     # Pinned: without these the resolver would pick oauthlib 4.x, which requests-oauthlib 2.0
     # was not tested with
     "requests-oauthlib==2.0.0",
-    "oauthlib==3.2.2",
+    "oauthlib==4.0.0",
 
     # Production server (Linux/macOS only; use `uv run python app_enhanced.py` on Windows)
-    "gunicorn==23.0.0; sys_platform != 'win32'",
+    "gunicorn==26.2.0; sys_platform != 'win32'",
 ]
 
 [dependency-groups]
