@@ -24,17 +24,19 @@ from werkzeug.exceptions import HTTPException
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 import media_jobs
+from clip_finder import ClipFinderError, suggest_clips
 from config import get_config
 from database import db_manager, get_analytics, get_recent_requests
-from jobs import JobFailed, JobQueueFull, JobRegistry, NullReporter
+from jobs import QUEUED, RUNNING, JobFailed, JobQueueFull, JobRegistry, NullReporter
 from library import POSTER_FOLDER, folder_size_bytes, list_shorts, remove_poster, sync_posters
 from logger import LogContext, api_logger, app_logger
-from media_jobs import (EXTRACT_STAGES, SHORT_STAGES, finish_request_record, parse_extract_request,
-                        parse_short_request, run_recorded)
-from short_video import remove_partial_renders, text_overlay_available
+from media_jobs import (DEFAULT_SHORT_DURATION, EXTRACT_STAGES, SHORT_STAGES, SUBTITLE_STAGES,
+                        finish_request_record, parse_extract_request, parse_short_request, run_recorded)
+from short_video import (MAX_SHORT_DURATION, MIN_SHORT_DURATION, ShortVideoError, parse_duration,
+                         remove_partial_renders, text_overlay_available)
 from trending import VIDEO_CATEGORIES, get_youtube_trending
 from validators import MAX_TIMESTAMPS, resolve_in_folder, validator
-from video_processor import extractor
+from video_processor import extractor, javascript_runtime_available
 from youtube_uploader import PRIVACY_STATUSES, YouTubeUploaderError, youtube_uploader
 
 APP_VERSION = '2.1.0'
@@ -98,8 +100,9 @@ PLATFORM_GUIDANCE = {
     },
     'douyin': {
         'status': 'limited',
-        'notes': 'Public videos with a full douyin.com/video/<id> link',
-        'tips': ['v.douyin.com short links are not supported; open the video and copy its full URL'],
+        'notes': 'Public videos; Douyin often refuses automated downloads',
+        'tips': ['douyin.com/video/<id>, ?modal_id=<id> and v.douyin.com share links all work',
+                 'If Douyin refuses, export your browser cookies to douyin_cookies.txt (see the README)'],
     },
 }
 
@@ -205,6 +208,10 @@ def create_app() -> Flask:
     # so the Limiter would be garbage collected once create_app() returns and every
     # decorated route would fail with "ReferenceError: weakly-referenced object ...".
     app.extensions['rate_limiter'] = limiter
+
+    if not javascript_runtime_available():
+        app_logger.warning("No JavaScript runtime (Node.js, Deno or Bun) found: YouTube downloads may "
+                           "fail with HTTP 403. Install Node.js and restart the app.")
 
     @app.before_request
     def guard_request():
@@ -461,6 +468,29 @@ def create_app() -> Flask:
 
     # -- API: short videos --------------------------------------------------------
 
+    @app.route('/api/clip-suggestions', methods=['POST'])
+    @limiter.limit("10 per minute")
+    def clip_suggestions():
+        """The most replayed moments of a YouTube video, from its heatmap and captions."""
+        data = get_json_body()
+        url = data.get('url') if data else None
+        if not isinstance(url, str) or not url.strip():
+            return json_error('URL is required', 400)
+        is_valid, platform, url_error = validator.validate_url(url.strip())
+        if not is_valid:
+            return json_error(url_error, 400)
+        if platform != 'youtube':
+            return json_error('Suggestions need YouTube data, so they work for YouTube links only.', 400)
+        try:
+            duration = parse_duration(data.get('duration', DEFAULT_SHORT_DURATION))
+        except ShortVideoError:
+            return json_error(f'Length must be between {MIN_SHORT_DURATION} and {MAX_SHORT_DURATION} seconds', 400)
+        try:
+            result = suggest_clips(url.strip(), duration, config.MAX_VIDEO_DURATION)
+        except ClipFinderError as error:
+            return json_error(error.user_message, 400)
+        return jsonify({'success': True, **result})
+
     @app.route('/api/create-short', methods=['POST'])
     @limiter.limit("5 per minute")
     def create_short_video():
@@ -512,6 +542,31 @@ def create_app() -> Flask:
         return start_job('short', SHORT_STAGES, record_id, lambda reporter: run_recorded(
             record_id, 'Rendering failed', lambda: media_jobs.render_short(short_request, reporter)))
 
+    def requested_short():
+        """(path, None) for the short named in the JSON body, or (None, an error response)."""
+        data = get_json_body()
+        filename = data.get('filename') if data else None
+        if not isinstance(filename, str):
+            return None, json_error('filename is required', 400)
+        path = resolve_in_folder(config.SHORTS_FOLDER, filename, ('.mp4',))
+        if path is None:
+            return None, json_error('Not found', 404)
+        return path, None
+
+    @app.route('/api/jobs/subtitles', methods=['POST'])
+    @limiter.limit("5 per minute")
+    def start_subtitle_job():
+        """A copy of a short in the library with Vietnamese subtitles (not on the request log)."""
+        path, error = requested_short()
+        if error:
+            return error
+        # One at a time: each loads speech and translation models (hundreds of MB)
+        if any(job['kind'] == 'subtitles' and job['state'] in (QUEUED, RUNNING)
+               for job in job_registry.snapshots()):
+            return json_error('Subtitles are already being added to a short. Wait for it to finish.', 409)
+        return start_job('subtitles', SUBTITLE_STAGES, 0,
+                         lambda reporter: media_jobs.add_vietnamese_subtitles(path, reporter))
+
     # Polled about once a second by an open page, so not counted against the API limit
     @app.route('/api/jobs')
     @limiter.exempt
@@ -559,13 +614,9 @@ def create_app() -> Flask:
     @app.route('/api/shorts/delete', methods=['POST'])
     @limiter.limit("30 per minute")
     def delete_generated_short():
-        data = get_json_body()
-        filename = data.get('filename') if data else None
-        if not isinstance(filename, str):
-            return json_error('filename is required', 400)
-        path = resolve_in_folder(config.SHORTS_FOLDER, filename, ('.mp4',))
-        if path is None:
-            return json_error('Not found', 404)
+        path, error = requested_short()
+        if error:
+            return error
         try:
             path.unlink()
         except PermissionError:

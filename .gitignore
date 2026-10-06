@@ -83,10 +83,14 @@ app_data.db
 
 # Instagram cookies and authentication
 instagram_cookies.txt
+douyin_cookies.txt
 
 # Generated short videos
 generated_shorts/*
 !generated_shorts/.gitkeep
+
+# Speech and translation models, downloaded on first use (hundreds of MB)
+models/
 
 # Log directories
 logs/

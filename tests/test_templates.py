@@ -297,6 +297,8 @@ class TestTemplates(unittest.TestCase):
         self.assertIn('data.sample', trending, 'sample data is called sample data')
 
         create = page_source(TEMPLATES_DIR / 'create_short.html')
+        self.assertIn("'/api/clip-suggestions'", create, 'Suggest moments asks the server')
+        self.assertIn("$('createSubmit').focus()", create)
         self.assertNotIn('resetFormBtn', create, 'no Reset beside the main action')
         self.assertIn('function reviewUpload', create, 'title, description and privacy are reviewed first')
         self.assertIn("privacy: details.privacy", create)

@@ -435,6 +435,36 @@ class TestDownloadProgress(unittest.TestCase):
                         self.extractor.download_video(url, on_progress=Mock())
 
 
+class TestYouTubeChallenges(unittest.TestCase):
+    """YouTube needs its download challenges solved, or it cuts downloads off with HTTP 403."""
+
+    def test_yt_dlp_may_use_any_installed_javascript_runtime(self):
+        options = video_processor.YouTubeProcessor().get_download_options('x')
+        self.assertEqual(set(options['js_runtimes']), {'deno', 'node', 'bun'})
+
+    def test_the_challenge_scripts_are_installed(self):
+        import importlib.util
+        self.assertIsNotNone(importlib.util.find_spec('yt_dlp_ejs'), 'pyproject: yt-dlp[default,...]')
+
+    def test_a_403_explains_what_to_do(self):
+        processor = video_processor.YouTubeProcessor()
+        error = 'ERROR: unable to download video data: HTTP Error 403: Forbidden'
+        with patch.object(video_processor, 'javascript_runtime_available', return_value=False):
+            self.assertIn('Install Node.js', processor.process_download_error(error))
+        with patch.object(video_processor, 'javascript_runtime_available', return_value=True):
+            self.assertIn('update yt-dlp', processor.process_download_error(error))
+        self.assertTrue(processor.process_download_error('Video unavailable').startswith('Youtube Error'))
+
+    def test_terminal_colour_codes_never_reach_the_page(self):
+        coloured = '[0;31mERROR:[0m unable to download video data: HTTP Error 403: Forbidden'
+        self.assertEqual(video_processor.clean_error_text(coloured),
+                         'ERROR: unable to download video data: HTTP Error 403: Forbidden')
+        with patch.object(video_processor, 'download_with_ytdlp',
+                          side_effect=yt_dlp.utils.DownloadError('[0;31mERROR:[0m Video unavailable')):
+            _, _, message = EnhancedVideoFrameExtractor().download_video('https://www.youtube.com/watch?v=dQw4w9WgXcQ')
+        self.assertNotIn('', message)
+
+
 class TestCleanup(unittest.TestCase):
     def test_warnings_do_not_contain_server_paths(self):
         config = get_config()

@@ -27,6 +27,10 @@ IMPORT_TO_DIST = {
     'google': 'google-auth',  # google.auth, google.oauth2
     'google_auth_oauthlib': 'google-auth-oauthlib',
     'httplib2': 'httplib2',
+    'PIL': 'pillow',
+    'faster_whisper': 'faster-whisper',
+    'ctranslate2': 'ctranslate2',
+    'sentencepiece': 'sentencepiece',
 }
 
 # Declared on purpose although never imported directly
@@ -35,7 +39,6 @@ NEEDED_WITHOUT_IMPORT = {
     'oauthlib': 'pinned: oauthlib 4.x is untested with requests-oauthlib 2.0',
     'requests-oauthlib': 'used by google-auth-oauthlib',
     'google-auth-httplib2': 'used by google-api-python-client',
-    'pillow': 'used by MoviePy and OpenCV image handling',
     'gunicorn': 'production server on Linux/macOS',
     'pip-audit': 'dependency audit in CI',
 }

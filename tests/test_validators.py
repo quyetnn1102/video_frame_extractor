@@ -70,11 +70,12 @@ class TestUrlAcceptance(unittest.TestCase):
     def test_accepts_douyin_forms(self):
         self.assert_accepted('https://www.douyin.com/video/7234567890123456789', 'douyin')
 
-    def test_douyin_short_links_are_refused_because_they_cannot_be_downloaded(self):
+    def test_douyin_short_links_are_accepted_for_resolution(self):
+        """link_resolver turns them into douyin.com/video/<id> (see tests/test_douyin.py)."""
         is_valid, platform, error = self.validator.validate_url('https://v.douyin.com/iabc123/')
-        self.assertFalse(is_valid)
+        self.assertTrue(is_valid)
         self.assertEqual(platform, 'douyin')
-        self.assertTrue(error)
+        self.assertIsNone(error)
 
 
 class TestUrlRejection(unittest.TestCase):

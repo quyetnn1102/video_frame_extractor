@@ -3,7 +3,8 @@ The work behind /api/extract and /api/create-short: check the request, download 
 then extract frames or render a short.
 
 The original routes run it while the browser waits; the /api/jobs routes run the same code as a
-background job (jobs.py), reporting each stage and stopping when the user cancels.
+background job (jobs.py), reporting each stage and stopping when the user cancels. Adding
+Vietnamese subtitles to a short in the library is a job only (/api/jobs/subtitles).
 """
 import os
 import time
@@ -16,18 +17,22 @@ from urllib.parse import quote
 from config import get_config
 from database import db_manager
 from jobs import JobCancelled, JobFailed
-from library import make_poster
+from library import make_poster, short_title
 from logger import app_logger
 from short_video import (ShortVideoError, create_short, normalize_quality, normalize_text_overlay,
                          parse_duration, parse_start_time)
+from subtitles import Cue, SubtitleError, render_subtitled, transcribe
+from translation import TranslationError, language_name, translate_to_vietnamese
 from validators import validator
 from video_processor import extractor
 
 MAX_FRAME_FILENAME_TITLE = 50
 DEFAULT_SHORT_DURATION = 30
+VIETSUB_SUFFIX = ' Vietsub'  # what Vietnamese viewers call a video with Vietnamese subtitles
 
 EXTRACT_STAGES = ('download', 'extract')
 SHORT_STAGES = ('download', 'render')
+SUBTITLE_STAGES = ('listen', 'translate', 'render')
 
 
 @dataclass(frozen=True)
@@ -228,4 +233,45 @@ def render_short(request: ShortRequest, reporter) -> Dict[str, Any]:
     }
     if result['warnings']:
         response['warnings'] = result['warnings']
+    return response
+
+
+def add_vietnamese_subtitles(source_path: Path, reporter) -> Dict[str, Any]:
+    """
+    Makes a copy of a short in the library with its speech subtitled in Vietnamese, and any
+    subtitles burned into the picture blurred (subtitles.py). The original is left as it is.
+    """
+    try:
+        reporter.stage('listen', 'Listening to the speech (the first time also downloads the speech model)')
+        language, cues = transcribe(source_path, reporter.progress)
+        if not cues:
+            raise JobFailed('No speech was found in this short, so there is nothing to subtitle.')
+        reporter.stage('translate', f'Translating from {language_name(language)}')
+        texts = translate_to_vietnamese([cue.text for cue in cues], language, on_download=reporter.progress)
+    except (SubtitleError, TranslationError) as error:
+        raise JobFailed(error.message) from error
+    cues = [Cue(cue.start, cue.end, text) for cue, text in zip(cues, texts) if text]
+    if not cues:
+        raise JobFailed('The speech could not be translated, so no subtitles were made.')
+
+    title = short_title(source_path.stem)[:MAX_FRAME_FILENAME_TITLE - len(VIETSUB_SUFFIX)].strip()
+    output_name = short_file_name(title + VIETSUB_SUFFIX)
+    output_path = source_path.parent / output_name
+    reporter.stage('render', 'Blurring the old subtitles and adding the Vietnamese ones')
+    blurred = render_subtitled(source_path, output_path, cues, reporter.progress)
+    make_poster(output_path)
+
+    response = {
+        'success': True,
+        'message': 'Vietnamese subtitles added',
+        'filename': output_name,
+        'title': title + VIETSUB_SUFFIX,
+        'language': language_name(language),
+        'subtitle_count': len(cues),
+        'file_size': file_size_or_none(output_path),
+        'download_url': f'/shorts/{quote(output_name)}',
+    }
+    if not blurred:
+        response['warnings'] = ['No subtitles were found in the picture, so nothing was blurred. '
+                                'The Vietnamese subtitles are near the bottom.']
     return response

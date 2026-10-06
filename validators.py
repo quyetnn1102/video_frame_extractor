@@ -37,6 +37,9 @@ MAX_FILENAME_LENGTH = 100
 # Real share links are far shorter; the cap keeps regex work on user input bounded.
 MAX_URL_LENGTH = 2048
 VIDEO_ID_PATTERN = re.compile(r'[\w-]{1,64}')
+DOUYIN_ID_PATTERN = re.compile(r'\d{6,25}')
+DOUYIN_VIDEO_PATH = re.compile(r'/video/(\d+)')
+DOUYIN_SHARE_PATH = re.compile(r'/share/video/(\d+)')
 
 # Seconds/minutes are bounded to 00-59 so "1:60" is rejected, not read as 120s.
 TIMESTAMP_PATTERNS = (
@@ -108,8 +111,11 @@ class SecurityValidator:
                 r'https?://fb\.watch/[\w-]+',
             ],
             'douyin': [
-                # v.douyin.com short links have no yt-dlp extractor; use the full link
                 r'https?://(www\.)?douyin\.com/video/\d+',
+                # A video opened from a feed, search or profile page: ...?modal_id=<id>
+                r'https?://(www\.)?douyin\.com/[^?#]*\?([^#]*&)?modal_id=\d+',
+                # Share links; resolved by link_resolver to douyin.com/video/<id>
+                r'https?://v\.douyin\.com/[\w-]+/?',
             ],
         }
         
@@ -187,6 +193,9 @@ class SecurityValidator:
         so they would fail with a misleading "No suitable extractor". Other links
         are returned unchanged.
         """
+        douyin = self.canonicalize_douyin_url(url)
+        if douyin != url:
+            return douyin
         try:
             parsed = urlparse.urlparse(url)
             host = (parsed.hostname or '').lower()
@@ -202,6 +211,29 @@ class SecurityValidator:
         if not VIDEO_ID_PATTERN.fullmatch(video_id):
             return url
         return f'https://www.youtube.com/watch?v={video_id}'
+
+    @staticmethod
+    def canonicalize_douyin_url(url: str) -> str:
+        """
+        A Douyin video as https://www.douyin.com/video/<id>, the only form yt-dlp reads.
+        Covers ...?modal_id=<id> on any douyin.com page and the iesdouyin.com share pages that
+        v.douyin.com links redirect to (rewritten here, never requested). Other links unchanged.
+        """
+        try:
+            parsed = urlparse.urlparse(url)
+        except ValueError:
+            return url
+        host = (parsed.hostname or '').lower()
+        if _host_matches(host, 'douyin.com'):
+            video_id = (urlparse.parse_qs(parsed.query).get('modal_id') or [''])[0]
+            match = DOUYIN_VIDEO_PATH.fullmatch(parsed.path.rstrip('/'))
+            video_id = video_id or (match.group(1) if match else '')
+        elif _host_matches(host, 'iesdouyin.com'):
+            match = DOUYIN_SHARE_PATH.match(parsed.path)
+            video_id = match.group(1) if match else ''
+        else:
+            return url
+        return f'https://www.douyin.com/video/{video_id}' if DOUYIN_ID_PATTERN.fullmatch(video_id) else url
 
     def validate_timestamp(self, timestamp: str) -> Tuple[bool, Optional[str], Optional[int]]:
         """

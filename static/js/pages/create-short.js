@@ -10,6 +10,7 @@
     const $ = (id) => document.getElementById(id);
     let busy = false;              // the YouTube sign-in/upload overlay is open
     let rendering = false;         // a short is being made (a background job)
+    let subtitling = false;        // a subtitled copy is being made (one at a time)
     let signedIn = false;          // set once the server confirms the YouTube sign-in
     let cancelRequested = false;   // set by the Cancel button while waiting for sign-in
 
@@ -119,6 +120,93 @@
         return errors.length === 0;
     }
 
+    // ---- suggest moments: the parts of a YouTube video people replay most -------
+
+    const PRESET_LENGTHS = [15, 30, 60];
+    const LENGTH_MATCH_SECONDS = 0.5;
+
+    function clock(totalSeconds) {
+        const seconds = Math.floor(totalSeconds);
+        return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+    }
+
+    // Fills in the start and length; a suggestion that ends on a line may be a little shorter
+    function useSuggestion(clip) {
+        $('startTime').value = clock(clip.start);
+        ui.clearFieldError($('startTime'));
+        const preset = PRESET_LENGTHS.find((length) => Math.abs(length - clip.duration) < LENGTH_MATCH_SECONDS);
+        if (preset) {
+            selectDuration(document.querySelector(`.duration-option[data-duration="${preset}"]`));
+        } else {
+            selectDuration(document.querySelector('.duration-option[data-duration="custom"]'));
+            $('customDuration').value = String(clip.duration);
+        }
+        $('suggestStatus').replaceChildren(notice('ok', 'Moment chosen.',
+            `Starts at ${clock(clip.start)}, ${Math.round(clip.duration)} seconds. Press Create short when ready.`));
+        $('createSubmit').focus();
+    }
+
+    function suggestionItem(clip) {
+        const time = element('span', 'suggestion-time',
+            `${clock(clip.start)} to ${clock(clip.start + clip.duration)}`);
+        const bar = element('span', 'suggestion-bar');
+        bar.style.width = Math.round(Math.max(0.1, clip.score) * 100) + '%';
+        bar.setAttribute('aria-hidden', 'true');  // the reason says the same in words
+        const head = element('div');
+        head.append(time, bar);
+
+        const use = element('button', 'btn btn-sm', 'Use this');
+        use.type = 'button';
+        use.setAttribute('aria-label', `Use the moment from ${clock(clip.start)}`);
+        use.addEventListener('click', () => useSuggestion(clip));
+
+        const item = element('li', 'suggestion');
+        item.append(head, use, element('p', 'suggestion-reason', clip.reason));
+        if (clip.excerpt) item.append(element('p', 'suggestion-excerpt clamp', `"${clip.excerpt}"`));
+        return item;
+    }
+
+    async function suggestMoments() {
+        const status = $('suggestStatus');
+        const url = $('shortVideoUrl').value.trim();
+        $('suggestions').replaceChildren();
+        if (!ui.isLink(url)) {
+            ui.setFieldError($('shortVideoUrl'), 'Enter a YouTube link first');
+            $('shortVideoUrl').focus();
+            status.replaceChildren();
+            return;
+        }
+        let duration;
+        try {
+            duration = getDuration();
+        } catch (error) {
+            status.replaceChildren(notice('error', 'Check the length.', error.message));
+            return;
+        }
+        const scanner = element('span', 'mark is-scanning');
+        scanner.setAttribute('aria-hidden', 'true');
+        const loading = element('p', 'inline-loading');
+        loading.append(scanner, document.createTextNode("Reading the video's replay data..."));
+        status.replaceChildren(loading);
+
+        const { ok, data, parsed } = await postJson('/api/clip-suggestions', { url, duration })
+            .catch(() => ({ ok: false, data: {}, parsed: false }));
+        if (!ok || !data.success) {
+            status.replaceChildren(notice('error', 'No suggestions.',
+                parsed ? (data.error || 'Try again in a moment.') : 'The app did not answer. Try again in a moment.'));
+            return;
+        }
+        const count = data.clips.length === 1 ? '1 moment' : `${data.clips.length} moments`;
+        const signals = data.signals || {};
+        const note = signals.captions ? ''
+            : signals.captions_unreadable ? ' YouTube did not let the app read the captions this time, so a clip may start mid-sentence.'
+                : ' This video has no captions, so a clip may start mid-sentence.';
+        status.replaceChildren(notice('info', `${count}, best first.`, `Choose one to fill in the start and length.${note}`));
+        $('suggestions').replaceChildren(...data.clips.map(suggestionItem));
+    }
+
+    $('suggestBtn').addEventListener('click', () => ui.whileWorking($('suggestBtn'), 'Looking...', suggestMoments));
+
     // ---- create a short: a background job, followed in a progress card ----------
 
     function setRendering(isRendering) {
@@ -183,8 +271,9 @@
     // A short still being made when this page was (re)opened: follow it. Finished ones are
     // already in "Your shorts", which is read from disk.
     async function resumeRunningJob() {
-        const job = await jobs.latest('short');
+        const [job, subtitleJob] = await Promise.all([jobs.latest('short'), jobs.latest('subtitles')]);
         if (!rendering && job && jobs.isActive(job)) followJob(job);  // rendering: just started here
+        if (!subtitling && subtitleJob && jobs.isActive(subtitleJob)) followSubtitleJob(subtitleJob);
     }
 
     // ---- your shorts: kept on disk, listed again after a refresh ------------
@@ -262,13 +351,19 @@
         upload.setAttribute('aria-label', `Upload ${item.title} to YouTube`);
         upload.addEventListener('click', () => reviewUpload(item));
 
+        const subtitle = element('button', 'btn btn-sm subtitle-btn', 'Vietnamese subtitles');
+        subtitle.type = 'button';
+        subtitle.setAttribute('aria-label', `Add Vietnamese subtitles to a copy of ${item.title}`);
+        if (subtitling) subtitle.setAttribute('aria-disabled', 'true');
+        subtitle.addEventListener('click', () => addSubtitles(item));
+
         const remove = element('button', 'btn btn-sm btn-quiet', 'Delete');
         remove.type = 'button';
         remove.setAttribute('aria-label', `Delete ${item.title}`);
         remove.addEventListener('click', () => confirmDelete(item));
 
         const actions = element('div', 'short-actions');
-        actions.append(download, upload, remove);
+        actions.append(download, upload, subtitle, remove);
 
         const card = element('li', isNew ? 'card card-flush short-card is-new' : 'card card-flush short-card');
         const body = element('div', 'short-body');
@@ -300,12 +395,60 @@
         }
     }
 
-    async function showNewShort(result) {
+    async function showNewShort(result, heading = 'Your short is ready.',
+        detail = 'It is first in the list below, and it stays there after you leave this page.') {
         $('resultsStatus').replaceChildren(
-            notice('ok', 'Your short is ready.', 'It is first in the list below, and it stays there after you leave this page.'),
+            notice('ok', heading, detail),
             ...(result.warnings || []).map((warning) => notice('warn', 'Note.', warning)));
         const cards = await loadLibrary(result.filename);
         if (cards.length) cards[0].scrollIntoView({ behavior: scrollBehavior(), block: 'center' });
+    }
+
+    // ---- Vietnamese subtitles: a copy of a short, made by a background job -------
+
+    function setSubtitling(isSubtitling) {
+        subtitling = isSubtitling;
+        document.querySelectorAll('.subtitle-btn').forEach((button) => {
+            if (isSubtitling) button.setAttribute('aria-disabled', 'true');
+            else button.removeAttribute('aria-disabled');
+        });
+    }
+
+    async function showSubtitleOutcome(job) {
+        if (job.state === 'succeeded') {
+            const count = job.result.subtitle_count;
+            await showNewShort(job.result, 'Vietnamese subtitles added.',
+                `${count} ${count === 1 ? 'line' : 'lines'} translated from ${job.result.language}. ` +
+                'The subtitled copy is first in the list below; the original is unchanged.');
+        } else {
+            $('resultsStatus').replaceChildren(job.state === 'cancelled'
+                ? notice('info', 'Cancelled.', 'No subtitled copy was made.')
+                : notice('error', 'Could not add subtitles.', job.error || 'Try again in a moment.'));
+        }
+        $('resultHeading').focus({ preventScroll: job.state === 'succeeded' });  // the progress card is gone
+    }
+
+    function followSubtitleJob(job) {
+        setSubtitling(true);
+        jobs.follow(job, $('subtitleJobPanel'), {
+            title: 'Adding Vietnamese subtitles',
+            onFinish: (final) => {
+                setSubtitling(false);
+                showSubtitleOutcome(final);
+            },
+        });
+    }
+
+    async function addSubtitles(item) {
+        if (subtitling) return;
+        setSubtitling(true);  // before the request, so a second click does nothing
+        $('resultsStatus').replaceChildren();
+        try {
+            followSubtitleJob(await jobs.start('/api/jobs/subtitles', { filename: item.filename }));
+        } catch (error) {
+            setSubtitling(false);
+            $('resultsStatus').replaceChildren(notice('error', 'Could not start.', error.message));
+        }
     }
 
 
