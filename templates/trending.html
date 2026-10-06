@@ -7,6 +7,7 @@
     <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
     <link rel="stylesheet" href="/static/css/app.css">
     <link rel="stylesheet" href="/static/css/shell.css">
+    <link rel="stylesheet" href="/static/css/menu.css">
     <script src="/static/js/shell.js"></script>
     <link rel="stylesheet" href="/static/css/pages/trending.css">
 </head>
@@ -21,18 +22,16 @@
             {% include 'partials/topbar.html' %}
 
             <main id="main" class="page">
-                <p class="intro">The most popular videos on YouTube right now. Pick one to pull frames from it.</p>
+                <p class="intro">Discover popular YouTube videos and turn them into clips or frames.</p>
 
                 <form class="query card" id="queryForm">
                     <div class="field">
                         <label for="categorySelect">Category</label>
                         <select id="categorySelect">
                             <option value="0">All categories</option>
-                            <option value="10">Music</option>
-                            <option value="20">Gaming</option>
-                            <option value="28">Science &amp; Technology</option>
-                            <option value="24">Entertainment</option>
-                            <option value="25">News &amp; Politics</option>
+                            {% for category_id, name in categories %}
+                            <option value="{{ category_id }}">{{ name }}</option>
+                            {% endfor %}
                         </select>
                     </div>
                     <div class="field">
@@ -49,13 +48,15 @@
                             <option value="IN">India</option>
                         </select>
                     </div>
-                    <button type="submit" class="btn" id="refreshBtn">Refresh</button>
-                    <p class="hint">The list changes as soon as you pick a category or region.</p>
+                    <p class="hint">The list updates as soon as you pick a category or region.</p>
                 </form>
 
                 <div class="section-head chart-head">
                     <h2 id="chartHeading">Trending on YouTube</h2>
-                    <p id="updatedAt"></p>
+                    <div class="chart-meta">
+                        <p id="updatedAt"></p>
+                        <button type="button" class="btn btn-sm btn-quiet" id="refreshBtn">Reload</button>
+                    </div>
                 </div>
                 <div class="inline-loading trend-status" id="trendStatus" role="status"></div>
                 <div class="trend-message" id="trendMessage" role="alert"></div>
@@ -64,7 +65,7 @@
 
                 <div class="empty-state" id="noResults" hidden>
                     <div>
-                        <h2>No videos found</h2>
+                        <h3>No videos found</h3>
                         <p>Try another category or region, or check back later.</p>
                     </div>
                     <button type="button" class="btn" id="showAllBtn">Show all categories</button>

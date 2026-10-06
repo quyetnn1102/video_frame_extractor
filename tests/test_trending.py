@@ -99,8 +99,8 @@ class TestGetYoutubeTrending(unittest.TestCase):
         self.assertEqual(video['duration'], '4:13')
         self.assertEqual(video['views'], '1234')
         self.assertEqual(video['category'], 'Music')
-        self.assertTrue(video['description'].endswith('...'))
-        self.assertEqual(len(video['description']), 203)
+        self.assertFalse(video['description'].endswith('...'), 'the page adds the ellipsis')
+        self.assertEqual(len(video['description']), trending.DESCRIPTION_PREVIEW_LENGTH)
 
     def test_untrusted_region_and_category_are_not_forwarded(self):
         with patch('trending.requests.get', return_value=api_response([api_item()])) as get:

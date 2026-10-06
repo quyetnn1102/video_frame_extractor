@@ -30,12 +30,6 @@
         return count + (count === 1 ? ' view' : ' views');
     }
 
-    function statItem(text, className) {
-        const wrapper = element('span');
-        wrapper.append(element(className ? 'strong' : 'span', className, text));
-        return wrapper;
-    }
-
     function createEntry(video, index) {
         const videoUrl = safeHttpsUrl(video.url);
 
@@ -50,40 +44,46 @@
         }
         picture.append(element('span', 'chip rank', String(index + 1)));
 
-        const stats = element('div', 'entry-stats');
-        stats.append(statItem(formatViews(video.views), 'views'),
-                     statItem(String(video.duration)),
-                     statItem(String(video.published)),
-                     statItem(String(video.category)));
+        // One line of facts: views · length · age · category
+        const facts = [formatViews(video.views), video.duration, video.published, video.category]
+            .filter(Boolean).map(String).join(' \u00b7 ');
 
         // Every entry has the same actions; the labels say which video they act on
-        const extractButton = element('button', 'btn', 'Extract frames');
-        extractButton.type = 'button';
-        extractButton.setAttribute('aria-label', `Extract frames from ${video.title}`);
-        extractButton.addEventListener('click', () => openWith('/extract', videoUrl));
-        const shortButton = element('button', 'btn', 'Create short');
+        const shortButton = element('button', 'btn btn-sm btn-primary', 'Create short');
         shortButton.type = 'button';
         shortButton.setAttribute('aria-label', `Create a short from ${video.title}`);
         shortButton.addEventListener('click', () => openWith('/create-short', videoUrl));
+        const extractButton = element('button', 'btn btn-sm', 'Extract frames');
+        extractButton.type = 'button';
+        extractButton.setAttribute('aria-label', `Extract frames from ${video.title}`);
+        extractButton.addEventListener('click', () => openWith('/extract', videoUrl));
 
         const actions = element('div', 'actions');
-        actions.append(extractButton, shortButton);
+        actions.append(shortButton, extractButton);
         if (videoUrl) {
-            const watch = element('a', undefined, 'Watch on YouTube');
-            watch.setAttribute('aria-label', `Watch ${video.title} on YouTube (opens a new tab)`);
-            watch.href = videoUrl;
-            watch.target = '_blank';
-            watch.rel = 'noopener noreferrer';
-            actions.append(watch);
+            // "⋯" keeps the three actions on one row; the accessible name says what it is
+            actions.append(ui.actionMenu('⋯', `More for ${video.title}`, [
+                { label: 'Watch on YouTube', href: videoUrl },
+                { label: 'Copy link', onSelect: () => copyLink(videoUrl) },
+            ]));
         }
 
-        const entry = element('li', index === 0 ? 'card card-flush entry is-lead' : 'card card-flush entry');
+        const entry = element('li', 'card card-flush entry');
         entry.append(picture,
-                     element('h2', 'entry-title clamp', video.title),
+                     element('h3', 'entry-title clamp', video.title),
                      element('p', 'entry-channel', video.channel),
                      element('p', 'entry-desc clamp', video.description),
-                     stats, actions);
+                     element('p', 'entry-stats', facts), actions);
         return entry;
+    }
+
+    async function copyLink(videoUrl) {
+        try {
+            await navigator.clipboard.writeText(videoUrl);
+            showMessage('ok', 'Link copied.', videoUrl);
+        } catch (error) {
+            showMessage('error', 'Could not copy the link.', videoUrl);
+        }
     }
 
     // A notice, with a "Try again" button when another attempt can help
@@ -133,7 +133,9 @@
         $('chartHeading').textContent = data.sample
             ? 'Sample videos (not live)'
             : `Trending in ${requested.regionText}, ${category}`;
-        $('updatedAt').textContent = 'Updated ' + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        // The browser's clock, so the time is this computer's
+        $('updatedAt').textContent = data.sample ? ''
+            : `Updated ${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} (your time)`;
     }
 
     // Why the list is not live (data.reason from the server), and what would fix it
@@ -188,6 +190,9 @@
             .catch((error) => {
                 console.error('Error loading trending videos:', error);
                 setLoading(false);
+                // The list on screen is from earlier filters: the heading must not claim otherwise
+                $('chartHeading').textContent = 'Trending on YouTube';
+                $('updatedAt').textContent = '';
                 showMessage('error', 'Could not load trending videos.', error.message || 'Try again in a moment.', true);
             })
             .finally(() => {
@@ -204,9 +209,9 @@
         window.location.href = target.toString();
     }
 
-    $('queryForm').addEventListener('submit', (event) => {
-        event.preventDefault();
-        // Refresh during a load would only ask YouTube (and spend quota) for the same list again
+    $('queryForm').addEventListener('submit', (event) => event.preventDefault());
+    // Reload during a load would only ask YouTube (and spend quota) for the same list again
+    $('refreshBtn').addEventListener('click', () => {
         if (!loading) loadTrendingVideos();
     });
     $('categorySelect').addEventListener('change', loadTrendingVideos);
@@ -217,6 +222,6 @@
         loadTrendingVideos();
     });
 
-    // Loaded once; "Refresh" asks again (every request costs YouTube API quota)
+    // Loaded once; "Reload" asks again (every request costs YouTube API quota)
     loadTrendingVideos();
 })();

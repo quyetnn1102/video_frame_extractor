@@ -111,9 +111,8 @@ def get_fallback_trending_data() -> List[Dict[str, Any]]:
 
 
 def _preview(description: str) -> str:
-    if len(description) > DESCRIPTION_PREVIEW_LENGTH:
-        return description[:DESCRIPTION_PREVIEW_LENGTH] + '...'
-    return description
+    """The start of a description; the page shows two lines of it and adds its own ellipsis."""
+    return description[:DESCRIPTION_PREVIEW_LENGTH]
 
 
 def _to_video(item: Dict[str, Any]) -> Dict[str, Any]:

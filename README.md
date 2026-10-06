@@ -78,7 +78,7 @@ Open <http://localhost:5000>. Downloads, frames and shorts are stored in `downlo
 
 **Vietnamese subtitles**: in Your shorts, **More > Add Vietnamese subtitles** makes a copy (titled "... Vietsub") with the speech subtitled in Vietnamese; the original is kept. It works on this computer, without an online service: [faster-whisper](https://github.com/SYSTRAN/faster-whisper) writes down the speech (Chinese, English or Vietnamese), the [Argos Translate](https://github.com/argosopentech/argos-translate) models translate it (Chinese through English), subtitles already burned into the picture (white text with a dark outline, as on Douyin and TikTok) are found and blurred while they show, and the Vietnamese lines are drawn in their place. The first run downloads the models into `models/` (about 500 MB for speech, 70 MB per translation model); after that it needs no network. A 1-minute short takes about 2 minutes on a laptop CPU. Machine translation is understandable but not polished, and names or wordplay come out literally.
 
-**Trending** (`/trending`): browse popular YouTube videos by region and category, and send one to the extractor.
+**Trending** (`/trending`): browse popular YouTube videos by region and category, and send one to Create short or Extract frames. When the list is sample data, the page says why (no API key, a refused key, the daily quota, or YouTube not answering).
 
 **Dashboard** (`/dashboard`): request counts per platform, success rate, extracted frames, and CPU/memory/disk usage. Frame extraction and short creation are recorded; other calls are not.
 

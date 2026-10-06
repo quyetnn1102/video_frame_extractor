@@ -260,7 +260,8 @@ def create_app() -> Flask:
 
     @app.route('/trending')
     def trending_page():
-        return render_template('trending.html')
+        categories = sorted(VIDEO_CATEGORIES.items(), key=lambda item: item[1])
+        return render_template('trending.html', categories=categories)
 
     @app.route('/shorts')
     def shorts_page():

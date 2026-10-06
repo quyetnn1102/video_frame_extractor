@@ -99,3 +99,23 @@ class TestFrameWarnings(RouteTestCase):
             media_jobs.extract_frames(ExtractRequest(VALID_URL, 'youtube', tuple(range(10))), 0, NullReporter())
         self.assertTrue(raised.exception.message.startswith('No frames could be extracted. 0:00: no frame there'))
         self.assertTrue(raised.exception.message.endswith('and 7 more'))
+
+
+class TestPageShortcuts(RouteTestCase):
+    def test_trending_offers_every_category_the_server_knows(self):
+        from trending import VIDEO_CATEGORIES
+        page = self.client.get('/trending').get_data(as_text=True)
+        for category_id in VIDEO_CATEGORIES:
+            self.assertIn(f'<option value="{category_id}">', page)
+
+    def test_the_top_bar_shortcut_appears_only_where_it_adds_something(self):
+        """Home has its own launcher and Trending cards their own actions."""
+        for path, expected in [('/', None), ('/trending', None), ('/create-short', 'href="/extract"'),
+                               ('/extract', 'href="/create-short">Create short'), ('/shorts', 'New short')]:
+            with self.subTest(path=path):
+                page = self.client.get(path).get_data(as_text=True)
+                actions = page.split('class="topbar-actions">')[1].split('</div>')[0]
+                if expected is None:
+                    self.assertNotIn('<a ', actions)
+                else:
+                    self.assertIn(expected, actions)
