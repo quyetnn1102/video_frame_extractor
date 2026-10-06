@@ -70,3 +70,6 @@ dev = [
 [tool.uv]
 # An application, not a library: the modules live in the project root and are not built or installed
 package = false
+# onnxruntime (faster-whisper's voice detection) dropped Python 3.10 wheels after 1.23.2, but
+# its metadata does not say so: without this the lock picks a release 3.10 cannot install
+constraint-dependencies = ["onnxruntime<1.24; python_version < '3.11'"]

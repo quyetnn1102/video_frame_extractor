@@ -333,7 +333,8 @@ class TestSubtitleRoute(RouteTestCase):
             job = self.wait_for_end(started['id'])
         self.assertEqual((started['kind'], started['stage_count']), ('subtitles', 3))
         self.assertEqual(job['state'], 'succeeded')
-        self.assertEqual(work.call_args.args[0], short)
+        # The same file, though the path may be spelled differently (8.3 names on Windows CI)
+        self.assertTrue(work.call_args.args[0].samefile(short))
 
     def test_one_subtitle_job_runs_at_a_time(self):
         short = self.shorts / 'Clip_abcd1234_short.mp4'
