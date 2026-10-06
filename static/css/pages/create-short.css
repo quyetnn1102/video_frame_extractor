@@ -169,6 +169,29 @@
     box-shadow: 0 0 0 100vmax var(--crop-shade);
 }
 
+.crop-thumb {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+/* After Analyze: the window can be dragged, or moved with the arrow keys */
+.crop.is-movable .crop-frame {
+    cursor: grab;
+    touch-action: none;
+}
+
+.crop.is-movable .crop-keep {
+    transform: none;
+}
+
+.crop.is-movable .crop-keep:focus-visible {
+    outline: 3px solid var(--lime);
+    outline-offset: -3px;
+}
+
 .crop.is-full .crop-keep {
     width: 100%;
     border-color: transparent;

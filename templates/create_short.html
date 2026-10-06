@@ -82,25 +82,22 @@
                             <div class="field">
                                 <label for="quality">Quality</label>
                                 <select id="quality">
-                                    <option value="low">Low (smaller file)</option>
-                                    <option value="medium" selected>Medium</option>
-                                    <option value="high">High (larger file)</option>
+                                    <option value="low">Low: 1 Mbit/s, ~8 MB/min</option>
+                                    <option value="medium" selected>Medium: 2 Mbit/s, ~16 MB/min</option>
+                                    <option value="high">High: 5 Mbit/s, ~38 MB/min</option>
                                 </select>
                             </div>
                         </div>
 
+                        {# Without ImageMagick there is no caption field; the Dashboard's Setup card says why #}
+                        {% if text_overlay_available %}
                         <div class="field">
                             <label for="overlayText">Caption <span class="optional">(optional)</span></label>
-                            {% if text_overlay_available %}
                             <input type="text" id="overlayText" maxlength="100" autocomplete="off"
                                    placeholder="Text shown at the bottom of the clip">
                             <p class="hint">Shown at the bottom of the clip.</p>
-                            {% else %}
-                            <input type="text" id="overlayText" maxlength="100" autocomplete="off" disabled
-                                   aria-describedby="overlayUnavailable" placeholder="Not available on this computer">
-                            <p class="hint" id="overlayUnavailable">Captions need ImageMagick, which was not found. See "Quick start" in the README, then restart the app.</p>
-                            {% endif %}
                         </div>
+                        {% endif %}
 
                         <label class="check" for="verticalFormat">
                             <input type="checkbox" id="verticalFormat" checked>
@@ -117,7 +114,12 @@
 
                     <aside class="aside card" aria-label="About the crop and where shorts go">
                         <figure class="crop" id="cropFigure">
-                            <div class="crop-frame"><div class="crop-keep"></div></div>
+                            <div class="crop-frame" id="cropFrame">
+                                <img class="crop-thumb" id="cropThumb" alt="" hidden>
+                                <div class="crop-keep" id="cropKeep" role="slider" tabindex="-1" aria-disabled="true"
+                                     aria-label="Part of the picture the short keeps" aria-valuemin="0"
+                                     aria-valuemax="100" aria-valuenow="50" aria-valuetext="Center"></div>
+                            </div>
                             <figcaption id="cropCaption">The outlined area is what you keep. Wide videos are cropped around the center.</figcaption>
                         </figure>
 

@@ -19,8 +19,8 @@ from database import db_manager
 from jobs import JobCancelled, JobFailed
 from library import VIETSUB_SUFFIX, make_poster, short_title
 from logger import app_logger
-from short_video import (ShortVideoError, create_short, normalize_quality, normalize_text_overlay,
-                         parse_duration, parse_start_time)
+from short_video import (DEFAULT_CROP_POSITION, ShortVideoError, create_short, normalize_quality,
+                         normalize_text_overlay, parse_crop_position, parse_duration, parse_start_time)
 from subtitles import Cue, SubtitleError, render_subtitled, transcribe
 from translation import TranslationError, language_name, translate_to_vietnamese
 from validators import format_clock, validator
@@ -29,6 +29,7 @@ from video_processor import extractor
 MAX_FRAME_FILENAME_TITLE = 50
 DEFAULT_SHORT_DURATION = 30
 MAX_ERRORS_LISTED = 3  # a job that fails on every timecode names this many
+FRAME_FORMATS = ('jpg', 'png')  # JPEG is smaller; PNG keeps every pixel
 
 EXTRACT_STAGES = ('download', 'extract')
 SHORT_STAGES = ('download', 'render')
@@ -40,6 +41,7 @@ class ExtractRequest:
     url: str
     platform: str
     seconds: Tuple[int, ...]
+    image_format: str = 'jpg'
 
 
 @dataclass(frozen=True)
@@ -51,6 +53,7 @@ class ShortRequest:
     quality: str
     vertical: bool
     text_overlay: Optional[Dict[str, Any]]
+    crop_position: float = DEFAULT_CROP_POSITION
 
 
 # -- small file helpers -------------------------------------------------------------
@@ -96,7 +99,10 @@ def parse_extract_request(data: Optional[Dict[str, Any]]) -> Tuple[Optional[Extr
     timestamps_valid, timestamp_errors, seconds_list = validator.validate_timestamps(timestamps)
     if not timestamps_valid:
         return None, '; '.join(timestamp_errors)
-    return ExtractRequest(*checked, seconds=tuple(seconds_list)), None
+    image_format = data.get('format') or 'jpg'
+    if image_format not in FRAME_FORMATS:
+        return None, f"format must be one of: {', '.join(FRAME_FORMATS)}"
+    return ExtractRequest(*checked, seconds=tuple(seconds_list), image_format=image_format), None
 
 
 def parse_short_request(data: Optional[Dict[str, Any]]) -> Tuple[Optional[ShortRequest], Optional[str]]:
@@ -115,13 +121,14 @@ def parse_short_request(data: Optional[Dict[str, Any]]) -> Tuple[Optional[ShortR
         duration = parse_duration(data.get('duration', DEFAULT_SHORT_DURATION))
         quality = normalize_quality(data.get('quality'))
         text_overlay = normalize_text_overlay(overlay_request)
+        crop_position = parse_crop_position(data.get('crop_position'))
     except ShortVideoError as error:
         return None, str(error)
     vertical = data.get('vertical_format', False)
     if not isinstance(vertical, bool):
         return None, 'vertical_format must be true or false'
-    return ShortRequest(*checked, start=start, duration=duration, quality=quality,
-                        vertical=vertical, text_overlay=text_overlay), None
+    return ShortRequest(*checked, start=start, duration=duration, quality=quality, vertical=vertical,
+                        text_overlay=text_overlay, crop_position=crop_position), None
 
 
 # -- the work -----------------------------------------------------------------------
@@ -172,7 +179,7 @@ def extract_frames(request: ExtractRequest, record_id: int, reporter) -> Dict[st
         reporter.stage('extract', 'Extracting frames')
         for done, seconds in enumerate(request.seconds):
             reporter.progress(done / len(request.seconds))
-            frame_filename = f"frame_{seconds}s_{uuid.uuid4().hex[:8]}.jpg"
+            frame_filename = f"frame_{seconds}s_{uuid.uuid4().hex[:8]}.{request.image_format}"
             frame_path = folder / frame_filename
             success, frame_error = extractor.extract_frame_at_timestamp(video_path, seconds, str(frame_path))
             if success:
@@ -218,7 +225,7 @@ def render_short(request: ShortRequest, reporter) -> Dict[str, Any]:
         result = create_short(Path(video_path), output_path, start=request.start,
                               duration=request.duration, vertical=request.vertical,
                               quality=request.quality, text_overlay=request.text_overlay,
-                              on_progress=reporter.progress)
+                              on_progress=reporter.progress, crop_position=request.crop_position)
     except ShortVideoError as error:
         raise JobFailed(str(error)) from error
     finally:

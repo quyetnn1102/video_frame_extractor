@@ -63,16 +63,16 @@ Open <http://localhost:5000>. Downloads, frames and shorts are stored in `downlo
 
 **Optional extras**
 
-- *Text overlay on shorts* needs [ImageMagick](https://imagemagick.org/). Without it the short is still created, just without the caption. If MoviePy cannot find ImageMagick, set the `IMAGEMAGICK_BINARY` environment variable to the path of `magick.exe` / `convert`.
+- *Text overlay on shorts* needs [ImageMagick](https://imagemagick.org/). Without it the caption field is hidden (the Dashboard's Setup card says why). If MoviePy cannot find ImageMagick, set the `IMAGEMAGICK_BINARY` environment variable to the path of `magick.exe` / `convert`.
 - *Trending page* needs a YouTube Data API key in `.env`: `YOUTUBE_API_KEY=...`. Without one the page shows a single demo entry.
 
 ## Usage
 
 **Home** (`/`): paste a link and choose **Create short** or **Extract frames**; the link is carried over to that page. Your most recent shorts and a short guide are shown below.
 
-**Extract frames** (`/extract`): paste a video link and enter timestamps, one per line, as seconds (`90`), `MM:SS` (`1:30`) or `H:MM:SS` (`1:02:03`). Seconds must be 00-59 (and minutes too in `H:MM:SS`), a timestamp cannot exceed `MAX_VIDEO_DURATION`, and at most 50 are accepted. The video is deleted after the frames are extracted.
+**Extract frames** (`/extract`): paste a video link and enter timestamps, one per line, as seconds (`90`), `MM:SS` (`1:30`) or `H:MM:SS` (`1:02:03`). Seconds must be 00-59 (and minutes too in `H:MM:SS`), a timestamp cannot exceed `MAX_VIDEO_DURATION`, and at most 50 are accepted. Each line is checked as you type ("3 valid · 1 invalid"), timecodes past the end of the analyzed video are named, and **Sort and remove duplicates** tidies the list. Frames are saved as JPG (smaller) or PNG (every pixel). The video is deleted after the frames are extracted.
 
-**Create a short** (`/create-short`): paste a link, choose the length and an optional start time (`90` or `1:30`; blank starts at the beginning), quality, vertical crop and caption. Wide or tall sources are cropped around the center to 9:16 and scaled to 1080x1920. The link is analyzed first, so a start time or length past the end of the video is caught before anything is downloaded.
+**Create a short** (`/create-short`): paste a link, choose the length and an optional start time (`90` or `1:30`; blank starts at the beginning), quality, vertical crop and caption. Wide or tall sources are cropped to 9:16 and scaled to 1080x1920; for a wide video, drag the outlined area on its thumbnail (or use the arrow keys) to choose which part is kept. Quality sets the bitrate (1, 2 or 5 Mbit/s), not the size. The link is analyzed first, so a start time or length past the end of the video is caught before anything is downloaded. A failed short can be tried again with the same settings.
 
 **Your shorts** (`/shorts`): every short you have made, kept until you delete it. Search titles, sort them, show only Vietsub copies, play one, download it; **More** has Add Vietnamese subtitles, Upload to YouTube (or how to set it up), Copy file name and Delete. Badges say which shorts are Vietsub copies, in use (by subtitles or an upload) or already uploaded.
 
@@ -80,7 +80,7 @@ Open <http://localhost:5000>. Downloads, frames and shorts are stored in `downlo
 
 **Trending** (`/trending`): browse popular YouTube videos by region and category, and send one to Create short or Extract frames. When the list is sample data, the page says why (no API key, a refused key, the daily quota, or YouTube not answering).
 
-**Dashboard** (`/dashboard`): request counts per platform, success rate, extracted frames, and CPU/memory/disk usage. Frame extraction and short creation are recorded; other calls are not.
+**Dashboard** (`/dashboard`): request counts per platform, success rate, extracted frames, and CPU/memory/disk usage. Frame extraction and short creation are recorded; other calls are not. The **Setup** card says what this computer has for the optional parts (Node.js for YouTube, ImageMagick for captions, YouTube upload, the Trending API key, Douyin cookies, the subtitle models).
 
 ## Configuration
 
@@ -154,8 +154,8 @@ All endpoints return JSON (errors as `{"success": false, "error": "..."}`) and r
 | `POST /api/validate-url` `{url}` | Validate a link and fetch title/duration | 30/min |
 | `POST /api/video-info` `{url}` | Video details without downloading (title, length, frame size, platform); a failure gives `reason` (`invalid` or `unreadable`) and the platform's tips | 20/min |
 | `POST /api/test-platform` `{url}` | Platform guidance for a link | 30/min |
-| `POST /api/extract` `{url, timestamps[]}` | Download, extract frames, delete the download | 10/min |
-| `POST /api/create-short` `{url, start_time, duration, quality, vertical_format, text_overlay}` | Create a short | 5/min |
+| `POST /api/extract` `{url, timestamps[], format}` | Download, extract frames (`format`: `jpg`, the default, or `png`), delete the download | 10/min |
+| `POST /api/create-short` `{url, start_time, duration, quality, vertical_format, crop_position, text_overlay}` | Create a short (`crop_position`: where a wide video is cropped, 0 left to 1 right, 0.5 by default) | 5/min |
 | `POST /api/clip-suggestions` `{url, duration}` | Up to 5 moments of a YouTube video worth a short, from its "Most replayed" heatmap and captions (read without downloading the video) | 10/min |
 | `POST /api/jobs/extract` `{url, timestamps[]}` | Same as `/api/extract`, as a background job: answers `202` with the job at once | 10/min |
 | `POST /api/jobs/create-short` (same body as `/api/create-short`) | Same as `/api/create-short`, as a background job | 5/min |

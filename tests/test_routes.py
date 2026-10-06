@@ -990,13 +990,18 @@ class TestPhaseFourRoutes(RouteTestCase):
             live = self.client.get('/api/trending').get_json()
         self.assertEqual((live['sample'], live['reason']), (False, None))
 
-    def test_the_caption_field_says_when_imagemagick_is_missing(self):
-        for available, expected in [(True, 'Shown at the bottom of the clip'), (False, 'Captions need ImageMagick')]:
+    def test_the_caption_field_is_there_only_with_imagemagick_and_setup_says_why(self):
+        for available in (True, False):
             with self.subTest(available=available):
-                with patch.object(app_enhanced, 'text_overlay_available', return_value=available):
-                    page = self.client.get('/create-short').get_data(as_text=True)
-                self.assertIn(expected, page)
-                self.assertEqual('id="overlayText" maxlength="100" autocomplete="off" disabled' in page, not available)
+                with patch.object(app_enhanced, 'text_overlay_available', return_value=available), \
+                        patch('setup_checks.text_overlay_available', return_value=available), \
+                        patch.object(app_enhanced, 'collect_system_info', return_value={}):
+                    create = self.client.get('/create-short').get_data(as_text=True)
+                    dashboard = self.client.get('/dashboard').get_data(as_text=True)
+                self.assertEqual('id="overlayText"' in create, available)
+                self.assertNotIn('ImageMagick', create, 'installation steps belong to the Setup card')
+                self.assertIn('Captions on shorts', dashboard)
+                self.assertEqual('Captions need ImageMagick' in dashboard, not available)
 
 
 class TestClipSuggestions(RouteTestCase):

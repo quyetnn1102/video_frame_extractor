@@ -52,13 +52,99 @@
 
     // ---- crop diagram -----------------------------------------------------
 
+    // ---- crop: which part of a wide picture the 9:16 short keeps -------------------
+
+    const CROP_STEP = 0.05;
+    const CROP_PAGE_STEP = 0.25;
+    let cropPosition = 0.5;   // 0 is the left edge, 1 the right (crop_position on the server)
+    let croppedVideoUrl = '';
+
+    function analyzedVideo() {
+        const state = source ? source.state() : null;
+        return state && state.status === 'ready' ? state.video : null;
+    }
+
+    // The share of the width a 9:16 window covers, or null when nothing is cut from the sides
+    function cropShare(video) {
+        const width = Number(video && video.width);
+        const height = Number(video && video.height);
+        if (!(width > 0 && height > 0)) return null;
+        const share = (height * 9 / 16) / width;
+        return share < 1 ? share : null;
+    }
+
+    function positionText() {
+        const percent = Math.round(cropPosition * 100);
+        const side = percent <= 33 ? 'Left' : percent >= 67 ? 'Right' : 'Center';
+        return `${side} (${percent}% from the left)`;
+    }
+
+    function cropCaption(vertical, video, movable) {
+        if (!vertical) return 'The whole picture is kept. Nothing is cropped.';
+        if (movable) return 'Drag the outlined area, or use the arrow keys, to choose what the short keeps.';
+        if (video && video.width && video.height) return 'This video is not wider than 9:16, so nothing is cut from the sides.';
+        return 'The outlined area is what you keep. Analyze a link to choose which part of a wide video.';
+    }
+
     function updateCropDiagram() {
         const vertical = $('verticalFormat').checked;
+        const video = analyzedVideo();
+        const share = vertical ? cropShare(video) : null;
+        const movable = share !== null;
+        const thumbnail = video && /^https:\/\//.test(video.thumbnail || '') ? video.thumbnail : '';
+
         $('cropFigure').classList.toggle('is-full', !vertical);
-        $('cropCaption').textContent = vertical
-            ? 'The outlined area is what you keep. Wide videos are cropped around the center.'
-            : 'The whole picture is kept. Nothing is cropped.';
+        $('cropFigure').classList.toggle('is-movable', movable);
+        $('cropThumb').hidden = !thumbnail;
+        if (thumbnail && $('cropThumb').src !== thumbnail) $('cropThumb').src = thumbnail;
+        $('cropFrame').style.aspectRatio = video && video.width && video.height ? `${video.width} / ${video.height}` : '';
+
+        const keep = $('cropKeep');
+        keep.tabIndex = movable ? 0 : -1;
+        if (movable) keep.removeAttribute('aria-disabled');
+        else keep.setAttribute('aria-disabled', 'true');
+        keep.style.width = movable ? `${share * 100}%` : '';
+        keep.style.left = movable ? `${cropPosition * (1 - share) * 100}%` : '';
+        keep.setAttribute('aria-valuenow', String(Math.round(cropPosition * 100)));
+        keep.setAttribute('aria-valuetext', positionText());
+        $('cropCaption').textContent = cropCaption(vertical, video, movable);
     }
+
+    function moveCrop(position) {
+        cropPosition = Math.min(1, Math.max(0, position));
+        updateCropDiagram();
+    }
+
+    $('cropKeep').addEventListener('keydown', (event) => {
+        if (!$('cropFigure').classList.contains('is-movable')) return;
+        const moves = {
+            ArrowLeft: cropPosition - CROP_STEP, ArrowDown: cropPosition - CROP_STEP,
+            ArrowRight: cropPosition + CROP_STEP, ArrowUp: cropPosition + CROP_STEP,
+            PageDown: cropPosition - CROP_PAGE_STEP, PageUp: cropPosition + CROP_PAGE_STEP, Home: 0, End: 1,
+        };
+        if (!(event.key in moves)) return;
+        event.preventDefault();
+        moveCrop(moves[event.key]);
+    });
+
+    // Dragging: the window follows the pointer, centred on it
+    function cropFromPointer(event) {
+        const share = cropShare(analyzedVideo());
+        if (share === null) return;
+        const frame = $('cropFrame').getBoundingClientRect();
+        const keepWidth = share * frame.width;
+        moveCrop((event.clientX - frame.left - keepWidth / 2) / (frame.width - keepWidth));
+    }
+
+    $('cropFrame').addEventListener('pointerdown', (event) => {
+        if (!$('cropFigure').classList.contains('is-movable')) return;
+        $('cropFrame').setPointerCapture(event.pointerId);
+        cropFromPointer(event);
+        $('cropKeep').focus({ preventScroll: true });
+    });
+    $('cropFrame').addEventListener('pointermove', (event) => {
+        if ($('cropFrame').hasPointerCapture(event.pointerId)) cropFromPointer(event);
+    });
 
     $('verticalFormat').addEventListener('change', updateCropDiagram);
 
@@ -125,8 +211,13 @@
     }
 
     function onSourceChange(state) {
+        if (state.url !== croppedVideoUrl) {  // another video: its crop starts in the center
+            croppedVideoUrl = state.url;
+            cropPosition = 0.5;
+        }
         updateSuggest(state);
         updateTiming();
+        updateCropDiagram();
     }
 
     $('startTime').addEventListener('input', updateTiming);
@@ -297,9 +388,12 @@
             showNewShort(job.result);
             return;
         }
-        status.replaceChildren(job.state === 'cancelled'
-            ? notice('info', 'Cancelled.', 'No short was made.')
-            : notice('error', 'Could not create the short.', job.error || 'Try again in a moment.'));
+        if (job.state === 'cancelled') {
+            status.replaceChildren(notice('info', 'Cancelled.', 'No short was made.'));
+        } else {
+            status.replaceChildren(withRetry(notice('error', 'Could not create the short.',
+                job.error || 'Try again in a moment.')));
+        }
         $('createSubmit').focus();  // the progress card, and the focus in it, is gone
     }
 
@@ -329,17 +423,39 @@
             quality: $('quality').value,
             vertical_format: $('verticalFormat').checked,
         };
-        const overlayText = $('overlayText').value.trim();
+        // The field exists only where captions can be drawn (ImageMagick)
+        const overlayText = $('overlayText') ? $('overlayText').value.trim() : '';
         if (overlayText) body.text_overlay = { text: overlayText };
+        if (body.vertical_format) body.crop_position = Number(cropPosition.toFixed(3));
+        startJob(body);
+    });
 
+    let lastRequest = null;   // what "Try again" sends
+
+    async function startJob(body) {
+        lastRequest = body;
+        const status = $('formStatus');
+        status.replaceChildren();
         setRendering(true);
         try {
             followJob(await jobs.start('/api/jobs/create-short', body));
         } catch (error) {
             setRendering(false);
-            status.replaceChildren(notice('error', 'Could not start.', error.message));
+            status.replaceChildren(withRetry(notice('error', 'Could not start.', error.message)));
         }
-    });
+    }
+
+    // The same short again, with the settings it was asked with
+    function withRetry(message) {
+        if (!lastRequest) return message;
+        const retry = element('button', 'btn btn-sm notice-action', 'Try again');
+        retry.type = 'button';
+        retry.addEventListener('click', () => {
+            if (!rendering) startJob(lastRequest);
+        });
+        message.append(retry);
+        return message;
+    }
 
     // A short still being made when this page was (re)opened: follow it. Finished ones are
     // in Your shorts, which is read from disk.

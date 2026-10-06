@@ -43,12 +43,23 @@
                             <textarea class="timecodes" id="timestamps" rows="5" required spellcheck="false"
                                       autocomplete="off" placeholder="0:05&#10;0:30&#10;1:15"></textarea>
                             <p class="hint">One per line, as 90, 1:30 or 1:02:03. Up to 50.</p>
+                            <div class="timecode-tools">
+                                <p class="hint" id="timecodeSummary" aria-live="polite"></p>
+                                <button type="button" class="btn btn-sm btn-quiet" id="sortTimecodesBtn">Sort and remove duplicates</button>
+                            </div>
                         </div>
 
                         <div class="go stack">
                             <div id="formStatus" role="alert"></div>
                             <div class="actions">
                                 <button type="submit" class="btn btn-primary" id="extractSubmit">Extract frames</button>
+                                <label class="format-choice" for="frameFormat">
+                                    Save as
+                                    <select id="frameFormat">
+                                        <option value="jpg" selected>JPG (smaller files)</option>
+                                        <option value="png">PNG (every pixel kept)</option>
+                                    </select>
+                                </label>
                             </div>
                             <div class="job-panel" id="jobPanel"></div>
                         </div>

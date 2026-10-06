@@ -104,6 +104,19 @@ class TestVerticalCrop(unittest.TestCase):
     def test_wide_sources_are_cropped_at_the_sides(self):
         self.assertEqual(compute_vertical_crop(1920, 1080), (656, 0, 1263, 1080))
 
+    def test_the_kept_part_of_a_wide_source_can_be_chosen(self):
+        self.assertEqual(compute_vertical_crop(1920, 1080, position=0), (0, 0, 607, 1080))
+        self.assertEqual(compute_vertical_crop(1920, 1080, position=1), (1313, 0, 1920, 1080))
+        self.assertEqual(compute_vertical_crop(1920, 1080, position=5), (1313, 0, 1920, 1080), 'kept in the frame')
+
+    def test_the_crop_position_is_checked(self):
+        from short_video import parse_crop_position
+        self.assertEqual(parse_crop_position(None), 0.5)
+        self.assertEqual(parse_crop_position('0.25'), 0.25)
+        for bad in (-0.1, 1.5, 'left', True, float('nan')):
+            with self.subTest(value=bad), self.assertRaises(ShortVideoError):
+                parse_crop_position(bad)
+
     def test_tall_sources_are_cropped_top_and_bottom(self):
         self.assertEqual(compute_vertical_crop(400, 1000), (0, 144, 400, 855))
 

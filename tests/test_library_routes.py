@@ -101,6 +101,33 @@ class TestFrameWarnings(RouteTestCase):
         self.assertTrue(raised.exception.message.endswith('and 7 more'))
 
 
+class TestPhaseFiveRequests(RouteTestCase):
+    def test_frames_can_be_png_and_are_served_and_zipped(self):
+        from media_jobs import parse_extract_request
+        request, error = parse_extract_request({'url': VALID_URL, 'timestamps': ['5'], 'format': 'png'})
+        self.assertEqual((request.image_format, error), ('png', None))
+        self.assertIn('format must be one of', parse_extract_request(
+            {'url': VALID_URL, 'timestamps': ['5'], 'format': 'gif'})[1])
+        (self.frames / 'frame_5s_1a2b3c4d.png').write_bytes(b'png')
+        self.assertEqual(self.client.get('/frames/frame_5s_1a2b3c4d.png').status_code, 200)
+        archive = self.client.post('/api/frames/archive', json={'filenames': ['frame_5s_1a2b3c4d.png']})
+        self.assertEqual(archive.status_code, 200)
+
+    def test_the_crop_position_reaches_the_render(self):
+        from media_jobs import parse_short_request
+        request, _ = parse_short_request({'url': VALID_URL, 'vertical_format': True, 'crop_position': 0.2})
+        self.assertEqual(request.crop_position, 0.2)
+        self.assertIn('Crop position', parse_short_request({'url': VALID_URL, 'crop_position': 2})[1])
+
+    def test_quality_labels_match_the_bitrates_the_server_uses(self):
+        from short_video import QUALITY_BITRATES
+        page = self.client.get('/create-short').get_data(as_text=True)
+        for name, bitrate in QUALITY_BITRATES.items():
+            megabits = int(bitrate.rstrip('k')) // 1000
+            with self.subTest(quality=name):
+                self.assertRegex(page, rf'<option value="{name}"[^>]*>[^<]*{megabits} Mbit/s')
+
+
 class TestPageShortcuts(RouteTestCase):
     def test_trending_offers_every_category_the_server_knows(self):
         from trending import VIDEO_CATEGORIES

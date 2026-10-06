@@ -5,6 +5,7 @@ A request starts a job and returns at once; the page polls the job for its stage
 and can cancel it. Jobs live in memory only (one process: deploy.py runs a single worker), so a
 restart forgets them. The files a finished job produced stay on disk and are listed as before.
 """
+import itertools
 import queue
 import threading
 import time
@@ -54,6 +55,7 @@ class Job:
     finished: Optional[float] = None
     cancel_requested: threading.Event = field(default_factory=threading.Event)
     subject: Optional[str] = None  # the file the job works on (a short's name), if any
+    order: int = 0                 # submission order: two jobs can share a clock tick
 
     def to_dict(self) -> Dict[str, Any]:
         """What the browser sees."""
@@ -129,6 +131,7 @@ class JobRegistry:
         self._max_workers = max_workers
         self._max_unfinished = max_unfinished
         self._queue: 'queue.Queue[Optional[Tuple[Job, Callable]]]' = queue.Queue()
+        self._submitted = itertools.count()
         for number in range(max_workers):
             threading.Thread(target=self._worker, name=f'job-{number + 1}', daemon=True).start()
 
@@ -141,7 +144,8 @@ class JobRegistry:
         `on_cancel_while_queued` runs when the job is cancelled before it started (the work, which
         would normally record the outcome, then never runs). Raises JobQueueFull.
         """
-        job = Job(id=uuid.uuid4().hex, kind=kind, stages=tuple(stages), subject=subject)
+        job = Job(id=uuid.uuid4().hex, kind=kind, stages=tuple(stages), subject=subject,
+                  order=next(self._submitted))
         with self._lock:
             self._prune()
             unfinished = sum(1 for other in self._jobs.values() if other.state not in FINISHED_STATES)
@@ -168,7 +172,7 @@ class JobRegistry:
         """Newest first."""
         with self._lock:
             self._prune()
-            return sorted(self._jobs.values(), key=lambda job: job.created, reverse=True)
+            return sorted(self._jobs.values(), key=lambda job: job.order, reverse=True)
 
     def snapshot(self, job_id: str) -> Optional[Dict[str, Any]]:
         """The job as the browser sees it, read in one go (never half of an update)."""
@@ -180,7 +184,7 @@ class JobRegistry:
         """Every job as the browser sees it, newest first."""
         with self._lock:
             self._prune()
-            return [job.to_dict() for job in sorted(self._jobs.values(), key=lambda job: job.created, reverse=True)]
+            return [job.to_dict() for job in sorted(self._jobs.values(), key=lambda job: job.order, reverse=True)]
 
     def cancel(self, job_id: str) -> Optional[Dict[str, Any]]:
         """
@@ -259,6 +263,6 @@ class JobRegistry:
         for job_id in expired:
             del self._jobs[job_id]
         finished = sorted((job for job in self._jobs.values() if job.state in FINISHED_STATES),
-                          key=lambda job: job.created)
+                          key=lambda job: job.order)
         while len(self._jobs) >= MAX_KEPT_JOBS and finished:
             del self._jobs[finished.pop(0).id]

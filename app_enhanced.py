@@ -37,6 +37,7 @@ from media_jobs import (DEFAULT_SHORT_DURATION, EXTRACT_STAGES, SHORT_STAGES, SU
 from short_video import (MAX_SHORT_DURATION, MIN_SHORT_DURATION, ShortVideoError, parse_duration,
                          remove_partial_renders, text_overlay_available)
 from platform_guidance import PLATFORM_GUIDANCE, PLATFORM_NAMES
+from setup_checks import setup_checks
 from trending import VIDEO_CATEGORIES, fetch_trending
 from validators import MAX_TIMESTAMPS, resolve_in_folder, validator
 from video_processor import extractor, javascript_runtime_available
@@ -50,6 +51,7 @@ CROSS_SITE_VALUES = ('cross-site', 'same-site')
 JOB_ID_PATTERN = re.compile(r'[0-9a-f]{32}')
 RECENT_REQUESTS_SHOWN = 10
 MAX_TRENDING_RESULTS = 50
+FRAME_EXTENSIONS = tuple(f'.{name}' for name in media_jobs.FRAME_FORMATS)
 
 # One registry per process: deploy.py runs a single worker, so every request sees the same jobs
 job_registry = JobRegistry(max_workers=get_config().MAX_CONCURRENT_JOBS)
@@ -279,11 +281,13 @@ def create_app() -> Flask:
             return render_template('dashboard.html', analytics=get_analytics(),
                                    system_info=system_info,
                                    recent_requests=get_recent_requests(limit=RECENT_REQUESTS_SHOWN),
-                                   storage=storage_usage(config), cleanup_hours=config.AUTO_CLEANUP_HOURS)
+                                   storage=storage_usage(config), cleanup_hours=config.AUTO_CLEANUP_HOURS,
+                                   setup=setup_checks())
         except Exception as error:  # the page should still load without metrics
             app_logger.error(f"Dashboard error ({type(error).__name__})")
             return render_template('dashboard.html', analytics={}, system_info={},
-                                   recent_requests=[], storage={}, cleanup_hours=config.AUTO_CLEANUP_HOURS)
+                                   recent_requests=[], storage={}, cleanup_hours=config.AUTO_CLEANUP_HOURS,
+                                   setup=[])
 
     # -- API: validation and information --------------------------------------
 
@@ -432,7 +436,7 @@ def create_app() -> Flask:
     @app.route('/frames/<filename>')
     @limiter.exempt
     def serve_frame(filename):
-        path = resolve_in_folder(config.FRAMES_FOLDER, filename, ('.jpg',))
+        path = resolve_in_folder(config.FRAMES_FOLDER, filename, FRAME_EXTENSIONS)
         if path is None:
             return json_error('Not found', 404)
         return send_from_directory(config.FRAMES_FOLDER, path.name)
@@ -446,12 +450,12 @@ def create_app() -> Flask:
         if (not isinstance(names, list) or not names or len(names) > MAX_TIMESTAMPS
                 or not all(isinstance(name, str) for name in names)):
             return json_error('filenames must be a list of frame file names', 400)
-        paths = [path for path in (resolve_in_folder(config.FRAMES_FOLDER, name, ('.jpg',))
+        paths = [path for path in (resolve_in_folder(config.FRAMES_FOLDER, name, FRAME_EXTENSIONS)
                                    for name in dict.fromkeys(names)) if path is not None]
         if not paths:
             return json_error('These frames are no longer on disk', 404)
         buffer = io.BytesIO()
-        with zipfile.ZipFile(buffer, 'w', zipfile.ZIP_STORED) as archive:  # JPEGs do not compress further
+        with zipfile.ZipFile(buffer, 'w', zipfile.ZIP_STORED) as archive:  # JPEG and PNG are compressed already
             for path in paths:
                 try:
                     archive.write(path, arcname=path.name)
