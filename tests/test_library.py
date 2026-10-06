@@ -28,7 +28,7 @@ class TestListShorts(unittest.TestCase):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         self.folder = Path(tmp.name)
-        patcher = patch.object(library, 'video_duration', return_value=12.5)
+        patcher = patch.object(library, 'read_media_info', return_value=library.MediaInfo(12.5, 1080, 1920))
         patcher.start()
         self.addCleanup(patcher.stop)
 
@@ -69,6 +69,22 @@ class TestListShorts(unittest.TestCase):
 
     def test_a_missing_folder_is_an_empty_library(self):
         self.assertEqual(library.list_shorts(self.folder / 'missing'), [])
+
+    def test_pages_go_through_every_short(self):
+        for index in range(5):
+            self.make(f'Clip{index}_1a2b3c4d_short.mp4', age_seconds=index)
+        pages = [library.list_shorts(self.folder, limit=2, offset=offset) for offset in (0, 2, 4)]
+        names = [item['filename'] for page in pages for item in page]
+        self.assertEqual(names, [f'Clip{index}_1a2b3c4d_short.mp4' for index in range(5)])
+        self.assertEqual(library.count_shorts(self.folder), 5)
+
+    def test_each_short_is_read_once_while_it_is_unchanged(self):
+        self.make('Clip_1a2b3c4d_short.mp4')
+        library.list_shorts(self.folder)
+        library.list_shorts(self.folder)
+        self.assertEqual(library.read_media_info.call_count, 1)
+        item = library.list_shorts(self.folder)[0]
+        self.assertEqual((item['width'], item['height']), (1080, 1920))
 
 
 class TestPosters(unittest.TestCase):

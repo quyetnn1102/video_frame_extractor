@@ -136,14 +136,22 @@
         $('updatedAt').textContent = 'Updated ' + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     }
 
+    // Why the list is not live (data.reason from the server), and what would fix it
+    const SAMPLE_REASONS = {
+        no_key: ['No YouTube API key.',
+            'These are sample videos. Add YOUTUBE_API_KEY to the .env file (see the README) and restart the app.', false],
+        bad_key: ['YouTube refused the API key.',
+            'These are sample videos. Check YOUTUBE_API_KEY in the .env file and that the YouTube Data API is ' +
+            'enabled for it, then restart the app.', false],
+        quota: ["Today's YouTube API quota is used up.",
+            'These are sample videos. The quota resets at midnight Pacific time; try again after that.', false],
+        unavailable: ['YouTube did not answer.', 'These are sample videos, not what is trending now.', true],
+    };
+
     function explainSample(data) {
         if (!data.sample) return;
-        if (data.api_key_configured) {
-            showMessage('warn', 'YouTube did not answer.', 'These are sample videos, not what is trending now.', true);
-        } else {
-            showMessage('warn', 'No YouTube API key.',
-                'These are sample videos. Add YOUTUBE_API_KEY to the .env file (see the README) and restart the app.');
-        }
+        const [lead, text, canRetry] = SAMPLE_REASONS[data.reason] || SAMPLE_REASONS.unavailable;
+        showMessage('warn', lead, text, canRetry);
     }
 
     function loadTrendingVideos() {
@@ -198,7 +206,8 @@
 
     $('queryForm').addEventListener('submit', (event) => {
         event.preventDefault();
-        loadTrendingVideos();
+        // Refresh during a load would only ask YouTube (and spend quota) for the same list again
+        if (!loading) loadTrendingVideos();
     });
     $('categorySelect').addEventListener('change', loadTrendingVideos);
     $('regionSelect').addEventListener('change', loadTrendingVideos);

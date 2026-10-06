@@ -23,11 +23,12 @@ from short_video import (ShortVideoError, create_short, normalize_quality, norma
                          parse_duration, parse_start_time)
 from subtitles import Cue, SubtitleError, render_subtitled, transcribe
 from translation import TranslationError, language_name, translate_to_vietnamese
-from validators import validator
+from validators import format_clock, validator
 from video_processor import extractor
 
 MAX_FRAME_FILENAME_TITLE = 50
 DEFAULT_SHORT_DURATION = 30
+MAX_ERRORS_LISTED = 3  # a job that fails on every timecode names this many
 VIETSUB_SUFFIX = ' Vietsub'  # what Vietnamese viewers call a video with Vietnamese subtitles
 
 EXTRACT_STAGES = ('download', 'extract')
@@ -151,10 +152,13 @@ def run_recorded(record_id: int, crash_message: str, work: Callable[[], Dict[str
     return result
 
 
-def download_source(url: str, reporter) -> Tuple[str, Optional[str]]:
-    """(path, title) of the downloaded video; raises JobFailed with the reason."""
+def download_source(url: str, reporter, start: float = 0.0) -> Tuple[str, Optional[str]]:
+    """
+    (path, title) of the downloaded video; raises JobFailed with the reason. With `start`, a
+    video that ends before it is refused before it is downloaded.
+    """
     reporter.stage('download', 'Downloading the video')
-    video_path, title, error = extractor.download_video(url, on_progress=reporter.progress)
+    video_path, title, error = extractor.download_video(url, on_progress=reporter.progress, start=start)
     if not video_path:
         raise JobFailed(error or 'Download failed')
     return video_path, title
@@ -177,7 +181,7 @@ def extract_frames(request: ExtractRequest, record_id: int, reporter) -> Dict[st
                                'url': f'/frames/{frame_filename}'})
                 db_manager.log_extracted_frame(record_id, seconds, frame_filename, file_size_or_none(frame_path))
             else:
-                errors.append(f"Timestamp {seconds}s: {frame_error}")
+                errors.append(f"{format_clock(seconds)}: {frame_error}")
         reporter.progress(1)
     except JobCancelled:
         # "Cancelled, nothing was extracted": the frames written so far go too
@@ -188,7 +192,9 @@ def extract_frames(request: ExtractRequest, record_id: int, reporter) -> Dict[st
         remove_quietly(video_path)
 
     if not frames:
-        raise JobFailed('Frame extraction failed: ' + '; '.join(errors))
+        listed = '; '.join(errors[:MAX_ERRORS_LISTED])
+        more = len(errors) - MAX_ERRORS_LISTED
+        raise JobFailed('No frames could be extracted. ' + listed + (f'; and {more} more' if more > 0 else ''))
     # 'url' lets a page that picks up a finished job remember which link the frames came from
     result = {'success': True, 'title': title, 'frames': frames, 'platform': request.platform,
               'url': request.url}
@@ -205,7 +211,7 @@ def short_file_name(video_title: Optional[str]) -> str:
 
 
 def render_short(request: ShortRequest, reporter) -> Dict[str, Any]:
-    video_path, video_title = download_source(request.url, reporter)
+    video_path, video_title = download_source(request.url, reporter, start=request.start)
     output_name = short_file_name(video_title)
     output_path = get_config().SHORTS_FOLDER / output_name
     try:

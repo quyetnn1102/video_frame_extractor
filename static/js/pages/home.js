@@ -6,7 +6,7 @@
     const $ = (id) => document.getElementById(id);
 
     // Titles come from other sites: everything is built with textContent, never HTML strings.
-    const { element, relativeTime, isLink } = ui;
+    const { element, notice, relativeTime, isLink } = ui;
 
     // ---- paste a link, then choose what to do with it --------------------------
 
@@ -73,9 +73,20 @@
         return entry;
     }
 
+    // A failed load is said as such: "No shorts yet" would wrongly suggest they are gone
+    function showLoadError() {
+        const message = notice('error', 'Could not load your shorts.', 'They are still on disk.');
+        const retry = element('button', 'btn btn-sm notice-action', 'Try again');
+        retry.type = 'button';
+        retry.addEventListener('click', loadRecent);
+        message.append(retry);
+        $('recentStatus').replaceChildren(message);
+    }
+
     async function loadRecent() {
+        $('recentStatus').replaceChildren();
         try {
-            const response = await fetch('/api/shorts');
+            const response = await fetch('/api/shorts?limit=' + MAX_RECENT);
             const data = await response.json();
             if (!response.ok || !data.success) throw new Error(data.error || 'Request failed');
             const items = data.shorts.slice(0, MAX_RECENT);
@@ -84,7 +95,7 @@
             $('startSection').hidden = items.length > 0;  // the steps are for a first visit
         } catch (error) {
             console.error('Could not load the recent shorts:', error);
-            $('recentEmpty').hidden = false;
+            showLoadError();
         }
     }
 

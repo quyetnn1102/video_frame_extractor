@@ -330,6 +330,20 @@ class TestDownloadWithYtdlp(unittest.TestCase):
         path, title, error = self.run_download(files=())
         self.assertEqual((path, title, error), (None, None, video_processor.NOT_DOWNLOADED_MESSAGE))
 
+    def test_a_start_past_the_end_is_named_before_anything_is_downloaded(self):
+        factory = lambda params: FakeYoutubeDL(params, files=(), info={'title': 'x', 'duration': 130})
+        with patch.object(video_processor.yt_dlp, 'YoutubeDL', side_effect=factory):
+            path, _, error = download_with_ytdlp('https://example.test/v', {'format': 'best'}, self.folder,
+                                                 start=150)
+        self.assertIsNone(path)
+        self.assertIn('start time (2:30) is past the end of the video (2:10)', error)
+
+    def test_the_start_filter_lets_through_videos_that_are_long_enough(self):
+        accepts = video_processor.duration_filter(3600, start=90)
+        self.assertIsNone(accepts({'duration': 120, 'is_live': False}, incomplete=False))
+        self.assertIsNotNone(accepts({'duration': 60, 'is_live': False}, incomplete=False))
+        self.assertIsNone(accepts({'is_live': False}, incomplete=False), 'an unknown length is not refused')
+
     def test_missing_video_information_is_reported(self):
         path, _, error = self.run_download(files=(), info={})
         self.assertIsNone(path)

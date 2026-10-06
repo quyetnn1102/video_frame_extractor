@@ -1,9 +1,12 @@
-# VideoExtract
+# Tallframe
 
-A local web app that downloads a video from a link, extracts still frames at the timestamps you choose, and cuts short vertical clips (9:16) that you can download or upload to your own YouTube channel.
+**Turn videos into short clips and frames.**
+
+A local web app (the repository is still called `video_frame_extractor`) that downloads a video from a link, extracts still frames at the timestamps you choose, and cuts short vertical clips (9:16) that you can download or upload to your own YouTube channel.
 
 - **Frame extraction**: paste a link and a list of timestamps, get a JPEG per timestamp.
 - **Short videos**: pick a start time and length (1-300 s), optionally crop to 9:16 and add a caption.
+- **Vietnamese subtitles** (offline): a copy of a short with its speech subtitled in Vietnamese.
 - **YouTube upload** (optional): upload a finished short to your own channel, private by default.
 - **Trending page** (optional): the most popular YouTube videos, via the official YouTube Data API.
 - **Dashboard**: request history and system load.
@@ -161,12 +164,12 @@ All endpoints return JSON (errors as `{"success": false, "error": "..."}`) and r
 | `GET /frames/<file>`, `GET /shorts/<file>` | Serve generated files | default |
 | `GET /shorts/posters/<file>` | A short's thumbnail (made when the short is created, or at startup for older ones) | none (file) |
 | `POST /api/frames/archive` `{filenames[]}` | The named frames (up to 50) as one `frames.zip` | 10/min |
-| `GET /api/shorts` | Earlier shorts in `generated_shorts/`, newest first (the Create short page shows them again after a refresh) | default |
-| `POST /api/shorts/delete` `{filename}` | Delete a short by file name | 30/min |
+| `GET /api/shorts?offset=&limit=` | A page of the shorts in `generated_shorts/`, newest first, with `total`; each short says whether a job or upload is using it (`busy`) and why YouTube would refuse it (`upload_problem`) | default |
+| `POST /api/shorts/delete` `{filename}` | Delete a short by file name (`409` while it is in use) | 30/min |
 | `POST /api/cleanup` | Delete files older than `AUTO_CLEANUP_HOURS` | 5/min |
-| `GET /api/trending?region=&category=&max_results=` | Popular YouTube videos | default |
+| `GET /api/trending?region=&category=&max_results=` | Popular YouTube videos; `reason` says why when they are sample data (`no_key`, `bad_key`, `quota`, `unavailable`) or none (`empty`) | default |
 | `GET /api/video-categories` | Category list | default |
-| `GET /api/youtube-auth` | Sign-in state only (safe to poll) | 120/min |
+| `GET /api/youtube-auth` | Sign-in state, and whether upload is set up (`configured`); safe to poll | 120/min |
 | `POST /api/youtube-auth/start` | Begin sign-in; returns the Google consent URL | 20/min |
 | `GET /oauth2callback` | Google redirects back here after sign-in | 10/min |
 | `POST /api/upload-to-youtube` `{filename, title, description, tags, privacy}` | Upload a short from `generated_shorts/` by file name | 5/min |

@@ -80,6 +80,14 @@ def resolve_in_folder(folder: Path, filename: str, extensions: Tuple[str, ...]) 
     return candidate
 
 
+def format_clock(seconds: float) -> str:
+    """Seconds as the page shows them: 1:25, or 1:02:03 from an hour."""
+    total = max(0, int(round(seconds)))
+    hours, rest = divmod(total, 3600)
+    minutes, secs = divmod(rest, 60)
+    return f"{hours}:{minutes:02d}:{secs:02d}" if hours else f"{minutes}:{secs:02d}"
+
+
 class SecurityValidator:
     """Comprehensive input validation and security checks"""
 

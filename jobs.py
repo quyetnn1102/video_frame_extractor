@@ -11,7 +11,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple
 
 from logger import app_logger
 
@@ -53,6 +53,7 @@ class Job:
     started: Optional[float] = None
     finished: Optional[float] = None
     cancel_requested: threading.Event = field(default_factory=threading.Event)
+    subject: Optional[str] = None  # the file the job works on (a short's name), if any
 
     def to_dict(self) -> Dict[str, Any]:
         """What the browser sees."""
@@ -70,6 +71,7 @@ class Job:
             'error': self.error,
             'created': datetime.fromtimestamp(self.created, timezone.utc).isoformat(),
             'elapsed_seconds': round(end - (self.started or self.created), 1),
+            'subject': self.subject,
         }
 
 
@@ -132,13 +134,14 @@ class JobRegistry:
 
     def submit(self, kind: str, stages: Sequence[str],
                work: Callable[[JobReporter], Dict[str, Any]],
-               on_cancel_while_queued: Optional[Callable[[], None]] = None) -> Job:
+               on_cancel_while_queued: Optional[Callable[[], None]] = None,
+               subject: Optional[str] = None) -> Job:
         """
         Queues `work`; it returns the job's result or raises JobFailed / JobCancelled.
         `on_cancel_while_queued` runs when the job is cancelled before it started (the work, which
         would normally record the outcome, then never runs). Raises JobQueueFull.
         """
-        job = Job(id=uuid.uuid4().hex, kind=kind, stages=tuple(stages))
+        job = Job(id=uuid.uuid4().hex, kind=kind, stages=tuple(stages), subject=subject)
         with self._lock:
             self._prune()
             unfinished = sum(1 for other in self._jobs.values() if other.state not in FINISHED_STATES)
@@ -150,6 +153,12 @@ class JobRegistry:
                 self._on_cancel_while_queued[job.id] = on_cancel_while_queued
         self._queue.put((job, work))
         return job
+
+    def active_subjects(self) -> Set[str]:
+        """The files that queued or running jobs work on."""
+        with self._lock:
+            return {job.subject for job in self._jobs.values()
+                    if job.subject and job.state not in FINISHED_STATES}
 
     def get(self, job_id: str) -> Optional[Job]:
         with self._lock:

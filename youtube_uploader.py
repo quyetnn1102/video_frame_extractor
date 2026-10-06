@@ -34,6 +34,7 @@ SHORTS_TAG = "#Shorts"
 DEFAULT_TITLE = "Short video"
 DEFAULT_TAGS = ["Shorts"]
 AUTH_TIMEOUT_SECONDS = 600
+SQUARE_TOLERANCE = 0.1  # an aspect ratio this close to 1 counts as square
 UPLOAD_RETRYABLE_STATUSES = (500, 502, 503, 504)
 UPLOAD_MAX_RETRIES = 3
 QUOTA_DOCS_URL = "https://developers.google.com/youtube/v3/determine_quota_cost"
@@ -111,6 +112,10 @@ class YouTubeUploader:
         self._sleep = time.sleep
 
     # -- authentication -----------------------------------------------------
+
+    def is_configured(self) -> bool:
+        """True when the Google API client file is there, so a sign-in can start at all."""
+        return self.client_secrets_file.is_file()
 
     def is_authenticated(self) -> bool:
         """True when saved credentials are valid (refreshing them when needed)."""
@@ -359,20 +364,32 @@ class YouTubeUploader:
             capture.release()
 
         duration = frame_count / fps if fps > 0 else 0
-        if duration > self.SHORTS_MAX_DURATION:
-            return False, f"Video too long: {duration:.1f}s (max {self.SHORTS_MAX_DURATION}s)"
-
+        problem = shorts_problem(duration, width, height)
+        if problem:
+            return False, problem
         aspect_ratio = width / height if height > 0 else 0
-        is_vertical = height > width
-        is_square = abs(aspect_ratio - 1.0) < 0.1
-        if not (is_vertical or is_square):
-            return False, f"Invalid aspect ratio: {aspect_ratio:.2f} (should be vertical or square)"
 
         file_size = os.path.getsize(video_path)
         if file_size > self.SHORTS_MAX_FILE_BYTES:
             return False, f"File too large: {file_size / (1024 * 1024):.1f}MB (max 2GB)"
 
         return True, f"Valid YouTube Short: {duration:.1f}s, {width}x{height}"
+
+
+def shorts_problem(duration: Optional[float], width: Optional[int], height: Optional[int]) -> Optional[str]:
+    """
+    Why a video cannot be a YouTube Short (60 s at most, vertical or square), or None.
+    Unknown values are not held against it: the upload checks the file again.
+    """
+    if duration and duration > YouTubeUploader.SHORTS_MAX_DURATION:
+        return (f"Video too long: {duration:.1f}s (max {YouTubeUploader.SHORTS_MAX_DURATION}s). "
+                "Make a short of 60 seconds or less to upload it.")
+    if width and height:
+        aspect_ratio = width / height
+        if not (height > width or abs(aspect_ratio - 1.0) < SQUARE_TOLERANCE):
+            return (f"Invalid aspect ratio: {aspect_ratio:.2f} (should be vertical or square). "
+                    "Make the short with the vertical 9:16 crop to upload it.")
+    return None
 
 
 # Global uploader instance

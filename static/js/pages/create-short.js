@@ -528,7 +528,7 @@
         Object.assign(title, { id: 'uploadTitle', type: 'text', maxLength: UPLOAD_TITLE_LIMIT, value: item.title || '' });
         const description = element('textarea');
         Object.assign(description, { id: 'uploadDescription', rows: 3, maxLength: UPLOAD_DESCRIPTION_LIMIT,
-                                     value: 'Created with VideoExtract' });
+                                     value: 'Created with Tallframe' });
         const privacy = element('select');
         privacy.id = 'uploadPrivacy';
         [['private', 'Private: only you'], ['unlisted', 'Unlisted: anyone with the link'],

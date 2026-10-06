@@ -396,5 +396,15 @@ class TestQuotaInfo(UploaderTestCase):
         self.assertNotIn('1600', json.dumps(info))
 
 
+class TestShortsProblem(unittest.TestCase):
+    def test_what_youtube_would_refuse_is_named(self):
+        from youtube_uploader import shorts_problem
+        self.assertIn('too long', shorts_problem(61, 1080, 1920))
+        self.assertIn('aspect ratio', shorts_problem(30, 1920, 1080))
+        self.assertIsNone(shorts_problem(60, 1080, 1920))
+        self.assertIsNone(shorts_problem(30, 1080, 1080), 'square videos are accepted')
+        self.assertIsNone(shorts_problem(None, None, None), 'unknown values are checked at upload')
+
+
 if __name__ == '__main__':
     unittest.main()

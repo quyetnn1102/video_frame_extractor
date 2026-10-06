@@ -12,6 +12,7 @@ import media_jobs
 from app_enhanced import create_app
 from config import get_config
 from jobs import JobRegistry
+from library import MediaInfo
 from short_video import ShortVideoError
 from youtube_uploader import YouTubeUploaderError
 
@@ -249,7 +250,7 @@ class TestPagesAndInfo(RouteTestCase):
                 self.assertEqual(self.client.post('/api/test-platform', json=body).status_code, 400)
 
     def test_trending_passes_validated_parameters(self):
-        with patch.object(app_enhanced, 'get_youtube_trending', return_value=[{'id': 'a'}]) as get:
+        with patch.object(app_enhanced, 'fetch_trending', return_value=([{'id': 'a'}], None)) as get:
             data = self.client.get('/api/trending?region=VN&category=10&max_results=5').get_json()
         get.assert_called_once_with('10', 'VN', 5)
         self.assertEqual(data['total'], 1)
@@ -420,7 +421,7 @@ class TestShortsLibrary(RouteTestCase):
 
     def setUp(self):
         super().setUp()
-        patcher = patch('library.video_duration', return_value=30.0)
+        patcher = patch('library.read_media_info', return_value=MediaInfo(30.0, 1080, 1920))
         patcher.start()
         self.addCleanup(patcher.stop)
 
@@ -633,8 +634,9 @@ class TestYouTubeRoutes(RouteTestCase):
         for signed_in in (True, False):
             with self.subTest(signed_in=signed_in):
                 self.uploader.is_authenticated.return_value = signed_in
+                self.uploader.is_configured.return_value = True
                 response = self.client.get('/api/youtube-auth')
-                self.assertEqual(response.get_json(), {'authenticated': signed_in})
+                self.assertEqual(response.get_json(), {'authenticated': signed_in, 'configured': True})
         self.uploader.begin_auth.assert_not_called()
 
     def test_starting_sign_in_returns_the_consent_url(self):
@@ -962,13 +964,15 @@ class TestPhaseFourRoutes(RouteTestCase):
         self.assertNotIn('<b>', page)
 
     def test_trending_says_when_it_shows_sample_data(self):
-        from trending import get_fallback_trending_data
-        with patch.object(app_enhanced, 'get_youtube_trending', return_value=get_fallback_trending_data()):
+        from trending import QUOTA, get_fallback_trending_data
+        with patch.object(app_enhanced, 'fetch_trending', return_value=(get_fallback_trending_data(), QUOTA)):
             data = self.client.get('/api/trending').get_json()
         self.assertTrue(data['sample'])
+        self.assertEqual(data['reason'], 'quota', 'the page says why there are no live results')
         self.assertIn('api_key_configured', data)
-        with patch.object(app_enhanced, 'get_youtube_trending', return_value=[{'id': 'abc'}]):
-            self.assertFalse(self.client.get('/api/trending').get_json()['sample'])
+        with patch.object(app_enhanced, 'fetch_trending', return_value=([{'id': 'abc'}], None)):
+            live = self.client.get('/api/trending').get_json()
+        self.assertEqual((live['sample'], live['reason']), (False, None))
 
     def test_the_caption_field_says_when_imagemagick_is_missing(self):
         for available, expected in [(True, 'Shown at the bottom of the clip'), (False, 'Captions need ImageMagick')]:

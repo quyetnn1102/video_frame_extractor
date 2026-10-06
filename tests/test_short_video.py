@@ -148,6 +148,13 @@ class TestTextOverlayAvailable(unittest.TestCase):
 
 @unittest.skipUnless(ffmpeg_available(), 'bundled ffmpeg binary not available')
 class TestCreateShort(unittest.TestCase):
+    def test_a_clip_cut_short_by_the_end_of_the_video_says_so(self):
+        output = self.folder / 'short.mp4'
+        result = short_video.create_short(self.make_source(seconds=4), output, start=2, duration=10,
+                                          quality='low')
+        self.assertEqual(result['duration'], 2)
+        self.assertIn('Shortened to 0:02: the video ends there.', result['warnings'])
+
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
@@ -240,14 +247,14 @@ class TestCreateShort(unittest.TestCase):
 
     def test_a_short_is_listed_only_once_it_is_complete(self):
         """Jobs render in the background, so the library is read while a render is running."""
-        from library import list_shorts
+        from library import MediaInfo, list_shorts
         output = self.folder / 'short.mp4'
         listed_during_render = []
 
         def look_at_the_library(fraction):
             listed_during_render.append((output.exists(), list_shorts(self.folder)))
 
-        with patch('library.video_duration', return_value=1.0):
+        with patch('library.read_media_info', return_value=MediaInfo(1.0, 1080, 1920)):
             short_video.create_short(self.source, output, start=0, duration=1, quality='low',
                                      on_progress=look_at_the_library)
             self.assertTrue(listed_during_render)

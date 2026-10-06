@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Home - VideoExtract</title>
+    <title>Home - Tallframe</title>
     <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
     <link rel="stylesheet" href="/static/css/app.css">
     <link rel="stylesheet" href="/static/css/shell.css">
@@ -22,7 +22,8 @@
 
             <main id="main" class="page">
                 <form class="card launcher" id="launchForm">
-                    <h2><label for="launchUrl">Paste a video link</label></h2>
+                    <h2 class="launcher-title">Turn videos into short clips and frames</h2>
+                    <label class="launcher-label" for="launchUrl">Paste a video link</label>
                     <input type="url" id="launchUrl" autocomplete="off" placeholder="https://www.youtube.com/watch?v=...">
                     <div class="preview-slot" id="launchPreview" aria-live="polite"></div>
                     <div class="launch-actions">
@@ -55,6 +56,7 @@
                         <h2 id="recentHeading">Recent shorts</h2>
                         <a href="/create-short#resultsSection">View all</a>
                     </div>
+                    <div id="recentStatus" role="alert"></div>
                     <ul class="recent" id="recentShorts"></ul>
                     <div class="empty-state" id="recentEmpty" hidden>
                         <div>

@@ -15,7 +15,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from config import get_config
 from logger import app_logger
-from validators import validator
+from validators import format_clock, validator
 
 QUALITY_BITRATES = {'low': '1000k', 'medium': '2000k', 'high': '5000k'}
 DEFAULT_QUALITY = 'medium'
@@ -24,6 +24,7 @@ SHORT_SIZE = (1080, 1920)  # width, height of the vertical output
 VERTICAL_ASPECT = 9 / 16
 MIN_SHORT_DURATION = 1
 MAX_SHORT_DURATION = 300  # seconds
+SHORTENED_NOTICE_SECONDS = 0.5  # a clip this much shorter than asked gets a note
 
 MAX_OVERLAY_LENGTH = 100
 FONT_SIZE_LIMITS = (8, 200)
@@ -277,6 +278,8 @@ def create_short(source_path: Path, output_path: Path, *, start: float, duration
                 f"Start time ({start:g}s) exceeds video duration ({video.duration:.1f}s)")
 
         actual_duration = min(duration, video.duration - start)
+        if duration - actual_duration >= SHORTENED_NOTICE_SECONDS:
+            warnings.append(f"Shortened to {format_clock(actual_duration)}: the video ends there.")
         clip = video.subclip(start, start + actual_duration)
 
         if vertical:
