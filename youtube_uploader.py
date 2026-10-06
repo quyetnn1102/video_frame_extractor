@@ -35,6 +35,8 @@ DEFAULT_TITLE = "Short video"
 DEFAULT_TAGS = ["Shorts"]
 AUTH_TIMEOUT_SECONDS = 600
 SQUARE_TOLERANCE = 0.1  # an aspect ratio this close to 1 counts as square
+# A 60 s render has whole frames, so it can last 60.03 s (29.97 fps): that is still a 60 s short
+SHORTS_DURATION_SLACK = 0.1
 UPLOAD_RETRYABLE_STATUSES = (500, 502, 503, 504)
 UPLOAD_MAX_RETRIES = 3
 QUOTA_DOCS_URL = "https://developers.google.com/youtube/v3/determine_quota_cost"
@@ -381,7 +383,7 @@ def shorts_problem(duration: Optional[float], width: Optional[int], height: Opti
     Why a video cannot be a YouTube Short (60 s at most, vertical or square), or None.
     Unknown values are not held against it: the upload checks the file again.
     """
-    if duration and duration > YouTubeUploader.SHORTS_MAX_DURATION:
+    if duration and duration > YouTubeUploader.SHORTS_MAX_DURATION + SHORTS_DURATION_SLACK:
         return (f"Video too long: {duration:.1f}s (max {YouTubeUploader.SHORTS_MAX_DURATION}s). "
                 "Make a short of 60 seconds or less to upload it.")
     if width and height:

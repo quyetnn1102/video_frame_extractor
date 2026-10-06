@@ -3,6 +3,7 @@ What the library page needs about each short beyond what is on disk: whether a j
 is using it, whether YouTube would take it, and where it was uploaded.
 """
 import threading
+from collections import Counter
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Dict, Set
@@ -13,8 +14,9 @@ from youtube_uploader import shorts_problem
 
 BUSY_SHORT_MESSAGE = 'This short is in use (subtitles or an upload are in progress). Try again when it finishes.'
 
-# Shorts being uploaded to YouTube right now (uploads run inside their request, not as jobs)
-_uploading: Set[str] = set()
+# Shorts being uploaded to YouTube right now (uploads run inside their request, not as jobs).
+# Counted, not a set: two uploads of the same short must both end before it is free again.
+_uploading: Counter = Counter()
 _uploading_lock = threading.Lock()
 
 
@@ -22,18 +24,20 @@ _uploading_lock = threading.Lock()
 def uploading(filename: str):
     """Marks a short as in use while it is uploaded, so it cannot be deleted meanwhile."""
     with _uploading_lock:
-        _uploading.add(filename)
+        _uploading[filename] += 1
     try:
         yield
     finally:
         with _uploading_lock:
-            _uploading.discard(filename)
+            _uploading[filename] -= 1
+            if _uploading[filename] <= 0:
+                del _uploading[filename]
 
 
 def shorts_in_use(job_registry) -> Set[str]:
     """Names of the shorts a job or an upload is working on."""
     with _uploading_lock:
-        uploads = set(_uploading)
+        uploads = set(_uploading)  # the names still counted
     return job_registry.active_subjects() | uploads
 
 

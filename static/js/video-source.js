@@ -15,6 +15,7 @@
      * What the page knows about the link (state.status):
      *   empty       nothing typed
      *   incomplete  typed, but not a full link yet (nothing is shown while typing)
+     *   pending     a new link, analyzed once typing pauses: nothing is known about it yet
      *   checking    asking the server
      *   ready       the video was read: state.video has its length and frame size
      *   unreadable  the link is supported but its details could not be read; it may still work
@@ -148,18 +149,28 @@
             else show('unreadable', url, parsed ? data : { error: 'The app did not answer.' });
         }
 
-        // While typing, a link is analyzed once it has stayed unchanged for a moment
+        // While typing, a link is analyzed once it has stayed unchanged for a moment. What was
+        // known about the previous link stops applying at once: its length must not check this one.
         function schedule() {
-            clearTimeout(timer);
             const url = input.value.trim();
             if (url === state.url && state.status !== 'incomplete') return;
+            clearTimeout(timer);
+            latest += 1;   // an answer for the previous link no longer applies
+            panel.replaceChildren();
             if (!isLink(url)) {
-                latest += 1;
-                panel.replaceChildren();
                 set({ status: url ? 'incomplete' : 'empty', url });
                 return;
             }
+            set({ status: 'pending', url });
             timer = setTimeout(analyze, LOOKUP_DELAY_MS);
+        }
+
+        // Back to an empty field (the page cleared it)
+        function reset() {
+            clearTimeout(timer);
+            latest += 1;
+            panel.replaceChildren();
+            set({ status: 'empty', url: '' });
         }
 
         input.addEventListener('input', schedule);
@@ -169,6 +180,7 @@
         return {
             state: () => state,
             analyze,
+            reset,
             isUsable: () => USABLE.has(state.status),
         };
     }

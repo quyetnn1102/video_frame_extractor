@@ -202,6 +202,10 @@ class TestFetchTrendingReasons(unittest.TestCase):
         with patch.dict(os.environ, {'YOUTUBE_API_KEY': ''}):
             self.assertEqual(trending.fetch_trending()[1], trending.NO_KEY)
 
+    def test_a_category_without_a_chart_is_empty_not_a_failure(self):
+        with patch('trending.requests.get', return_value=self.failing(404, ['videoChartNotFound'])):
+            self.assertEqual(trending.fetch_trending(category='29'), ([], trending.EMPTY))
+
     def test_no_videos_is_an_empty_list_not_sample_data(self):
         with patch('trending.requests.get', return_value=api_response([])):
             self.assertEqual(trending.fetch_trending(), ([], trending.EMPTY))

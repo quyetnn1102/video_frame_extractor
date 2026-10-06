@@ -78,6 +78,19 @@ class TestListShorts(unittest.TestCase):
         self.assertEqual(names, [f'Clip{index}_1a2b3c4d_short.mp4' for index in range(5)])
         self.assertEqual(library.count_shorts(self.folder), 5)
 
+    def test_a_restart_reuses_what_was_read_until_the_short_changes(self):
+        path = self.make('Clip_1a2b3c4d_short.mp4')
+        library.list_shorts(self.folder)
+        with library._media_cache_lock:
+            library._media_cache.clear()  # a new run of the app
+        library.list_shorts(self.folder)
+        self.assertEqual(library.read_media_info.call_count, 1, 'read from the saved file, not the video')
+        path.write_bytes(b'a different video')
+        library.list_shorts(self.folder)
+        self.assertEqual(library.read_media_info.call_count, 2, 'a changed short is read again')
+        library.remove_poster(path)
+        self.assertFalse(library.info_path(path).exists())
+
     def test_each_short_is_read_once_while_it_is_unchanged(self):
         self.make('Clip_1a2b3c4d_short.mp4')
         library.list_shorts(self.folder)

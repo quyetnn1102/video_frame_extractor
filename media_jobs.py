@@ -102,7 +102,8 @@ def parse_extract_request(data: Optional[Dict[str, Any]]) -> Tuple[Optional[Extr
     image_format = data.get('format') or 'jpg'
     if image_format not in FRAME_FORMATS:
         return None, f"format must be one of: {', '.join(FRAME_FORMATS)}"
-    return ExtractRequest(*checked, seconds=tuple(seconds_list), image_format=image_format), None
+    # 90 and 1:30 are the same moment: one frame each, in the order typed
+    return ExtractRequest(*checked, seconds=tuple(dict.fromkeys(seconds_list)), image_format=image_format), None
 
 
 def parse_short_request(data: Optional[Dict[str, Any]]) -> Tuple[Optional[ShortRequest], Optional[str]]:

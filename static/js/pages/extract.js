@@ -106,14 +106,7 @@
     }
 
     // The server reports whole seconds; show them the way they are typed (m:ss or h:mm:ss)
-    function formatTimecode(value) {
-        const total = Number(value);
-        if (!Number.isInteger(total) || total < 0) return String(value);
-        const hours = Math.floor(total / 3600);
-        const minutes = Math.floor((total % 3600) / 60);
-        const seconds = String(total % 60).padStart(2, '0');
-        return hours > 0 ? `${hours}:${String(minutes).padStart(2, '0')}:${seconds}` : `${minutes}:${seconds}`;
-    }
+    const formatTimecode = (value) => ui.formatClock(value) || String(value);
 
     function displayResults(frames, warnings, options) {
         const restored = Boolean(options && options.restored);
@@ -205,6 +198,16 @@
     }
 
     const checks = [[$('videoUrl'), linkError], [$('timestamps'), timecodesError]];
+
+    // An error shown for the previous link, or checked against its length, may no longer apply
+    function recheckShownErrors() {
+        checks.forEach(([input, check]) => {
+            if (input.getAttribute('aria-invalid') !== 'true') return;
+            const message = check();
+            if (message) ui.setFieldError(input, message);
+            else ui.clearFieldError(input);
+        });
+    }
     checks.forEach(([input, check]) => ui.revalidateOnInput(input, check));
 
     function formIsValid() {
@@ -261,7 +264,10 @@
         shownFrames = [];
         hasResults = false;
         $('resultActions').hidden = true;
+        source.reset();  // reset() fires no input events: the link and its length are cleared here
         renderPreview();
+        updateSubmitLabel();
+        updateTimecodeSummary();
         $('videoUrl').focus();
     }
 
@@ -385,7 +391,10 @@
         $('videoUrl').value = typeof saved.url === 'string' ? saved.url : '';
     }
     source = videoSource.attach({ input: $('videoUrl'), button: $('analyzeBtn'), panel: $('linkPreview'),
-                                  onChange: updateTimecodeSummary });
+                                  onChange: () => {
+                                      updateTimecodeSummary();
+                                      recheckShownErrors();
+                                  } });
     updateSubmitLabel();
     updateTimecodeSummary();
 

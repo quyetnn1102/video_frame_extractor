@@ -75,6 +75,11 @@
         return null;
     }
 
+    /** `value` when it starts with one of `allowedPrefixes` (server data for href/src), else ''. */
+    function safeUrl(value, allowedPrefixes) {
+        return allowedPrefixes.some((prefix) => typeof value === 'string' && value.startsWith(prefix)) ? value : '';
+    }
+
     /** Seconds as m:ss, or h:mm:ss from an hour ('' when unknown); the same as format_clock in Python. */
     function formatClock(totalSeconds) {
         const seconds = Math.round(Number(totalSeconds));
@@ -270,7 +275,8 @@
                     event.preventDefault();
                     return;
                 }
-                close(false);
+                // Focus back on "More" first: a dialog the item opens returns focus there
+                close(true);
                 if (item.onSelect) item.onSelect();
             });
             const row = element('li');
@@ -325,7 +331,7 @@
     }
 
     window.ui = {
-        element, notice, scrollBehavior, relativeTime, postJson,
+        element, notice, scrollBehavior, relativeTime, postJson, safeUrl,
         parseTimecode, formatClock, isLink, showBusy, hideBusy,
         setFieldError, clearFieldError, showErrors, clearErrors, revalidateOnInput, whileWorking, actionMenu,
     };

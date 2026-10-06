@@ -7,6 +7,7 @@
     // Titles come from other sites: everything is built with textContent, never HTML strings.
     const { element, notice, relativeTime } = ui;
     const HINTS = {
+        pending: 'Analyzing the link...',
         checking: 'Analyzing the link...',
         invalid: 'This link cannot be used: see above.',
         ready: 'Choose what to make from it.',

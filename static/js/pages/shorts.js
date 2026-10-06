@@ -10,13 +10,11 @@
     let highlighted = null;      // the short to point out (opened from Home, or just made)
     let subtitling = false;      // a subtitled copy is being made (one at a time)
     let youtube = { configured: true, authenticated: false };
+    let refreshes = 0;           // only the newest list is shown, whatever order answers arrive in
+    let loadFailed = false;      // then the list is unknown, not empty
 
     // Titles come from other sites and from file names: everything is built with textContent.
-    const { element, notice, scrollBehavior, relativeTime, postJson } = ui;
-
-    function safeUrl(value, allowedPrefixes) {
-        return allowedPrefixes.some((prefix) => typeof value === 'string' && value.startsWith(prefix)) ? value : '';
-    }
+    const { element, notice, scrollBehavior, relativeTime, postJson, safeUrl } = ui;
 
     // ---- the list: every short, then search, sort and filter in the page -------------
 
@@ -62,18 +60,24 @@
         const page = matching.slice(0, shown);
         $('resultsContent').replaceChildren(...page.map(shortCard));
         $('libraryLoading').hidden = true;
-        $('libraryEmpty').hidden = allShorts.length > 0;
+        $('libraryEmpty').hidden = loadFailed || allShorts.length > 0;
         $('noMatches').hidden = allShorts.length === 0 || matching.length > 0;
         $('showMoreBtn').hidden = matching.length <= shown;
         $('libraryCount').textContent = countText(page.length, matching.length);
     }
 
     async function refresh(newFilename) {
+        const mine = ++refreshes;
         try {
-            allShorts = await fetchAll();
+            const shorts = await fetchAll();
+            if (mine !== refreshes) return;
+            allShorts = shorts;
+            loadFailed = false;
             if (newFilename !== undefined) highlighted = newFilename;
             render();
         } catch (error) {
+            if (mine !== refreshes) return;
+            loadFailed = true;
             console.error('Could not load the shorts:', error);
             $('libraryLoading').hidden = true;
             const message = notice('error', 'Could not load your shorts.', 'They are still on disk.');

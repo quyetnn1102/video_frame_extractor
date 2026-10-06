@@ -27,6 +27,8 @@ ERROR_CODE_PATTERN = re.compile(r'[A-Za-z][A-Za-z0-9_]{0,63}')  # e.g. API_KEY_I
 NO_KEY, BAD_KEY, QUOTA, UNAVAILABLE, EMPTY = 'no_key', 'bad_key', 'quota', 'unavailable', 'empty'
 QUOTA_CODES = frozenset({'quotaExceeded', 'dailyLimitExceeded', 'rateLimitExceeded',
                          'userRateLimitExceeded', 'RESOURCE_EXHAUSTED'})
+# videos.list answers 404 for a category that has no chart in a region: no videos, not a failure
+NO_CHART_CODES = frozenset({'videoChartNotFound', 'NOT_FOUND'})
 KEY_CODES = frozenset({'keyInvalid', 'keyExpired', 'API_KEY_INVALID', 'API_KEY_EXPIRED',
                        'accessNotConfigured', 'SERVICE_DISABLED'})
 
@@ -161,9 +163,11 @@ def describe_api_failure(error: Exception) -> str:
 
 
 def failure_reason(error: Exception) -> str:
-    """QUOTA, BAD_KEY or UNAVAILABLE for a failed API call, from Google's error codes."""
+    """EMPTY, QUOTA, BAD_KEY or UNAVAILABLE for a failed API call, from Google's error codes."""
     response = getattr(error, 'response', None)
     codes = set(_error_codes(response)) if response is not None else set()
+    if codes & NO_CHART_CODES:
+        return EMPTY
     if codes & QUOTA_CODES:
         return QUOTA
     if codes & KEY_CODES:
@@ -210,8 +214,12 @@ def fetch_trending(category: str = '0', region: str = DEFAULT_REGION,
         response.raise_for_status()
         items = response.json().get('items')
     except (requests.RequestException, ValueError) as error:
+        reason = failure_reason(error)
+        if reason == EMPTY:
+            app_logger.info("YouTube has no chart for this category and region")
+            return [], EMPTY
         app_logger.error(f"YouTube API request failed ({describe_api_failure(error)})")
-        return get_fallback_trending_data(), failure_reason(error)
+        return get_fallback_trending_data(), reason
 
     if not items:
         app_logger.warning("No items found in YouTube API response")

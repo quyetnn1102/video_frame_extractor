@@ -402,6 +402,7 @@ class TestShortsProblem(unittest.TestCase):
         self.assertIn('too long', shorts_problem(61, 1080, 1920))
         self.assertIn('aspect ratio', shorts_problem(30, 1920, 1080))
         self.assertIsNone(shorts_problem(60, 1080, 1920))
+        self.assertIsNone(shorts_problem(60.03, 1080, 1920), 'a 60 s render at 29.97 fps lasts 60.03 s')
         self.assertIsNone(shorts_problem(30, 1080, 1080), 'square videos are accepted')
         self.assertIsNone(shorts_problem(None, None, None), 'unknown values are checked at upload')
 

@@ -259,7 +259,8 @@ class TestTemplates(unittest.TestCase):
         for script in sorted((STATIC_DIR / 'js' / 'pages').glob('*.js')):
             with self.subTest(script=script.name):
                 text = script.read_text(encoding='utf-8')
-                for helper in ['element', 'notice', 'scrollBehavior', 'relativeTime', 'postJson', 'isLink']:
+                for helper in ['element', 'notice', 'scrollBehavior', 'relativeTime', 'postJson', 'isLink',
+                               'safeUrl', 'formatClock']:
                     self.assertNotIn(f'function {helper}(', text, 'use the one in static/js/ui.js')
                 self.assertNotIn("'/api/video-info'", text, 'links are analyzed by video-source.js')
 

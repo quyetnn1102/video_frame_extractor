@@ -52,6 +52,7 @@ JOB_ID_PATTERN = re.compile(r'[0-9a-f]{32}')
 RECENT_REQUESTS_SHOWN = 10
 MAX_TRENDING_RESULTS = 50
 FRAME_EXTENSIONS = tuple(f'.{name}' for name in media_jobs.FRAME_FORMATS)
+PAGE_NUMBER = re.compile(r'[0-9]{1,7}')
 
 # One registry per process: deploy.py runs a single worker, so every request sees the same jobs
 job_registry = JobRegistry(max_workers=get_config().MAX_CONCURRENT_JOBS)
@@ -64,7 +65,7 @@ def page_parameter(name: str, default: int, maximum: int) -> Optional[int]:
     raw = request.args.get(name, '')
     if raw == '':
         return default
-    if not raw.isdigit():
+    if not PAGE_NUMBER.fullmatch(raw):  # ASCII digits only: str.isdigit() also accepts "²"
         return None
     value = int(raw)
     return value if value <= maximum else None
@@ -717,14 +718,12 @@ def create_app() -> Flask:
         if video_path is None:
             return json_error('Video not found', 404)
 
-        if not youtube_uploader.is_authenticated():
-            return json_error('Please sign in to YouTube first', 401)
-
-        is_valid, validation_message = youtube_uploader.validate_short_video(str(video_path))
-        if not is_valid:
-            return json_error(f'Video validation failed: {validation_message}', 400)
-
-        with uploading(video_path.name):  # Delete waits until the upload is over
+        with uploading(video_path.name):  # Delete waits from here until the upload is over
+            if not youtube_uploader.is_authenticated():
+                return json_error('Please sign in to YouTube first', 401)
+            is_valid, validation_message = youtube_uploader.validate_short_video(str(video_path))
+            if not is_valid:
+                return json_error(f'Video validation failed: {validation_message}', 400)
             success, message, video_id = youtube_uploader.upload_video(
                 video_path=str(video_path), title=title, description=description,
                 tags=tags, privacy_status=privacy, is_short=True)

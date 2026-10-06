@@ -8,17 +8,7 @@
 
     // Server text is untrusted for display purposes: everything below is built
     // with textContent / addEventListener instead of HTML strings.
-    const { element, notice, postJson } = ui;
-
-    function safeUrl(value, allowedPrefixes) {
-        return allowedPrefixes.some((prefix) => typeof value === 'string' && value.startsWith(prefix))
-            ? value : '';
-    }
-
-    function safeUrl(value, allowedPrefixes) {
-        return allowedPrefixes.some((prefix) => typeof value === 'string' && value.startsWith(prefix))
-            ? value : '';
-    }
+    const { element, notice, postJson, safeUrl } = ui;
 
     // ---- length presets ---------------------------------------------------
 
@@ -218,6 +208,17 @@
         updateSuggest(state);
         updateTiming();
         updateCropDiagram();
+        recheckShownErrors();
+    }
+
+    // An error shown for the previous link, or checked against its length, may no longer apply
+    function recheckShownErrors() {
+        [[$('shortVideoUrl'), linkError], [$('startTime'), startTimeError]].forEach(([input, check]) => {
+            if (input.getAttribute('aria-invalid') !== 'true') return;
+            const message = check();
+            if (message) ui.setFieldError(input, message);
+            else ui.clearFieldError(input);
+        });
     }
 
     $('startTime').addEventListener('input', updateTiming);

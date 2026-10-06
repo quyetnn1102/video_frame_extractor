@@ -1,4 +1,5 @@
 """Lists the shorts already made, so the Create short page can show them again later."""
+import json
 import os
 import re
 import threading
@@ -69,17 +70,61 @@ _media_cache: Dict[Tuple[str, int, int], MediaInfo] = {}
 _media_cache_lock = threading.Lock()
 
 
+def info_path(video_path: Path) -> Path:
+    """Where a short's length and size are kept between runs: next to its poster."""
+    return poster_path(video_path).with_suffix('.json')
+
+
+def _number(value: Any, kind: type) -> Optional[Any]:
+    return value if isinstance(value, kind) and not isinstance(value, bool) and value > 0 else None
+
+
+def _saved_media_info(path: Path, stat: os.stat_result) -> Optional[MediaInfo]:
+    """What an earlier run read from this short, if the file has not changed since."""
+    try:
+        saved = json.loads(info_path(path).read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(saved, dict) or saved.get('mtime_ns') != stat.st_mtime_ns or saved.get('size') != stat.st_size:
+        return None
+    return MediaInfo(_number(saved.get('duration'), (int, float)), _number(saved.get('width'), int),
+                     _number(saved.get('height'), int))
+
+
+def _save_media_info(path: Path, stat: os.stat_result, info: MediaInfo) -> None:
+    target = info_path(path)
+    partial = target.with_name(f'.{uuid.uuid4().hex}.partial')
+    try:
+        target.parent.mkdir(exist_ok=True)
+        partial.write_text(json.dumps({'mtime_ns': stat.st_mtime_ns, 'size': stat.st_size, 'duration': info.duration,
+                                       'width': info.width, 'height': info.height}), encoding='utf-8')
+        os.replace(partial, target)
+    except OSError as error:  # only a cache: the next run reads the video again
+        app_logger.warning(f"Could not save a short's length ({type(error).__name__})")
+    finally:
+        partial.unlink(missing_ok=True)
+
+
 def cached_media_info(path: Path, stat: os.stat_result) -> MediaInfo:
+    """
+    A short's length and size: from memory, else from what an earlier run saved next to the
+    poster, else read from the video (once) and saved. Listing the library then opens no video,
+    even right after a restart.
+    """
     key = (str(path), stat.st_mtime_ns, stat.st_size)
     with _media_cache_lock:
         known = _media_cache.get(key)
     if known is not None:
         return known
-    try:
-        info = read_media_info(path)
-    except Exception as error:  # a damaged file is listed without its length, never an error
-        app_logger.warning(f"Could not read a short's length ({type(error).__name__})")
-        info = UNKNOWN_MEDIA
+    info = _saved_media_info(path, stat)
+    if info is None:
+        try:
+            info = read_media_info(path)
+        except Exception as error:  # a damaged file is listed without its length, never an error
+            app_logger.warning(f"Could not read a short's length ({type(error).__name__})")
+            info = UNKNOWN_MEDIA
+        else:
+            _save_media_info(path, stat, info)
     with _media_cache_lock:
         if len(_media_cache) >= MAX_CACHED_MEDIA_INFO:
             _media_cache.clear()  # mostly entries of deleted or replaced shorts
@@ -154,10 +199,12 @@ def make_poster(video_path: Path) -> bool:
 
 
 def remove_poster(video_path: Path) -> None:
-    try:
-        poster_path(video_path).unlink(missing_ok=True)
-    except OSError as error:
-        app_logger.warning(f"Could not remove a poster ({type(error).__name__})")
+    """Removes what the library keeps about a short: its poster and its saved length."""
+    for kept in (poster_path(video_path), info_path(video_path)):
+        try:
+            kept.unlink(missing_ok=True)
+        except OSError as error:
+            app_logger.warning(f"Could not remove a poster ({type(error).__name__})")
 
 
 def sync_posters(folder: Path) -> Tuple[int, int]:
@@ -180,6 +227,13 @@ def sync_posters(folder: Path) -> Tuple[int, int]:
             removed += 1
         except OSError:
             continue  # in use; the next sync removes it
+    # Saved lengths of shorts that are gone (they are not counted: only posters are)
+    for saved in (folder / POSTER_FOLDER).glob('*.json'):
+        if saved.stem not in shorts and not (folder / (saved.stem + '.mp4')).exists():
+            try:
+                saved.unlink()
+            except OSError:
+                continue
     # Temporary files left by a crash mid-write (recent ones may still be in use)
     for partial in (folder / POSTER_FOLDER).glob('*.partial'):
         try:

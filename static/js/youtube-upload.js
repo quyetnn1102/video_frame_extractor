@@ -9,16 +9,12 @@
     const AUTH_POLL_MS = 1000;
     const TITLE_LIMIT = 100;          // TITLE_LIMIT in youtube_uploader.py
     const DESCRIPTION_LIMIT = 5000;   // DESCRIPTION_LIMIT
-    const { element, notice, postJson } = ui;
+    const { element, notice, postJson, safeUrl } = ui;
     let signedIn = false;          // set once the server confirms the YouTube sign-in
     let cancelRequested = false;   // set by the Cancel button while waiting for sign-in
     let uploading = false;
 
     const sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
-
-    function safeUrl(value, allowedPrefixes) {
-        return allowedPrefixes.some((prefix) => typeof value === 'string' && value.startsWith(prefix)) ? value : '';
-    }
 
     function cancelButton() {
         return document.getElementById('cancelLoadingBtn');

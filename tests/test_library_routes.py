@@ -31,7 +31,8 @@ class TestLibraryPages(LibraryRouteTestCase):
         self.assertEqual((len(data['shorts']), data['total'], data['offset'], data['limit']), (2, 5, 2, 2))
 
     def test_bad_page_parameters_are_refused(self):
-        for query in ('limit=0', 'limit=500', 'limit=abc', 'offset=-1', 'offset=1.5'):
+        for query in ('limit=0', 'limit=500', 'limit=abc', 'offset=-1', 'offset=1.5', 'limit=%C2%B2',
+                      'offset=99999999'):
             with self.subTest(query=query):
                 self.assertEqual(self.client.get('/api/shorts?' + query).status_code, 400)
 
@@ -78,7 +79,10 @@ class TestShortsInUse(LibraryRouteTestCase):
     def test_a_short_being_uploaded_is_in_use_until_the_upload_ends(self):
         name = self.make_short('Clip_1a2b3c4d_short.mp4')
         with library_api.uploading(name):
-            self.assertIn(name, library_api.shorts_in_use(app_enhanced.job_registry))
+            with library_api.uploading(name):  # a second upload of the same short
+                pass
+            self.assertIn(name, library_api.shorts_in_use(app_enhanced.job_registry),
+                          'still in use while the first upload runs')
         self.assertNotIn(name, library_api.shorts_in_use(app_enhanced.job_registry))
 
 
@@ -112,6 +116,11 @@ class TestPhaseFiveRequests(RouteTestCase):
         self.assertEqual(self.client.get('/frames/frame_5s_1a2b3c4d.png').status_code, 200)
         archive = self.client.post('/api/frames/archive', json={'filenames': ['frame_5s_1a2b3c4d.png']})
         self.assertEqual(archive.status_code, 200)
+
+    def test_the_same_moment_twice_is_extracted_once(self):
+        from media_jobs import parse_extract_request
+        request, _ = parse_extract_request({'url': VALID_URL, 'timestamps': ['90', '0:05', '1:30']})
+        self.assertEqual(request.seconds, (90, 5))
 
     def test_the_crop_position_reaches_the_render(self):
         from media_jobs import parse_short_request
