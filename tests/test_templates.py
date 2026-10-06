@@ -90,16 +90,21 @@ class TestTemplates(unittest.TestCase):
         self.assertIn('localStorage.setItem', text)
         self.assertIn('savedExtraction()', text)
 
-    def test_link_fields_show_a_preview_from_the_shared_script(self):
-        script = STATIC_DIR / 'js' / 'link-preview.js'
+    def test_link_fields_are_analyzed_by_the_shared_script(self):
+        """One "Analyze video" step on every page: the same check, wording and errors."""
+        script = STATIC_DIR / 'js' / 'video-source.js'
         self.assertTrue(script.is_file())
         for page, slot in [('index.html', 'launchPreview'), ('extract.html', 'linkPreview'),
                            ('create_short.html', 'shortLinkPreview')]:
             with self.subTest(template=page):
                 text = page_source(TEMPLATES_DIR / page)
-                self.assertIn('src="/static/js/link-preview.js"', text)
+                self.assertIn('src="/static/js/video-source.js"', text)
+                self.assertLess(text.index('src="/static/js/ui.js"'), text.index('src="/static/js/video-source.js"'),
+                                'video-source.js uses ui.js')
+                self.assertIn('videoSource.attach(', text)
                 self.assertIn(f'id="{slot}"', text)
                 self.assertIn(f"$('{slot}')", text)
+                self.assertNotIn('Check link', text, 'the button is called "Analyze video"')
         self.assertNotIn('innerHTML', script.read_text(encoding='utf-8'),
                          'titles and channel names come from other sites')
 
@@ -197,7 +202,7 @@ class TestTemplates(unittest.TestCase):
                 self.assertIn('novalidate', form, 'browser tooltips would pre-empt the error summary')
                 self.assertIn('id="errorSummary" class="error-summary" tabindex="-1" hidden', text)
                 self.assertIn('ui.showErrors(', text)
-                self.assertIn('ui.attachLinkCheck(', text, 'Check link has a busy state in ui.js')
+                self.assertIn('>Analyze video</button>', text)
 
     def test_the_timecode_limit_matches_the_server(self):
         from validators import MAX_TIMESTAMPS
@@ -251,7 +256,7 @@ class TestTemplates(unittest.TestCase):
                 text = script.read_text(encoding='utf-8')
                 for helper in ['element', 'notice', 'scrollBehavior', 'relativeTime', 'postJson', 'isLink']:
                     self.assertNotIn(f'function {helper}(', text, 'use the one in static/js/ui.js')
-                self.assertNotIn("'/api/test-platform'", text, 'Check link goes through ui.attachLinkCheck')
+                self.assertNotIn("'/api/video-info'", text, 'links are analyzed by video-source.js')
 
     def test_each_page_has_at_most_one_primary_button(self):
         """The top bar shortcut is secondary, so it never competes with the page's own action."""

@@ -75,6 +75,16 @@
         return null;
     }
 
+    /** Seconds as m:ss, or h:mm:ss from an hour ('' when unknown); the same as format_clock in Python. */
+    function formatClock(totalSeconds) {
+        const seconds = Math.round(Number(totalSeconds));
+        if (!Number.isFinite(seconds) || seconds < 0) return '';
+        const hours = Math.floor(seconds / 3600);
+        const minutes = Math.floor((seconds % 3600) / 60);
+        const rest = String(seconds % 60).padStart(2, '0');
+        return hours > 0 ? `${hours}:${String(minutes).padStart(2, '0')}:${rest}` : `${minutes}:${rest}`;
+    }
+
     function isLink(value) {
         try {
             const url = new URL(value);
@@ -218,47 +228,9 @@
         }
     }
 
-    // ---- "Check link": the same check and the same message on every page ------------
-
-    /**
-     * Wires a Check link button: asks the server whether the link can be used, then says so.
-     * @param {HTMLButtonElement} button
-     * @param {HTMLInputElement} input the link field
-     * @param {HTMLElement} status where the result is shown
-     */
-    function attachLinkCheck(button, input, status) {
-        button.addEventListener('click', () => whileWorking(button, 'Checking...', async () => {
-            const url = input.value.trim();
-            if (!url) {
-                status.replaceChildren(notice('error', 'No link yet.', 'Paste a video link first.'));
-                return;
-            }
-            try {
-                const { ok, data, parsed } = await postJson('/api/test-platform', { url });
-                // A broken reply says nothing about the link itself
-                if (!parsed) throw new Error('The server did not answer with JSON');
-                const info = data.info || {};
-                if (!ok || !data.valid) {
-                    status.replaceChildren(notice('error', 'This link cannot be used.',
-                        info.notes || data.error || 'It is invalid or from an unsupported site.'));
-                    return;
-                }
-                const result = notice('ok', 'This link works.',
-                    `${data.platform}: ${info.status || 'ready'}. ${info.notes || ''}`.trim());
-                if (Array.isArray(info.tips) && info.tips.length) {
-                    result.append(element('span', 'tips', 'Tips: ' + info.tips.join(', ')));
-                }
-                status.replaceChildren(result);
-            } catch (error) {
-                console.error('Link check failed:', error);
-                status.replaceChildren(notice('error', 'Could not check the link.', 'Try again in a moment.'));
-            }
-        }));
-    }
-
     window.ui = {
-        element, notice, scrollBehavior, relativeTime, postJson, attachLinkCheck,
-        parseTimecode, isLink, showBusy, hideBusy,
+        element, notice, scrollBehavior, relativeTime, postJson,
+        parseTimecode, formatClock, isLink, showBusy, hideBusy,
         setFieldError, clearFieldError, showErrors, clearErrors, revalidateOnInput, whileWorking,
     };
 })();

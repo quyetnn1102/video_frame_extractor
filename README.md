@@ -150,7 +150,7 @@ All endpoints return JSON (errors as `{"success": false, "error": "..."}`) and r
 |---|---|---|
 | `GET /`, `/extract`, `/create-short`, `/trending`, `/dashboard` | Pages | default |
 | `POST /api/validate-url` `{url}` | Validate a link and fetch title/duration | 30/min |
-| `POST /api/video-info` `{url}` | Video details without downloading | 20/min |
+| `POST /api/video-info` `{url}` | Video details without downloading (title, length, frame size, platform); a failure gives `reason` (`invalid` or `unreadable`) and the platform's tips | 20/min |
 | `POST /api/test-platform` `{url}` | Platform guidance for a link | 30/min |
 | `POST /api/extract` `{url, timestamps[]}` | Download, extract frames, delete the download | 10/min |
 | `POST /api/create-short` `{url, start_time, duration, quality, vertical_format, text_overlay}` | Create a short | 5/min |

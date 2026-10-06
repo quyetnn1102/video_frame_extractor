@@ -2,42 +2,42 @@
     'use strict';
 
     const MAX_RECENT = 6;
-    const SECONDS_PER_MINUTE = 60;
     const $ = (id) => document.getElementById(id);
 
     // Titles come from other sites: everything is built with textContent, never HTML strings.
-    const { element, notice, relativeTime, isLink } = ui;
+    const { element, notice, relativeTime } = ui;
+    const DEFAULT_HINT = 'YouTube, TikTok, Instagram, Facebook or Douyin';
 
-    // ---- paste a link, then choose what to do with it --------------------------
+    // ---- paste a link; the actions open once it has been analyzed ------------------
 
-    function syncButtons() {
-        const ready = isLink($('launchUrl').value.trim());
-        $('launchShort').disabled = !ready;
-        $('launchFrames').disabled = !ready;
+    // aria-disabled, not disabled: the buttons stay reachable, and pressing one says what is missing
+    function syncButtons(state) {
+        const usable = state.status === 'ready' || state.status === 'unreadable';
+        ['launchShort', 'launchFrames'].forEach((id) => {
+            if (usable) $(id).removeAttribute('aria-disabled');
+            else $(id).setAttribute('aria-disabled', 'true');
+        });
+        $('launchHint').textContent = state.status === 'checking' ? 'Analyzing the link...' : DEFAULT_HINT;
     }
+
+    const source = videoSource.attach({ input: $('launchUrl'), panel: $('launchPreview'), onChange: syncButtons });
 
     function openTool(path) {
-        const url = $('launchUrl').value.trim();
-        if (!isLink(url)) return;
-        window.location.href = path + '?url=' + encodeURIComponent(url);
+        if (source.isUsable()) {
+            window.location.href = path + '?url=' + encodeURIComponent(source.state().url);
+        } else if (source.state().status !== 'checking') {
+            source.analyze();  // says why the link cannot be used yet (empty, incomplete, invalid)
+            $('launchUrl').focus();
+        }
     }
 
-    $('launchUrl').addEventListener('input', syncButtons);
     $('launchForm').addEventListener('submit', (event) => {
         event.preventDefault();
         openTool('/create-short');
     });
     $('launchFrames').addEventListener('click', () => openTool('/extract'));
-    window.attachLinkPreview($('launchUrl'), $('launchPreview'));
-    syncButtons();
 
     // ---- recent shorts, from the shorts saved on disk ---------------------------
-
-    function formatLength(totalSeconds) {
-        const seconds = Math.round(Number(totalSeconds));
-        if (!Number.isFinite(seconds) || seconds <= 0) return '';
-        return `${Math.floor(seconds / SECONDS_PER_MINUTE)}:${String(seconds % SECONDS_PER_MINUTE).padStart(2, '0')}`;
-    }
 
     function recentCard(item) {
         const thumb = element('div', 'recent-thumb');
@@ -57,7 +57,7 @@
             thumb.append(video);
         }
         thumb.append(element('span', 'tag', 'Short'));
-        const length = formatLength(item.duration);
+        const length = item.duration > 0 ? ui.formatClock(item.duration) : '';
         if (length) thumb.append(element('span', 'chip', length));
 
         const body = element('div', 'recent-body');

@@ -12,6 +12,7 @@
     let hasResults = false;   // real frames replace the preview until the next extraction
     let shownFrames = [];     // the frames on screen, for "Download all"
     let busy = false;
+    let source = null;        // the analyzed video link (video-source.js), set at the end
 
     // Server text (platform names, warnings, file names) is untrusted for display:
     // everything below is built with textContent / addEventListener, never HTML strings.
@@ -126,11 +127,26 @@
         }
     }
 
-    $('timestamps').addEventListener('input', renderPreview);
+    $('timestamps').addEventListener('input', () => {
+        renderPreview();
+        updateSubmitLabel();
+    });
 
-    // ---- check the link ---------------------------------------------------
+    // ---- the video: analyzed once its link is pasted (video-source.js) ------------
 
-    ui.attachLinkCheck($('validateBtn'), $('videoUrl'), $('linkStatus'));
+    function sourceDuration() {
+        const state = source ? source.state() : null;
+        const seconds = state && state.status === 'ready' ? Number(state.video.duration) : NaN;
+        return seconds > 0 ? seconds : null;
+    }
+
+    // "Extract 3 frames": the button says how many it will make
+    function updateSubmitLabel() {
+        if (busy) return;
+        const count = timecodesFromInput().filter((code) => ui.parseTimecode(code) !== null).length;
+        $('extractSubmit').textContent = count === 1 ? 'Extract 1 frame'
+            : count > 1 ? `Extract ${Math.min(count, MAX_TIMECODES)} frames` : 'Extract frames';
+    }
 
     // ---- check the form before anything is downloaded ----------------------
 
@@ -138,6 +154,9 @@
         const url = $('videoUrl').value.trim();
         if (!url) return 'Enter a video link';
         if (!ui.isLink(url)) return 'Enter a full link, starting with https://';
+        if (source && source.state().status === 'invalid') {
+            return 'This link cannot be used: ' + (source.state().message || 'see above');
+        }
         return null;
     }
 
@@ -146,7 +165,11 @@
         if (codes.length === 0) return 'Enter at least one timecode';
         if (codes.length > MAX_TIMECODES) return `Enter ${MAX_TIMECODES} timecodes or fewer`;
         const wrong = codes.find((code) => ui.parseTimecode(code) === null);
-        if (wrong) return `"${wrong}" is not a timecode. Use m:ss or h:mm:ss, for example 1:05`;
+        if (wrong) return `"${wrong}" is not a timecode. Use 90, 1:30 or 1:02:03`;
+        // Known once the link is analyzed: a timecode past the end would give no frame
+        const total = sourceDuration();
+        const late = total === null ? undefined : codes.find((code) => ui.parseTimecode(code) >= total);
+        if (late) return `${late} is past the end of the video (${ui.formatClock(total)})`;
         return null;
     }
 
@@ -202,7 +225,7 @@
         }
         $('extractForm').reset();
         ui.clearErrors($('errorSummary'), checks.map(([input]) => input));
-        ['formStatus', 'linkStatus', 'linkPreview', 'archiveStatus', 'extractWarnings']
+        ['formStatus', 'linkPreview', 'archiveStatus', 'extractWarnings']
             .forEach((id) => $(id).replaceChildren());
         shownFrames = [];
         hasResults = false;
@@ -235,10 +258,11 @@
     function setWorking(isWorking) {
         busy = isWorking;
         const submit = $('extractSubmit');
-        submit.textContent = isWorking ? 'Extracting...' : 'Extract frames';
+        submit.textContent = 'Extracting...';
         $('resultActions').hidden = isWorking || !hasResults;
         if (isWorking) submit.setAttribute('aria-disabled', 'true');
         else submit.removeAttribute('aria-disabled');
+        updateSubmitLabel();
     }
 
     function showOutcome(job) {
@@ -309,7 +333,8 @@
     } else if (saved) {
         $('videoUrl').value = typeof saved.url === 'string' ? saved.url : '';
     }
-    window.attachLinkPreview($('videoUrl'), $('linkPreview'));
+    source = videoSource.attach({ input: $('videoUrl'), button: $('analyzeBtn'), panel: $('linkPreview') });
+    updateSubmitLabel();
 
     if (saved && !prefill) {
         displayResults(saved.frames, Array.isArray(saved.warnings) ? saved.warnings.map(String) : [], { restored: true });

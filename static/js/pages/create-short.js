@@ -13,6 +13,7 @@
     let subtitling = false;        // a subtitled copy is being made (one at a time)
     let signedIn = false;          // set once the server confirms the YouTube sign-in
     let cancelRequested = false;   // set by the Cancel button while waiting for sign-in
+    let source = null;             // the analyzed video link (video-source.js), set at the end
 
     // Server text is untrusted for display purposes: everything below is built
     // with textContent / addEventListener instead of HTML strings.
@@ -49,6 +50,7 @@
         $('customDurationDiv').hidden = duration !== 'custom';
         if (duration === 'custom') $('customDuration').focus();
         else ui.clearFieldError($('customDuration'));
+        updateTiming();
     }
 
     function getDuration() {
@@ -61,7 +63,10 @@
     }
 
     document.querySelectorAll('.duration-option').forEach((option) => {
-        option.addEventListener('click', () => selectDuration(option));
+        // A preset longer than the video stays visible, with the reason, but cannot be chosen
+        option.addEventListener('click', () => {
+            if (option.getAttribute('aria-disabled') !== 'true') selectDuration(option);
+        });
     });
 
     // ---- crop diagram -----------------------------------------------------
@@ -76,9 +81,75 @@
 
     $('verticalFormat').addEventListener('change', updateCropDiagram);
 
-    // ---- link check -------------------------------------------------------
+    // ---- the video: analyzed once its link is pasted (video-source.js) ------------
 
-    ui.attachLinkCheck($('validateShortBtn'), $('shortVideoUrl'), $('shortLinkStatus'));
+    // Its length, once known: start, length and the presets are checked against it
+    function sourceDuration() {
+        const state = source ? source.state() : null;
+        const seconds = state && state.status === 'ready' ? Number(state.video.duration) : NaN;
+        return seconds > 0 ? seconds : null;
+    }
+
+    function startSeconds() {
+        const value = $('startTime').value.trim();
+        if (!value) return 0;
+        const parsed = value.includes(':') ? ui.parseTimecode(value) : Number(value);
+        return parsed !== null && Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+    }
+
+    function chosenLength() {
+        try {
+            return getDuration();
+        } catch (error) {
+            return null;
+        }
+    }
+
+    function updateLengthOptions(total) {
+        document.querySelectorAll('.duration-option[data-note]').forEach((option) => {
+            const tooLong = total !== null && Number(option.dataset.duration) > total;
+            option.querySelector('small').textContent = tooLong ? 'Longer than the video' : option.dataset.note;
+            if (tooLong) option.setAttribute('aria-disabled', 'true');
+            else option.removeAttribute('aria-disabled');
+        });
+    }
+
+    // "Ends at 2:15 of 3:33", or how much of the clip the video has room for
+    function updateTiming() {
+        const total = sourceDuration();
+        const start = startSeconds();
+        const length = chosenLength();
+        updateLengthOptions(total);
+        if (!rendering) $('createSubmit').textContent = length ? `Create ${Math.round(length)}-second short` : 'Create short';
+        const hint = $('startHint');
+        if (total === null || start === null || length === null) {
+            hint.textContent = 'Leave blank to start from the beginning.';
+        } else if (start >= total) {
+            hint.textContent = `The video is ${ui.formatClock(total)} long: start before that.`;
+        } else if (start + length > total) {
+            hint.textContent = `Runs past the end of the video (${ui.formatClock(total)}): ` +
+                `the short will be ${ui.formatClock(total - start)} long.`;
+        } else {
+            hint.textContent = `Ends at ${ui.formatClock(start + length)} of ${ui.formatClock(total)}.`;
+        }
+    }
+
+    function updateSuggest(state) {
+        const youtube = state.status === 'ready' && state.video.platform === 'youtube';
+        if (youtube) $('suggestBtn').removeAttribute('aria-disabled');
+        else $('suggestBtn').setAttribute('aria-disabled', 'true');
+        $('suggestHint').textContent = state.status === 'ready' && !youtube
+            ? 'Only for YouTube links: other sites do not share which parts people replay.'
+            : 'For YouTube links: finds the parts people replay most, at the length above. Takes a few seconds.';
+    }
+
+    function onSourceChange(state) {
+        updateSuggest(state);
+        updateTiming();
+    }
+
+    $('startTime').addEventListener('input', updateTiming);
+    $('customDuration').addEventListener('input', updateTiming);
 
     // ---- check the form before anything is downloaded ----------------------
 
@@ -86,6 +157,9 @@
         const url = $('shortVideoUrl').value.trim();
         if (!url) return 'Enter a video link to cut a short from';
         if (!ui.isLink(url)) return 'Enter a full link, starting with https://';
+        if (source && source.state().status === 'invalid') {
+            return 'This link cannot be used: ' + (source.state().message || 'see above');
+        }
         return null;
     }
 
@@ -103,8 +177,14 @@
         const value = $('startTime').value.trim();
         // Seconds without a colon are read as a number by the server (parse_start_time)
         const asSeconds = value.includes(':') ? NaN : Number(value);
-        if (!value || ui.parseTimecode(value) !== null || (Number.isFinite(asSeconds) && asSeconds >= 0)) return null;
-        return 'Enter the start as m:ss, h:mm:ss or seconds, for example 1:30 or 90';
+        if (value && ui.parseTimecode(value) === null && !(Number.isFinite(asSeconds) && asSeconds >= 0)) {
+            return 'Enter the start as m:ss, h:mm:ss or seconds, for example 1:30 or 90';
+        }
+        const total = sourceDuration();
+        if (total !== null && startSeconds() >= total) {
+            return `Start before the end of the video (${ui.formatClock(total)})`;
+        }
+        return null;
     }
 
     const checks = [[$('shortVideoUrl'), linkError], [$('customDuration'), lengthError],
@@ -125,10 +205,7 @@
     const PRESET_LENGTHS = [15, 30, 60];
     const LENGTH_MATCH_SECONDS = 0.5;
 
-    function clock(totalSeconds) {
-        const seconds = Math.floor(totalSeconds);
-        return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
-    }
+    const clock = (totalSeconds) => ui.formatClock(Math.floor(totalSeconds));
 
     // Fills in the start and length; a suggestion that ends on a line may be a little shorter
     function useSuggestion(clip) {
@@ -168,14 +245,8 @@
 
     async function suggestMoments() {
         const status = $('suggestStatus');
-        const url = $('shortVideoUrl').value.trim();
+        const url = source.state().url;
         $('suggestions').replaceChildren();
-        if (!ui.isLink(url)) {
-            ui.setFieldError($('shortVideoUrl'), 'Enter a YouTube link first');
-            $('shortVideoUrl').focus();
-            status.replaceChildren();
-            return;
-        }
         let duration;
         try {
             duration = getDuration();
@@ -205,14 +276,22 @@
         $('suggestions').replaceChildren(...data.clips.map(suggestionItem));
     }
 
-    $('suggestBtn').addEventListener('click', () => ui.whileWorking($('suggestBtn'), 'Looking...', suggestMoments));
+    $('suggestBtn').addEventListener('click', () => {
+        if ($('suggestBtn').getAttribute('aria-disabled') === 'true') {
+            $('suggestStatus').replaceChildren(notice('info', 'Analyze a YouTube link first.',
+                'Paste it above; suggestions use its replay data.'));
+            return;
+        }
+        ui.whileWorking($('suggestBtn'), 'Looking...', suggestMoments);
+    });
 
     // ---- create a short: a background job, followed in a progress card ----------
 
     function setRendering(isRendering) {
         rendering = isRendering;
         const submit = $('createSubmit');
-        submit.textContent = isRendering ? 'Creating...' : 'Create short';
+        submit.textContent = 'Creating...';
+        if (!isRendering) updateTiming();
         if (isRendering) submit.setAttribute('aria-disabled', 'true');
         else submit.removeAttribute('aria-disabled');
     }
@@ -660,7 +739,8 @@
 
     const prefill = new URLSearchParams(window.location.search).get('url');
     if (prefill) $('shortVideoUrl').value = prefill;
-    window.attachLinkPreview($('shortVideoUrl'), $('shortLinkPreview'));
+    source = videoSource.attach({ input: $('shortVideoUrl'), button: $('analyzeShortBtn'),
+                                  panel: $('shortLinkPreview'), onChange: onSourceChange });
     updateCropDiagram();
     showRequestedShort();
     resumeRunningJob();

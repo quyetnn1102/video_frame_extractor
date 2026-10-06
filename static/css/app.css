@@ -580,13 +580,10 @@ select {
 
 /* ---- link check: the answer to "Check link" ---- */
 
-.link-status:not(:empty) {
-    margin-top: var(--space-3);
-}
-
-.link-status .tips {
-    display: block;
-    margin-top: var(--space-1);
+/* What to try when a link fails (video-source.js) */
+.notice .tips {
+    margin: var(--space-1) 0 0;
+    padding-left: 1.1rem;
     color: var(--ink-soft);
 }
 

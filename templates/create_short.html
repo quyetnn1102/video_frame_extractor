@@ -32,34 +32,33 @@
                             <div class="input-row">
                                 <input type="url" id="shortVideoUrl" required autocomplete="off"
                                        placeholder="https://www.youtube.com/watch?v=...">
-                                <button type="button" class="btn" id="validateShortBtn">Check link</button>
+                                <button type="button" class="btn" id="analyzeShortBtn">Analyze video</button>
                             </div>
                             <p class="hint">YouTube, TikTok, Instagram, Facebook or Douyin. Only use videos you own or have permission to use.</p>
-                            <div class="link-status" id="shortLinkStatus" role="status"></div>
                             <div class="preview-slot" id="shortLinkPreview" aria-live="polite"></div>
                         </div>
 
                         <div class="field">
                             <span class="label" id="durationLabel">Length</span>
                             <div class="durations" role="group" aria-labelledby="durationLabel">
-                                <button type="button" class="duration-option" data-duration="15" aria-pressed="false">
+                                <button type="button" class="duration-option" data-duration="15" data-note="TikTok" aria-pressed="false">
                                     <strong>15 s</strong><small>TikTok</small>
                                 </button>
-                                <button type="button" class="duration-option" data-duration="30" aria-pressed="true">
+                                <button type="button" class="duration-option" data-duration="30" data-note="Reels" aria-pressed="true">
                                     <strong>30 s</strong><small>Reels</small>
                                 </button>
-                                <button type="button" class="duration-option" data-duration="60" aria-pressed="false">
+                                <button type="button" class="duration-option" data-duration="60" data-note="Shorts" aria-pressed="false">
                                     <strong>60 s</strong><small>Shorts</small>
                                 </button>
                                 <button type="button" class="duration-option" data-duration="custom" aria-pressed="false">
-                                    <strong>Other</strong><small>1 to 300 s</small>
+                                    <strong>Custom</strong><small>1 to 300 s</small>
                                 </button>
                             </div>
                             <input type="hidden" id="selectedDuration" value="30">
                         </div>
 
                         <div class="field" id="customDurationDiv" hidden>
-                            <label for="customDuration">Length in seconds</label>
+                            <label for="customDuration">Custom length (seconds)</label>
                             <input type="number" id="customDuration" min="1" max="300" step="0.1" placeholder="1 to 300">
                             <p class="hint">Only clips of up to 60 seconds can be uploaded to YouTube from here.</p>
                         </div>
@@ -69,7 +68,7 @@
                                 <span class="label" id="suggestLabel">Not sure where to cut?</span>
                                 <button type="button" class="btn btn-sm" id="suggestBtn">Suggest moments</button>
                             </div>
-                            <p class="hint">For YouTube links: finds the parts people replay most, at the length above. Takes a few seconds.</p>
+                            <p class="hint" id="suggestHint">For YouTube links: finds the parts people replay most, at the length above. Takes a few seconds.</p>
                             <div class="suggest-status" id="suggestStatus" role="status"></div>
                             <ol class="suggestions" id="suggestions" aria-labelledby="suggestLabel"></ol>
                         </div>
@@ -78,7 +77,7 @@
                             <div class="field">
                                 <label for="startTime">Start at <span class="optional">(optional)</span></label>
                                 <input type="text" id="startTime" autocomplete="off" placeholder="1:30 or 90 (seconds)">
-                                <p class="hint">Leave blank to start from the beginning.</p>
+                                <p class="hint" id="startHint" aria-live="polite">Leave blank to start from the beginning.</p>
                             </div>
                             <div class="field">
                                 <label for="quality">Quality</label>
@@ -163,7 +162,7 @@
 
     <script src="/static/js/ui.js"></script>
     <script src="/static/js/job-progress.js"></script>
-    <script src="/static/js/link-preview.js"></script>
+    <script src="/static/js/video-source.js"></script>
     <script src="/static/js/pages/create-short.js"></script>
 </body>
 </html>

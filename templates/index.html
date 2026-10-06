@@ -21,15 +21,15 @@
             {% include 'partials/topbar.html' %}
 
             <main id="main" class="page">
-                <form class="card launcher" id="launchForm">
+                <form class="card launcher" id="launchForm" novalidate>
                     <h2 class="launcher-title">Turn videos into short clips and frames</h2>
                     <label class="launcher-label" for="launchUrl">Paste a video link</label>
                     <input type="url" id="launchUrl" autocomplete="off" placeholder="https://www.youtube.com/watch?v=...">
                     <div class="preview-slot" id="launchPreview" aria-live="polite"></div>
                     <div class="launch-actions">
-                        <button type="submit" class="btn btn-primary" id="launchShort" disabled>Create short</button>
-                        <button type="button" class="btn" id="launchFrames" disabled>Extract frames</button>
-                        <p class="hint">YouTube, TikTok, Instagram, Facebook or Douyin</p>
+                        <button type="submit" class="btn btn-primary" id="launchShort" aria-disabled="true">Create short</button>
+                        <button type="button" class="btn" id="launchFrames" aria-disabled="true">Extract frames</button>
+                        <p class="hint" id="launchHint" aria-live="polite">YouTube, TikTok, Instagram, Facebook or Douyin</p>
                     </div>
                 </form>
 
@@ -93,8 +93,8 @@
         </div>
     </div>
 
-    <script src="/static/js/link-preview.js"></script>
     <script src="/static/js/ui.js"></script>
+    <script src="/static/js/video-source.js"></script>
     <script src="/static/js/pages/home.js"></script>
 </body>
 </html>

@@ -329,6 +329,19 @@ class TestValidateAndVideoInfo(RouteTestCase):
         response = self.client.post('/api/video-info', json={'url': VALID_URL})
         self.assertEqual((response.status_code, response.get_json()['error']), (400, 'Not available'))
 
+    def test_video_info_names_the_platform_as_it_writes_itself(self):
+        self.extractor.get_video_info.return_value = (True, {'title': 'T', 'platform': 'tiktok'}, None)
+        data = self.client.post('/api/video-info', json={'url': VALID_URL}).get_json()
+        self.assertEqual(data['video_info']['platform_name'], 'TikTok')
+
+    def test_video_info_failures_say_whether_the_link_can_still_be_tried(self):
+        self.extractor.get_video_info.return_value = (False, None, 'Private video')
+        unreadable = self.client.post('/api/video-info', json={'url': VALID_URL}).get_json()
+        self.assertEqual(unreadable['reason'], 'unreadable', 'a supported link may still download')
+        self.assertTrue(unreadable['tips'], "the platform's tips come along")
+        invalid = self.client.post('/api/video-info', json={'url': 'https://example.com/video'}).get_json()
+        self.assertEqual(invalid['reason'], 'invalid')
+
 
 class TestExtractFrames(RouteTestCase):
     def post(self, **overrides):

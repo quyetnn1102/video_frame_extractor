@@ -636,7 +636,10 @@ class EnhancedVideoFrameExtractor:
                         # description is often present but None (TikTok, Instagram, Facebook)
                         'description': (info.get('description') or '')[:MAX_DESCRIPTION_LENGTH],
                         'thumbnail': info.get('thumbnail'),
-                        'platform': platform
+                        'platform': platform,
+                        # Frame size of the best format, so a page can tell wide from vertical
+                        'width': info.get('width'),
+                        'height': info.get('height'),
                     }
                     
                     video_logger.info("Video info extracted successfully", 

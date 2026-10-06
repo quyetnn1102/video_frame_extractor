@@ -37,7 +37,7 @@ from media_jobs import (DEFAULT_SHORT_DURATION, EXTRACT_STAGES, SHORT_STAGES, SU
                         finish_request_record, parse_extract_request, parse_short_request, run_recorded)
 from short_video import (MAX_SHORT_DURATION, MIN_SHORT_DURATION, ShortVideoError, parse_duration,
                          remove_partial_renders, text_overlay_available)
-from platform_guidance import PLATFORM_GUIDANCE
+from platform_guidance import PLATFORM_GUIDANCE, PLATFORM_NAMES
 from trending import VIDEO_CATEGORIES, fetch_trending
 from validators import MAX_TIMESTAMPS, resolve_in_folder, validator
 from video_processor import extractor, javascript_runtime_available
@@ -354,13 +354,15 @@ def create_app() -> Flask:
             return json_error('URL is required', 400)
 
         url = data['url'].strip()
-        is_valid, _, error = validator.validate_url(url)
-        if not is_valid:
-            return json_error(error, 400)
+        is_valid, platform, error = validator.validate_url(url)
+        tips = PLATFORM_GUIDANCE.get(platform, {}).get('tips', [])
+        if not is_valid:  # 'invalid': the link cannot be used at all
+            return jsonify({'success': False, 'error': error, 'reason': 'invalid', 'tips': tips}), 400
 
         success, video_info, info_error = extractor.get_video_info(url)
-        if not success:
-            return json_error(info_error, 400)
+        if not success:  # 'unreadable': a supported link whose details could not be read
+            return jsonify({'success': False, 'error': info_error, 'reason': 'unreadable', 'tips': tips}), 400
+        video_info['platform_name'] = PLATFORM_NAMES.get(video_info.get('platform'), video_info.get('platform'))
         return jsonify({'success': True, 'video_info': video_info})
 
     @app.route('/api/test-platform', methods=['POST'])
