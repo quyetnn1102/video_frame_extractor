@@ -10,7 +10,7 @@ requires-python = ">=3.10"
 dependencies = [
     # Web app
     "flask==2.3.3",
-    "werkzeug==2.3.7",
+    "werkzeug==3.1.9",
     "flask-limiter==3.12",
     "limits>=3.13",
     # Ranges, not exact pins, for libraries that other tools commonly share an environment
