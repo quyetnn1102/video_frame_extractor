@@ -49,7 +49,7 @@ dependencies = [
     "oauthlib==3.2.2",
 
     # Production server (Linux/macOS only; use `uv run python app_enhanced.py` on Windows)
-    "gunicorn==23.0.0; sys_platform != 'win32'",
+    "gunicorn==26.2.0; sys_platform != 'win32'",
 ]
 
 [dependency-groups]
