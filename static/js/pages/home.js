@@ -41,7 +41,14 @@
 
     function recentCard(item) {
         const thumb = element('div', 'recent-thumb');
-        if (typeof item.url === 'string' && item.url.startsWith('/shorts/')) {
+        if (typeof item.poster === 'string' && item.poster.startsWith('/shorts/posters/')) {
+            // A small still made by the server: far lighter than loading the video itself
+            const poster = element('img');
+            poster.src = item.poster;
+            poster.alt = '';  // the title is right below
+            poster.loading = 'lazy';
+            thumb.append(poster);
+        } else if (typeof item.url === 'string' && item.url.startsWith('/shorts/')) {
             const video = element('video');
             video.preload = 'metadata';
             video.muted = true;

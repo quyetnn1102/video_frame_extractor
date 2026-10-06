@@ -57,20 +57,8 @@
                         <div class="section-head">
                             <h2 id="platformHeading">Platforms</h2>
                         </div>
-                        <ul class="tally" id="platformStats">
-                            {% if analytics.platform_stats %}
-                                {% set busiest = analytics.platform_stats.values()|max or 1 %}
-                                {% for platform, count in analytics.platform_stats.items() %}
-                                <li>
-                                    <span class="name">{{ platform }}</span>
-                                    <span class="track"><span class="fill" data-width="{{ (count / busiest * 100)|round(1) }}"></span></span>
-                                    <span class="count">{{ count }}</span>
-                                </li>
-                                {% endfor %}
-                            {% else %}
-                                <li class="muted">No requests yet.</li>
-                            {% endif %}
-                        </ul>
+                        {# Built by dashboard.js from data-outcomes (tojson is safe in a single-quoted attribute) #}
+                        <ul class="tally" id="platformStats" data-outcomes='{{ (analytics.platform_outcomes or {})|tojson }}'></ul>
                     </section>
 
                     <section class="card" aria-labelledby="systemHeading">

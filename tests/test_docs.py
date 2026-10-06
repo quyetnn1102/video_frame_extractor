@@ -61,9 +61,11 @@ class TestApiTableMatchesTheApp(unittest.TestCase):
     def app_routes(self):
         extractor = Mock()
         extractor.cleanup_old_files.return_value = (0, 0, [])
+        # No startup cleanup: it would sweep (and make posters in) the real working folders
         with patch.object(app_enhanced, 'extractor', extractor), \
                 patch.object(app_enhanced, 'youtube_uploader', Mock()), \
-                patch.object(app_enhanced, 'db_manager', Mock()):
+                patch.object(app_enhanced, 'db_manager', Mock()), \
+                patch.object(app_enhanced, 'run_startup_cleanup'):
             app = app_enhanced.create_app()
         routes = set()
         for rule in app.url_map.iter_rules():

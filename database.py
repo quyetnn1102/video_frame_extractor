@@ -337,6 +337,13 @@ def get_analytics() -> Dict[str, Any]:
                 ORDER BY count DESC
             ''')
             platform_stats = dict(cursor.fetchall())
+
+            # How each platform's requests ended: the dashboard shows what fails where
+            cursor.execute('SELECT platform, status, COUNT(*) FROM video_requests GROUP BY platform, status')
+            platform_outcomes = {}
+            for platform, status, count in cursor.fetchall():
+                outcome = platform_outcomes.setdefault(platform, dict.fromkeys(OUTCOMES, 0))
+                outcome[status if status in OUTCOMES[:-1] else 'other'] += count
             
             # Recent activity (last 24 hours)
             cursor.execute('''
@@ -361,6 +368,7 @@ def get_analytics() -> Dict[str, Any]:
                 'successful_requests': successful_requests,
                 'success_rate': (successful_requests / total_requests * 100) if total_requests > 0 else 0,
                 'platform_stats': platform_stats,
+                'platform_outcomes': platform_outcomes,
                 'recent_requests_24h': recent_requests,
                 'avg_processing_time_ms': round(avg_processing_time, 2),
                 'total_frames_extracted': total_frames
@@ -373,10 +381,15 @@ def get_analytics() -> Dict[str, Any]:
             'successful_requests': 0,
             'success_rate': 0,
             'platform_stats': {},
+            'platform_outcomes': {},
             'recent_requests_24h': 0,
             'avg_processing_time_ms': 0,
             'total_frames_extracted': 0
         }
+
+# How a request can end; 'other' is anything else (still running, or stopped by a restart)
+OUTCOMES = ('completed', 'failed', 'cancelled', 'other')
+
 
 def sqlite_time_to_iso(value):
     """CURRENT_TIMESTAMP is UTC without a zone ('2026-10-05 15:44:30'); browsers need the 'Z'."""

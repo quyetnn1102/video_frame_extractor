@@ -27,7 +27,7 @@ import media_jobs
 from config import get_config
 from database import db_manager, get_analytics, get_recent_requests
 from jobs import JobFailed, JobQueueFull, JobRegistry, NullReporter
-from library import folder_size_bytes, list_shorts
+from library import POSTER_FOLDER, folder_size_bytes, list_shorts, remove_poster, sync_posters
 from logger import LogContext, api_logger, app_logger
 from media_jobs import (EXTRACT_STAGES, SHORT_STAGES, finish_request_record, parse_extract_request,
                         parse_short_request, run_recorded)
@@ -534,6 +534,16 @@ def create_app() -> Flask:
             return json_error('Job not found', 404)
         return jsonify({'success': True, 'job': job})
 
+    @app.route('/shorts/posters/<filename>')
+    @limiter.exempt
+    def serve_short_poster(filename):
+        """Only serves posters that exist; they are made when a short is created or at startup."""
+        folder = config.SHORTS_FOLDER / POSTER_FOLDER
+        path = resolve_in_folder(folder, filename, ('.jpg',))
+        if path is None:
+            return json_error('Not found', 404)
+        return send_from_directory(folder, path.name)
+
     @app.route('/shorts/<filename>')
     @limiter.exempt
     def serve_short_video(filename):
@@ -563,12 +573,14 @@ def create_app() -> Flask:
         except OSError as error:
             app_logger.error(f"Could not delete a short ({type(error).__name__})")
             return json_error('Could not delete the short', 500)
+        remove_poster(path)
         return jsonify({'success': True})
 
     @app.route('/api/cleanup', methods=['POST'])
     @limiter.limit("5 per minute")
     def cleanup_files():
         files_deleted, space_freed, errors = extractor.cleanup_old_files()
+        sync_posters(config.SHORTS_FOLDER)  # posters of deleted shorts go too
         response = {
             'success': True,
             'files_deleted': files_deleted,
@@ -596,7 +608,8 @@ def create_app() -> Flask:
         try:
             return jsonify({'authenticated': False, 'auth_url': youtube_uploader.begin_auth()})
         except YouTubeUploaderError as error:
-            return jsonify({'authenticated': False, 'error': str(error)}), 400
+            app_logger.warning(f"YouTube sign-in could not start: {error.user_message}")
+            return jsonify({'success': False, 'authenticated': False, 'error': error.user_message}), 400
 
     @app.route('/oauth2callback')
     @limiter.limit("10 per minute")
@@ -681,8 +694,11 @@ def run_startup_cleanup() -> None:
     try:
         deleted, freed_mb, _ = extractor.cleanup_old_files()
         partial = remove_partial_renders(get_config().SHORTS_FOLDER)
+        # Posters for shorts made before they existed; and none for shorts that were deleted
+        posters_made, posters_removed = sync_posters(get_config().SHORTS_FOLDER)
         app_logger.info("Startup cleanup finished", files_deleted=deleted, space_freed_mb=freed_mb,
-                        partial_renders_removed=partial)
+                        partial_renders_removed=partial, posters_made=posters_made,
+                        posters_removed=posters_removed)
     except (OSError, ValueError) as error:
         app_logger.warning(f"Startup cleanup failed ({type(error).__name__})")
 

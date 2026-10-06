@@ -309,6 +309,7 @@ class TestTemplates(unittest.TestCase):
         self.assertIn('id="requestRows"', dashboard)
         self.assertIn("'/api/cleanup'", dashboard)
         self.assertIn('document.hidden', dashboard, 'no polling in a background tab')
+        self.assertIn('showPlatforms(data.analytics.platform_outcomes)', dashboard, 'success and failure per platform')
         cleanup = dashboard.split('function confirmCleanup')[1].split("addEventListener('click', confirmCleanup)")[0]
         self.assertIn('showModal()', cleanup, 'deleting shorts is confirmed first')
         self.assertIn('Shorts, frames and downloads', dashboard, 'the button says what it deletes')

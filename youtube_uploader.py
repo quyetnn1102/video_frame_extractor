@@ -40,7 +40,14 @@ QUOTA_DOCS_URL = "https://developers.google.com/youtube/v3/determine_quota_cost"
 
 
 class YouTubeUploaderError(Exception):
-    """An error whose message is safe to show to the user."""
+    """
+    A problem the user can act on. Routes show `user_message`, which is always text written
+    here (never exception text or a path), instead of str(error).
+    """
+
+    def __init__(self, user_message: str):
+        super().__init__(user_message)
+        self.user_message = user_message
 
 
 @dataclass

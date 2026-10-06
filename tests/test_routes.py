@@ -654,7 +654,19 @@ class TestYouTubeRoutes(RouteTestCase):
         self.uploader.begin_auth.side_effect = YouTubeUploaderError('client_secrets.json not found.')
         response = self.client.post('/api/youtube-auth/start')
         self.assertEqual(response.status_code, 400)
-        self.assertEqual(response.get_json()['error'], 'client_secrets.json not found.')
+        self.assertEqual(response.get_json(), {'success': False, 'authenticated': False,
+                                               'error': 'client_secrets.json not found.'})
+
+    def test_sign_in_errors_show_their_written_message_not_the_exception_text(self):
+        """str(error) would also carry whatever text a future cause adds; user_message cannot."""
+        error = YouTubeUploaderError('Could not save YouTube credentials')
+        error.args = (r'[Errno 13] Permission denied: C:\Users\me\youtube_credentials.json',)
+        self.uploader.is_authenticated.return_value = False
+        self.uploader.begin_auth.side_effect = error
+        body = self.client.post('/api/youtube-auth/start').get_data(as_text=True)
+        self.assertIn('Could not save YouTube credentials', body)
+        self.assertNotIn('Permission denied', body)
+        self.assertNotIn('Users', body)
 
     def test_starting_sign_in_is_not_available_as_a_get(self):
         self.assertEqual(self.client.get('/api/youtube-auth/start').status_code, 405)
@@ -882,6 +894,24 @@ class TestJobPollingIsNotRateLimited(RouteTestCase):
 class TestPhaseFourRoutes(RouteTestCase):
     """Page-level improvements: frame archive, dashboard data, trending sample flag, captions."""
 
+    def test_posters_are_served_and_deleted_with_their_short(self):
+        posters = self.shorts / '.posters'
+        posters.mkdir()
+        (posters / 'My Clip_abcd1234_short.jpg').write_bytes(b'jpeg')
+        (self.shorts / 'My Clip_abcd1234_short.mp4').write_bytes(b'mp4')
+        (self.shorts / 'secret.jpg').write_bytes(b'x')
+
+        poster = self.client.get('/shorts/posters/My%20Clip_abcd1234_short.jpg')
+        self.assertEqual((poster.status_code, poster.data), (200, b'jpeg'))
+        poster.close()
+        for path in ['/shorts/posters/missing.jpg', '/shorts/posters/..%2Fsecret.jpg',
+                     '/shorts/posters/..%5Csecret.jpg']:
+            with self.subTest(path=path):
+                self.assertEqual(self.client.get(path).status_code, 404)
+
+        self.client.post('/api/shorts/delete', json={'filename': 'My Clip_abcd1234_short.mp4'})
+        self.assertEqual(list(posters.iterdir()), [], 'the poster goes with its short')
+
     def test_frames_can_be_downloaded_as_one_zip(self):
         import io
         import zipfile
@@ -918,6 +948,18 @@ class TestPhaseFourRoutes(RouteTestCase):
         self.assertEqual(data['recent_requests'][0]['error'], 'Video unavailable')
         self.assertIn('Video unavailable', page)
         self.assertNotIn('IP address', page, 'the app only serves this computer')
+
+    def test_the_dashboard_hands_the_platform_outcomes_to_its_script(self):
+        import html
+        import json
+        import re
+        outcomes = {"you'tube<b>": {'completed': 2, 'failed': 1, 'cancelled': 0, 'other': 0}}
+        with patch.object(app_enhanced, 'get_analytics', return_value={'platform_outcomes': outcomes}),                 patch.object(app_enhanced, 'get_recent_requests', return_value=[]),                 patch.object(app_enhanced, 'collect_system_info', return_value={}):
+            page = self.client.get('/dashboard').get_data(as_text=True)
+        attribute = re.search(r"data-outcomes='([^']*)'", page)
+        self.assertIsNotNone(attribute, "a quote or < in the data must not end the attribute")
+        self.assertEqual(json.loads(html.unescape(attribute.group(1))), outcomes)
+        self.assertNotIn('<b>', page)
 
     def test_trending_says_when_it_shows_sample_data(self):
         from trending import get_fallback_trending_data

@@ -79,6 +79,7 @@
 }
 
 .tally .track {
+    display: flex;
     height: 0.8rem;
     background: var(--soft);
     border-radius: 999px;
@@ -89,7 +90,18 @@
     display: block;
     height: 100%;
     background: var(--primary);
-    border-radius: 999px;
+}
+
+/* Outcome segments; the words under the bar say the same, so colour is never the only cue */
+.tally .fill.is-ok { background: var(--ok); }
+.tally .fill.is-failed { background: var(--danger); }
+.tally .fill.is-other { background: var(--field-edge); }
+
+.tally .outcomes {
+    grid-column: 2 / -1;
+    margin-top: -0.6rem;
+    font-size: var(--text-xs);
+    color: var(--ink-soft);
 }
 
 .tally .count {

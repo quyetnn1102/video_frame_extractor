@@ -235,9 +235,16 @@
 
         const video = element('video', 'short-video');
         video.controls = true;
-        video.preload = 'metadata';
         video.playsInline = true;
-        if (source) video.src = source + '#t=0.1';  // shows the first moment as the cover
+        const poster = safeUrl(item.poster, ['/shorts/posters/']);
+        if (poster) {
+            video.poster = poster;
+            video.preload = 'none';  // the poster shows it; the video loads when played
+            if (source) video.src = source;
+        } else {
+            video.preload = 'metadata';
+            if (source) video.src = source + '#t=0.1';  // shows the first moment as the cover
+        }
 
         const meta = element('p', 'short-meta');
         if (item.duration) meta.append(element('span', undefined, `${item.duration} s`));
