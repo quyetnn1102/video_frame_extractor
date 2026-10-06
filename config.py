@@ -125,6 +125,8 @@ class Config:
     COOKIE_BROWSERS = ['chrome', 'firefox', 'edge', 'safari']
     USE_BROWSER_COOKIES = env_bool('USE_BROWSER_COOKIES')
     COOKIE_FILE_PATH = BASE_DIR / 'instagram_cookies.txt'
+    # Douyin refuses plain clients; cookies exported from your own browser may get through
+    DOUYIN_COOKIE_FILE_PATH = BASE_DIR / 'douyin_cookies.txt'
 
     # Cleanup settings
     AUTO_CLEANUP_HOURS = env_int('AUTO_CLEANUP_HOURS', 24)

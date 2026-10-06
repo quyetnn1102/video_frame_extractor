@@ -24,7 +24,7 @@ Downloads are done by [yt-dlp](https://github.com/yt-dlp/yt-dlp), frames by Open
 | TikTok | `/@user/video/<id>`, `vm.tiktok.com`, `vt.tiktok.com`, `tiktok.com/t/` | Some videos are region-blocked |
 | Instagram | `/p/`, `/reel/`, `/reels/`, `/tv/` | Public posts; restricted content needs [cookies](#platform-authentication) |
 | Facebook | `/<page>/videos/<id>`, `/watch/?v=<id>`, `/reel/<id>`, `fb.watch/` | Public videos only |
-| Douyin | `douyin.com/video/<id>` | `v.douyin.com` short links are not supported by yt-dlp |
+| Douyin | `douyin.com/video/<id>`, any `douyin.com` page with `?modal_id=<id>`, `v.douyin.com` share links | Often refused: Douyin needs browser cookies (see [Platform authentication](#platform-authentication)) and now checks signatures only its own pages make, so some videos cannot be downloaded at all |
 
 Limits (all configurable, see [Configuration](#configuration)): the source video may be at most `MAX_VIDEO_DURATION` seconds (1 hour by default) and `MAX_DOWNLOAD_MB` megabytes (500; a running download is aborted when it passes this); playlists are never downloaded; a short is 1-300 seconds. The app asks for 720p or lower, but that is a preference: some sites only offer a single quality. This app checks uploads against the 60-second limit of classic YouTube Shorts.
 
@@ -109,6 +109,14 @@ Most public videos need no login. **Instagram** sometimes refuses content unless
 4. The app uses the file automatically when it exists. Reading your *browser's* cookies directly is off unless you set `USE_BROWSER_COOKIES=true`, because it exposes your whole browser profile to the download process.
 
 Treat `instagram_cookies.txt` like a password: never commit or share it, and delete it when you are done. Using a logged-in account to automate downloads can violate Instagram's terms and get the account restricted (see [Responsible use](#responsible-use)). Content that needs a login may still fail if the account cannot see it.
+
+**Douyin** answers only browsers, so yt-dlp needs cookies from one ("Fresh cookies are needed"). No login is required:
+
+1. Open [douyin.com](https://www.douyin.com) in your browser and play any video, so the site sets its cookies.
+2. Export the cookies for `douyin.com` in Netscape format (same kind of exporter as above) and save them as `douyin_cookies.txt` in the project root. The file is git-ignored; treat it like a password.
+3. The app uses the file automatically. Export again when Douyin refuses: the cookies expire.
+
+This may still fail. Since September 2026 Douyin also checks request signatures that only its own pages can create, which has broken most download tools. The app does not try to forge them.
 
 ## YouTube upload
 
@@ -224,7 +232,8 @@ The suite is offline and fast: it covers validation, the Flask routes (with the 
 | Symptom | Fix |
 |---|---|
 | A platform stops working | Upgrade yt-dlp first: `uv lock --upgrade-package yt-dlp`, then set the new version in the `yt-dlp==` pin in `pyproject.toml` and run `uv sync` |
-| `No suitable extractor` | The link form is not supported (for example `v.douyin.com`); use the full video URL |
+| `No suitable extractor` | The link form is not supported; use the full video URL |
+| Douyin: "Douyin only answers browsers" | Export your douyin.com cookies to `douyin_cookies.txt` (see [Platform authentication](#platform-authentication)). It may still fail: Douyin has blocked most download tools since September 2026 |
 | `Invalid Host header` | You opened the app under another name; add it to `ALLOWED_HOSTS` |
 | Instagram: login required / restricted | See [Platform authentication](#platform-authentication) |
 | TikTok: "did not send the video page" | Run `uv sync` (it installs `curl-cffi`, which lets yt-dlp present itself as a browser), restart the app, or wait a few minutes if TikTok is rate limiting you |

@@ -100,8 +100,9 @@ PLATFORM_GUIDANCE = {
     },
     'douyin': {
         'status': 'limited',
-        'notes': 'Public videos with a full douyin.com/video/<id> link',
-        'tips': ['v.douyin.com short links are not supported; open the video and copy its full URL'],
+        'notes': 'Public videos; Douyin often refuses automated downloads',
+        'tips': ['douyin.com/video/<id>, ?modal_id=<id> and v.douyin.com share links all work',
+                 'If Douyin refuses, export your browser cookies to douyin_cookies.txt (see the README)'],
     },
 }
 

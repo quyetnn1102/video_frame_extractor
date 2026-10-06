@@ -83,6 +83,7 @@ app_data.db
 
 # Instagram cookies and authentication
 instagram_cookies.txt
+douyin_cookies.txt
 
 # Generated short videos
 generated_shorts/*

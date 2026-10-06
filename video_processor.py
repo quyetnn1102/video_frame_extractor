@@ -37,6 +37,7 @@ BYTES_PER_MB = 1024 * 1024
 # yt-dlp's wording (lower case) when TikTok serves its bot-check page instead of the video page
 TIKTOK_BLOCKED_MARKER = 'unexpected response from webpage request'
 YOUTUBE_FORBIDDEN_MARKER = 'http error 403'
+DOUYIN_COOKIES_MARKER = 'fresh cookies'
 JS_RUNTIMES = ('deno', 'node', 'bun')  # yt-dlp uses the first one it finds; any is enough
 ANSI_ESCAPES = re.compile(r'\x1b\[[0-9;]*[A-Za-z]')
 
@@ -360,9 +361,28 @@ class FacebookProcessor(PlatformProcessor):
 
 class DouyinProcessor(PlatformProcessor):
     """Douyin-specific processing"""
-    
+
     def __init__(self):
         super().__init__('douyin')
+
+    def get_download_options(self, url: str) -> Dict[str, Any]:
+        opts = super().get_download_options(url)
+        cookie_file = self.config.DOUYIN_COOKIE_FILE_PATH
+        if cookie_file.is_file():
+            opts['cookiefile'] = str(cookie_file)
+        return opts
+
+    def process_download_error(self, error: str) -> str:
+        if DOUYIN_COOKIES_MARKER in error.lower():
+            if self.config.DOUYIN_COOKIE_FILE_PATH.is_file():
+                return ("Douyin Error: Douyin refused the request even with douyin_cookies.txt. Export "
+                        "fresh cookies (open douyin.com in your browser first). Douyin now also checks "
+                        "signatures only its own pages can make, so some videos cannot be downloaded at all.")
+            return ("Douyin Error: Douyin only answers browsers. Export your cookies for douyin.com to "
+                    "douyin_cookies.txt in the app folder (see \"Platform authentication\" in the README) "
+                    "and try again. Douyin now also checks signatures only its own pages can make, so it "
+                    "may still refuse.")
+        return super().process_download_error(error)
 
 class EnhancedVideoFrameExtractor:
     """Enhanced video processing with improved error handling and modular design"""

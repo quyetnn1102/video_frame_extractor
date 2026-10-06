@@ -1,5 +1,5 @@
 """
-Safe resolution of share-link redirects (currently fb.watch).
+Safe resolution of share-link redirects (fb.watch and v.douyin.com).
 
 yt-dlp has no extractor for these short hosts, and the generic extractor that
 would follow them is disabled. We resolve them ourselves instead: only the
@@ -15,7 +15,7 @@ import requests
 from validators import validator
 
 # Hosts that only redirect to the real video page.
-SHORT_LINK_HOSTS = frozenset({'fb.watch'})
+SHORT_LINK_HOSTS = frozenset({'fb.watch', 'v.douyin.com'})
 MAX_REDIRECT_HOPS = 3
 REQUEST_TIMEOUT_SECONDS = 10
 REDIRECT_STATUS_CODES = frozenset({301, 302, 303, 307, 308})
@@ -68,7 +68,8 @@ def resolve_short_url(url: str) -> Tuple[Optional[str], Optional[str]]:
         if status not in REDIRECT_STATUS_CODES or not location:
             return None, "The short link did not lead to a video"
 
-        current = urljoin(current, location)
+        # Douyin share links lead to www.iesdouyin.com/share/video/<id>: rewritten, not requested
+        current = validator.canonicalize_douyin_url(urljoin(current, location))
         is_valid, _, _ = validator.validate_url(current)
         if not is_valid:
             return None, "The short link redirected to an unsupported URL"
