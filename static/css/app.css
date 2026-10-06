@@ -30,6 +30,7 @@
     --lime-ink: #26340b;
     --tag: #9b2c8f;
     --danger: #b3261e;
+    --danger-strong: #8c1d17;
     --danger-soft: #fcebea;
     --ok: #1f6b3a;
     --ok-soft: #e7f5ec;
@@ -366,6 +367,7 @@ a.card:hover {
 input[type="text"],
 input[type="url"],
 input[type="number"],
+input[type="search"],
 select,
 textarea {
     width: 100%;
@@ -524,11 +526,16 @@ select {
     border-color: var(--primary-hover);
 }
 
-.btn-danger,
-.btn-danger:hover {
+.btn-danger {
     color: var(--surface);
     background: var(--danger);
     border-color: var(--danger);
+}
+
+.btn-danger:hover {
+    color: var(--surface);
+    background: var(--danger-strong);
+    border-color: var(--danger-strong);
 }
 
 .btn-quiet {

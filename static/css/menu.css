@@ -1,0 +1,58 @@
+/* The "More" menu built by ui.actionMenu: rare actions behind one button.
+   Loaded by the pages that use it (Your shorts, Trending). */
+
+.menu {
+    position: relative;
+    display: inline-block;
+}
+
+.menu-list {
+    position: absolute;
+    top: calc(100% + 0.35rem);
+    right: 0;
+    z-index: 20;
+    min-width: 15rem;
+    margin: 0;
+    padding: var(--space-1);
+    list-style: none;
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-radius: var(--radius-sm);
+    box-shadow: var(--dialog-shadow);
+}
+
+.menu-item {
+    display: block;
+    width: 100%;
+    padding: 0.6rem 0.75rem;
+    font: inherit;
+    font-size: var(--text-sm);
+    text-align: left;
+    color: var(--ink);
+    text-decoration: none;
+    background: none;
+    border: 0;
+    border-radius: 6px;
+    cursor: pointer;
+}
+
+.menu-item:hover,
+.menu-item:focus-visible {
+    background: var(--soft);
+}
+
+.menu-item.is-danger {
+    color: var(--danger);
+}
+
+.menu-item[aria-disabled="true"] {
+    color: var(--ink-soft);
+    cursor: not-allowed;
+}
+
+.menu-note {
+    display: block;
+    margin-top: 0.15rem;
+    font-size: var(--text-xs);
+    color: var(--ink-soft);
+}

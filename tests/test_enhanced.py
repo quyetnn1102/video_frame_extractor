@@ -56,6 +56,15 @@ class TestVideoProcessor(unittest.TestCase):
 class TestDatabaseManager(unittest.TestCase):
     """Uses a throwaway database file, never the real app_data.db."""
 
+    def test_uploads_are_remembered_per_short(self):
+        self.db_manager.record_upload('a.mp4', 'vid1', 'private')
+        self.db_manager.record_upload('a.mp4', 'vid2', 'unlisted')  # uploaded again
+        self.db_manager.record_upload('b.mp4', 'vid3', 'public')
+        self.assertEqual(self.db_manager.get_uploads(), {
+            'a.mp4': {'video_id': 'vid2', 'privacy': 'unlisted'},
+            'b.mp4': {'video_id': 'vid3', 'privacy': 'public'},
+        })
+
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)

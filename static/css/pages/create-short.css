@@ -198,64 +198,6 @@
     color: var(--ink-soft);
 }
 
-/* Your shorts: bordered cards that are rebuilt from the server on every visit */
-.library {
-    margin-top: clamp(2rem, 5vw, 3rem);
-}
-
-.library .notice {
-    margin-bottom: 1.25rem;
-}
-
-.shelf {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
-    gap: 1.5rem;
-    margin: 0;
-    padding: 0;
-    list-style: none;
-}
-
-.short-video {
-    display: block;
-    width: 100%;
-    aspect-ratio: 9 / 16;
-    object-fit: contain;
-    background: var(--strip);
-}
-
-.short-card.is-new {
-    border-color: var(--ink);
-    box-shadow: 0 0 0 2px var(--lime), var(--card-shadow);
-}
-
-.short-body {
-    padding: 0.85rem 1rem 1rem;
-}
-
-.short-title {
-    font-size: var(--text-base);
-    font-weight: 600;
-    line-height: 1.3;
-    overflow-wrap: anywhere;
-}
-
-.short-meta {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0 0.9rem;
-    margin-top: 0.2rem;
-    font-size: var(--text-sm);
-    color: var(--ink-soft);
-}
-
-.short-actions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.5rem;
-    margin-top: 0.8rem;
-}
-
 @media (max-width: 60rem) {
     .workbench {
         grid-template-columns: minmax(0, 1fr);

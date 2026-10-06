@@ -228,9 +228,105 @@
         }
     }
 
+    // ---- "More": rare actions behind one button, so a card shows only its main one ----------
+
+    /**
+     * A button that opens a small menu. Arrow keys move, Escape closes and returns to the button.
+     * A disabled item stays in the menu with its reason, so nothing disappears without a word.
+     * @param {string} label visible text ("More")
+     * @param {string} accessibleName what the menu acts on ("More actions for <title>")
+     * @param {Array<{label: string, onSelect?: function(): void, href?: string, danger?: boolean,
+     *                disabledReason?: string}>} items
+     * @returns {HTMLElement}
+     */
+    function actionMenu(label, accessibleName, items) {
+        const wrapper = element('div', 'menu');
+        const toggle = element('button', 'btn btn-sm menu-toggle', label);
+        toggle.type = 'button';
+        toggle.setAttribute('aria-label', accessibleName);
+        toggle.setAttribute('aria-haspopup', 'menu');
+        toggle.setAttribute('aria-expanded', 'false');
+        const list = element('ul', 'menu-list');
+        list.setAttribute('role', 'menu');
+        list.hidden = true;
+
+        const entries = items.map((item) => {
+            const entry = element(item.href ? 'a' : 'button', item.danger ? 'menu-item is-danger' : 'menu-item', item.label);
+            entry.setAttribute('role', 'menuitem');
+            entry.tabIndex = -1;
+            if (item.href) {
+                entry.href = item.href;
+                entry.target = '_blank';
+                entry.rel = 'noopener noreferrer';
+            } else {
+                entry.type = 'button';
+            }
+            if (item.disabledReason) {
+                entry.setAttribute('aria-disabled', 'true');
+                entry.append(element('span', 'menu-note', item.disabledReason));
+            }
+            entry.addEventListener('click', (event) => {
+                if (item.disabledReason) {
+                    event.preventDefault();
+                    return;
+                }
+                close(false);
+                if (item.onSelect) item.onSelect();
+            });
+            const row = element('li');
+            row.setAttribute('role', 'none');
+            row.append(entry);
+            list.append(row);
+            return entry;
+        });
+
+        function onOutside(event) {
+            if (!wrapper.contains(event.target)) close(false);
+        }
+
+        function open(focusIndex) {
+            list.hidden = false;
+            toggle.setAttribute('aria-expanded', 'true');
+            document.addEventListener('pointerdown', onOutside);
+            entries[(focusIndex + entries.length) % entries.length].focus();
+        }
+
+        function close(returnFocus) {
+            if (list.hidden) return;
+            list.hidden = true;
+            toggle.setAttribute('aria-expanded', 'false');
+            document.removeEventListener('pointerdown', onOutside);
+            if (returnFocus) toggle.focus();
+        }
+
+        toggle.addEventListener('click', () => (list.hidden ? open(0) : close(true)));
+        toggle.addEventListener('keydown', (event) => {
+            if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+                event.preventDefault();
+                open(event.key === 'ArrowDown' ? 0 : -1);
+            }
+        });
+        list.addEventListener('keydown', (event) => {
+            const index = entries.indexOf(document.activeElement);
+            const moves = { ArrowDown: index + 1, ArrowUp: index - 1, Home: 0, End: entries.length - 1 };
+            if (event.key in moves) {
+                event.preventDefault();
+                entries[(moves[event.key] + entries.length) % entries.length].focus();
+            } else if (event.key === 'Escape') {
+                event.preventDefault();
+                close(true);
+            } else if (event.key === 'Tab') {
+                close(false);
+            }
+        });
+
+        wrapper.append(toggle, list);
+        return wrapper;
+    }
+
     window.ui = {
         element, notice, scrollBehavior, relativeTime, postJson,
         parseTimecode, formatClock, isLink, showBusy, hideBusy,
-        setFieldError, clearFieldError, showErrors, clearErrors, revalidateOnInput, whileWorking,
+        setFieldError, clearFieldError, showErrors, clearErrors, revalidateOnInput, whileWorking, actionMenu,
     };
 })();

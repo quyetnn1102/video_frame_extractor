@@ -8,6 +8,7 @@ from unittest.mock import Mock, patch
 from urllib.parse import quote
 
 import app_enhanced
+import library_api
 import media_jobs
 from app_enhanced import create_app
 from config import get_config
@@ -48,6 +49,7 @@ class RouteTestCase(unittest.TestCase):
         self.uploader = self.patch_module('youtube_uploader')
         self.db = self.patch_module('db_manager')
         self.db.log_video_request.return_value = 7
+        self.db.get_uploads.return_value = {}
         # A fresh job registry per test, so jobs from other tests are not listed
         registry = JobRegistry(max_workers=2)
         patcher = patch.object(app_enhanced, 'job_registry', registry)
@@ -59,9 +61,9 @@ class RouteTestCase(unittest.TestCase):
         self.client = self.app.test_client()
 
     def patch_module(self, name):
-        """One mock for the name in app_enhanced and in media_jobs (which does the downloads)."""
+        """One mock for the name in app_enhanced, media_jobs (the downloads) and library_api."""
         mocked = Mock()
-        for module in (app_enhanced, media_jobs):
+        for module in (app_enhanced, media_jobs, library_api):
             if hasattr(module, name):
                 patcher = patch.object(module, name, mocked)
                 patcher.start()
@@ -602,6 +604,7 @@ class TestYouTubeRoutes(RouteTestCase):
         kwargs = self.uploader.upload_video.call_args.kwargs
         self.assertEqual(Path(kwargs['video_path']), short.resolve())
         self.assertEqual((kwargs['title'], kwargs['privacy_status']), ('My title', 'private'))
+        self.db.record_upload.assert_called_once_with(short.name, 'vid123', 'private')
 
     def test_server_paths_are_never_accepted(self):
         short = self.make_short()

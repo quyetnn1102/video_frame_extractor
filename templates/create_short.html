@@ -115,50 +115,22 @@
                         <div class="job-panel" id="jobPanel"></div>
                     </form>
 
-                    <aside class="aside card" aria-label="About the crop and YouTube upload">
+                    <aside class="aside card" aria-label="About the crop and where shorts go">
                         <figure class="crop" id="cropFigure">
                             <div class="crop-frame"><div class="crop-keep"></div></div>
                             <figcaption id="cropCaption">The outlined area is what you keep. Wide videos are cropped around the center.</figcaption>
                         </figure>
 
                         <div class="aside-note">
-                            <h2>Uploading to YouTube is optional</h2>
-                            <p>To upload a finished short to your own channel, set up Google API credentials first (see "YouTube upload" in the README). Uploads start as private.</p>
+                            <h2>Where shorts go</h2>
+                            <p>Finished shorts are saved in <a href="/shorts">Your shorts</a>, where you can download them, add Vietnamese subtitles to a copy or upload them to your own YouTube channel.</p>
                         </div>
                     </aside>
                 </div>
 
-                <section class="library" id="resultsSection" aria-labelledby="resultHeading">
-                    <div class="section-head">
-                        <h2 id="resultHeading" tabindex="-1">Your shorts</h2>
-                        <p id="libraryCount"></p>
-                    </div>
-                    <div id="resultsStatus" role="alert"></div>
-                    <div class="job-panel" id="subtitleJobPanel"></div>
-                    <p class="inline-loading" id="libraryLoading"><span class="mark is-scanning" aria-hidden="true"></span>Loading your shorts...</p>
-                    <ul class="shelf" id="resultsContent"></ul>
-                    <div class="empty-state" id="libraryEmpty" hidden>
-                        <div>
-                            <h3>No shorts yet</h3>
-                            <p>Shorts you make appear here and stay after you leave or refresh this page.</p>
-                        </div>
-                        <button type="button" class="btn" id="libraryStart">Start with a video link</button>
-                    </div>
-                </section>
             </main>
         </div>
     </div>
-
-    <div class="loading-overlay" id="loadingOverlay" role="dialog" aria-modal="true"
-         aria-labelledby="loadingHeading" aria-describedby="loadingMessage">
-        <div class="loading-box">
-            <span class="mark is-scanning" aria-hidden="true"></span>
-            <h2 id="loadingHeading" tabindex="-1">Working on it</h2>
-            <p id="loadingMessage">Please wait.</p>
-            <button type="button" class="btn" id="cancelLoadingBtn" hidden>Cancel</button>
-        </div>
-    </div>
-    <p class="visually-hidden" id="busyStatus" role="status"></p>
 
     <script src="/static/js/ui.js"></script>
     <script src="/static/js/job-progress.js"></script>

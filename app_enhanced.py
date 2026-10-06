@@ -10,12 +10,11 @@ import io
 import os
 import re
 import threading
-from contextlib import contextmanager
 import time
 import zipfile
 import uuid
 from datetime import datetime
-from typing import Any, Dict, Optional, Set
+from typing import Any, Dict, Optional
 from urllib.parse import urlsplit
 
 from flask import (Flask, jsonify, render_template, render_template_string, request,
@@ -30,8 +29,8 @@ from clip_finder import ClipFinderError, suggest_clips
 from config import get_config
 from database import db_manager, get_analytics, get_recent_requests
 from jobs import QUEUED, RUNNING, JobFailed, JobQueueFull, JobRegistry, NullReporter
-from library import (DEFAULT_LIMIT, MAX_LIMIT, POSTER_FOLDER, count_shorts, folder_size_bytes, list_shorts,
-                     remove_poster, sync_posters)
+from library import DEFAULT_LIMIT, MAX_LIMIT, POSTER_FOLDER, folder_size_bytes, remove_poster, sync_posters
+from library_api import BUSY_SHORT_MESSAGE, library_page, shorts_in_use, uploading
 from logger import LogContext, api_logger, app_logger
 from media_jobs import (DEFAULT_SHORT_DURATION, EXTRACT_STAGES, SHORT_STAGES, SUBTITLE_STAGES,
                         finish_request_record, parse_extract_request, parse_short_request, run_recorded)
@@ -41,7 +40,7 @@ from platform_guidance import PLATFORM_GUIDANCE, PLATFORM_NAMES
 from trending import VIDEO_CATEGORIES, fetch_trending
 from validators import MAX_TIMESTAMPS, resolve_in_folder, validator
 from video_processor import extractor, javascript_runtime_available
-from youtube_uploader import PRIVACY_STATUSES, YouTubeUploaderError, shorts_problem, youtube_uploader
+from youtube_uploader import PRIVACY_STATUSES, YouTubeUploaderError, youtube_uploader
 
 APP_VERSION = '2.1.0'
 LOOPBACK_HOSTS = ('127.0.0.1', 'localhost', '::1')
@@ -56,28 +55,6 @@ MAX_TRENDING_RESULTS = 50
 job_registry = JobRegistry(max_workers=get_config().MAX_CONCURRENT_JOBS)
 # Held while checking for a running subtitle job and starting one, so two requests cannot both start
 subtitle_start_lock = threading.Lock()
-# Shorts being uploaded to YouTube right now (uploads run inside their request, not as jobs)
-uploading_shorts: Set[str] = set()
-uploading_lock = threading.Lock()
-BUSY_SHORT_MESSAGE = 'This short is in use (subtitles or an upload are in progress). Try again when it finishes.'
-
-
-def shorts_in_use() -> Set[str]:
-    """Names of the shorts a job or an upload is working on."""
-    with uploading_lock:
-        uploading = set(uploading_shorts)
-    return job_registry.active_subjects() | uploading
-
-
-@contextmanager
-def uploading(filename: str):
-    with uploading_lock:
-        uploading_shorts.add(filename)
-    try:
-        yield
-    finally:
-        with uploading_lock:
-            uploading_shorts.discard(filename)
 
 
 def page_parameter(name: str, default: int, maximum: int) -> Optional[int]:
@@ -284,6 +261,10 @@ def create_app() -> Flask:
     @app.route('/trending')
     def trending_page():
         return render_template('trending.html')
+
+    @app.route('/shorts')
+    def shorts_page():
+        return render_template('shorts.html')
 
     @app.route('/create-short')
     def create_short_page():
@@ -628,13 +609,7 @@ def create_app() -> Flask:
         offset = page_parameter('offset', 0, 1_000_000)
         if not limit or offset is None:
             return json_error(f'offset and limit must be whole numbers (limit 1 to {MAX_LIMIT})', 400)
-        busy = shorts_in_use()
-        shorts = list_shorts(config.SHORTS_FOLDER, limit=limit, offset=offset)
-        for item in shorts:
-            item['busy'] = item['filename'] in busy
-            item['upload_problem'] = shorts_problem(item['duration'], item['width'], item['height'])
-        return jsonify({'success': True, 'shorts': shorts, 'offset': offset, 'limit': limit,
-                        'total': count_shorts(config.SHORTS_FOLDER)})
+        return jsonify({'success': True, **library_page(config.SHORTS_FOLDER, offset, limit, job_registry)})
 
     @app.route('/api/shorts/delete', methods=['POST'])
     @limiter.limit("30 per minute")
@@ -642,7 +617,7 @@ def create_app() -> Flask:
         path, error = requested_short()
         if error:
             return error
-        if path.name in shorts_in_use():
+        if path.name in shorts_in_use(job_registry):
             return json_error(BUSY_SHORT_MESSAGE, 409)
         try:
             path.unlink()
@@ -750,6 +725,7 @@ def create_app() -> Flask:
                 tags=tags, privacy_status=privacy, is_short=True)
         if not success:
             return json_error(message, 502)
+        db_manager.record_upload(video_path.name, video_id, privacy)  # the library shows it
 
         return jsonify({
             'success': True,

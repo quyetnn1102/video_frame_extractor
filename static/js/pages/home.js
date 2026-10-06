@@ -64,8 +64,8 @@
         body.append(element('p', 'recent-title clamp', item.title), element('p', 'recent-meta', relativeTime(item.created)));
 
         const card = element('a', 'card card-flush recent-card');
-        // Opens this short in the list (create-short.js highlights it), not just the list
-        card.href = '/create-short?short=' + encodeURIComponent(item.filename) + '#resultsSection';
+        // Opens this short in Your shorts (shorts.js points it out), not just the list
+        card.href = '/shorts?short=' + encodeURIComponent(item.filename);
         card.append(thumb, body);
 
         const entry = element('li');

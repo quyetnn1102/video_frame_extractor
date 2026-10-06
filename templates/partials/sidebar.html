@@ -20,7 +20,7 @@
         <a href="/create-short"{% if active_page == 'create' %} aria-current="page"{% endif %} title="Create short">
             <svg class="icon" aria-hidden="true"><use href="#i-scissors"/></svg><span class="nav-label">Create short</span>
         </a>
-        <a href="/create-short#resultsSection" title="Your shorts">
+        <a href="/shorts"{% if active_page == 'shorts' %} aria-current="page"{% endif %} title="Your shorts">
             <svg class="icon" aria-hidden="true"><use href="#i-library"/></svg><span class="nav-label">Your shorts</span>
         </a>
     </nav>

@@ -14,6 +14,7 @@ from logger import app_logger
 from validators import resolve_in_folder
 
 DEFAULT_LIMIT = 24
+VIETSUB_SUFFIX = ' Vietsub'  # ends the title of a copy with Vietnamese subtitles (what viewers call it)
 MAX_LIMIT = 100              # shorts per page of the library
 MAX_CACHED_MEDIA_INFO = 2000
 POSTER_FOLDER = '.posters'   # inside the shorts folder: one small JPEG per short

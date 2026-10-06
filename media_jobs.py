@@ -17,7 +17,7 @@ from urllib.parse import quote
 from config import get_config
 from database import db_manager
 from jobs import JobCancelled, JobFailed
-from library import make_poster, short_title
+from library import VIETSUB_SUFFIX, make_poster, short_title
 from logger import app_logger
 from short_video import (ShortVideoError, create_short, normalize_quality, normalize_text_overlay,
                          parse_duration, parse_start_time)
@@ -29,7 +29,6 @@ from video_processor import extractor
 MAX_FRAME_FILENAME_TITLE = 50
 DEFAULT_SHORT_DURATION = 30
 MAX_ERRORS_LISTED = 3  # a job that fails on every timecode names this many
-VIETSUB_SUFFIX = ' Vietsub'  # what Vietnamese viewers call a video with Vietnamese subtitles
 
 EXTRACT_STAGES = ('download', 'extract')
 SHORT_STAGES = ('download', 'render')

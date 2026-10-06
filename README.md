@@ -72,9 +72,11 @@ Open <http://localhost:5000>. Downloads, frames and shorts are stored in `downlo
 
 **Extract frames** (`/extract`): paste a video link and enter timestamps, one per line, as seconds (`90`), `MM:SS` (`1:30`) or `H:MM:SS` (`1:02:03`). Seconds must be 00-59 (and minutes too in `H:MM:SS`), a timestamp cannot exceed `MAX_VIDEO_DURATION`, and at most 50 are accepted. The video is deleted after the frames are extracted.
 
-**Create a short** (`/create-short`): paste a link, choose the length and an optional start time (`90` or `1:30`; blank starts at the beginning), quality, vertical crop and caption. Wide or tall sources are cropped around the center to 9:16 and scaled to 1080x1920. Then download the MP4 or upload it to YouTube.
+**Create a short** (`/create-short`): paste a link, choose the length and an optional start time (`90` or `1:30`; blank starts at the beginning), quality, vertical crop and caption. Wide or tall sources are cropped around the center to 9:16 and scaled to 1080x1920. The link is analyzed first, so a start time or length past the end of the video is caught before anything is downloaded.
 
-**Vietnamese subtitles**: under any short in "Your shorts", **Vietnamese subtitles** makes a copy (titled "... Vietsub") with the speech subtitled in Vietnamese; the original is kept. It works on this computer, without an online service: [faster-whisper](https://github.com/SYSTRAN/faster-whisper) writes down the speech (Chinese, English or Vietnamese), the [Argos Translate](https://github.com/argosopentech/argos-translate) models translate it (Chinese through English), subtitles already burned into the picture (white text with a dark outline, as on Douyin and TikTok) are found and blurred while they show, and the Vietnamese lines are drawn in their place. The first run downloads the models into `models/` (about 500 MB for speech, 70 MB per translation model); after that it needs no network. A 1-minute short takes about 2 minutes on a laptop CPU. Machine translation is understandable but not polished, and names or wordplay come out literally.
+**Your shorts** (`/shorts`): every short you have made, kept until you delete it. Search titles, sort them, show only Vietsub copies, play one, download it; **More** has Add Vietnamese subtitles, Upload to YouTube (or how to set it up), Copy file name and Delete. Badges say which shorts are Vietsub copies, in use (by subtitles or an upload) or already uploaded.
+
+**Vietnamese subtitles**: in Your shorts, **More > Add Vietnamese subtitles** makes a copy (titled "... Vietsub") with the speech subtitled in Vietnamese; the original is kept. It works on this computer, without an online service: [faster-whisper](https://github.com/SYSTRAN/faster-whisper) writes down the speech (Chinese, English or Vietnamese), the [Argos Translate](https://github.com/argosopentech/argos-translate) models translate it (Chinese through English), subtitles already burned into the picture (white text with a dark outline, as on Douyin and TikTok) are found and blurred while they show, and the Vietnamese lines are drawn in their place. The first run downloads the models into `models/` (about 500 MB for speech, 70 MB per translation model); after that it needs no network. A 1-minute short takes about 2 minutes on a laptop CPU. Machine translation is understandable but not polished, and names or wordplay come out literally.
 
 **Trending** (`/trending`): browse popular YouTube videos by region and category, and send one to the extractor.
 
@@ -148,7 +150,7 @@ All endpoints return JSON (errors as `{"success": false, "error": "..."}`) and r
 
 | Method and path | Purpose | Limit |
 |---|---|---|
-| `GET /`, `/extract`, `/create-short`, `/trending`, `/dashboard` | Pages | default |
+| `GET /`, `/extract`, `/create-short`, `/shorts`, `/trending`, `/dashboard` | Pages | default |
 | `POST /api/validate-url` `{url}` | Validate a link and fetch title/duration | 30/min |
 | `POST /api/video-info` `{url}` | Video details without downloading (title, length, frame size, platform); a failure gives `reason` (`invalid` or `unreadable`) and the platform's tips | 20/min |
 | `POST /api/test-platform` `{url}` | Platform guidance for a link | 30/min |

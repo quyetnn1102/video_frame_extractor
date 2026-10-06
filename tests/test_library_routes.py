@@ -3,6 +3,7 @@ import threading
 from unittest.mock import patch
 
 import app_enhanced
+import library_api
 import media_jobs
 from jobs import NullReporter
 from library import MediaInfo
@@ -42,6 +43,23 @@ class TestLibraryPages(LibraryRouteTestCase):
         self.assertFalse(item['busy'])
 
 
+class TestLibraryPage(LibraryRouteTestCase):
+    def test_your_shorts_has_its_own_page(self):
+        page = self.client.get('/shorts')
+        self.assertEqual(page.status_code, 200)
+        self.assertIn('id="resultsContent"', page.get_data(as_text=True))
+
+    def test_subtitled_and_uploaded_shorts_say_so(self):
+        self.make_short('Clip Vietsub_1a2b3c4d_short.mp4')
+        self.make_short('Clip_5e6f7a8b_short.mp4')
+        self.db.get_uploads.return_value = {'Clip_5e6f7a8b_short.mp4': {'video_id': 'vid9', 'privacy': 'private'}}
+        items = {item['filename']: item for item in self.client.get('/api/shorts').get_json()['shorts']}
+        self.assertTrue(items['Clip Vietsub_1a2b3c4d_short.mp4']['subtitled'])
+        self.assertIsNone(items['Clip Vietsub_1a2b3c4d_short.mp4']['youtube_url'])
+        self.assertFalse(items['Clip_5e6f7a8b_short.mp4']['subtitled'])
+        self.assertEqual(items['Clip_5e6f7a8b_short.mp4']['youtube_url'], 'https://www.youtube.com/watch?v=vid9')
+
+
 class TestShortsInUse(LibraryRouteTestCase):
     def test_a_short_being_subtitled_is_marked_and_cannot_be_deleted(self):
         name = self.make_short('Clip_1a2b3c4d_short.mp4')
@@ -59,9 +77,9 @@ class TestShortsInUse(LibraryRouteTestCase):
 
     def test_a_short_being_uploaded_is_in_use_until_the_upload_ends(self):
         name = self.make_short('Clip_1a2b3c4d_short.mp4')
-        with app_enhanced.uploading(name):
-            self.assertIn(name, app_enhanced.shorts_in_use())
-        self.assertNotIn(name, app_enhanced.shorts_in_use())
+        with library_api.uploading(name):
+            self.assertIn(name, library_api.shorts_in_use(app_enhanced.job_registry))
+        self.assertNotIn(name, library_api.shorts_in_use(app_enhanced.job_registry))
 
 
 class TestFrameWarnings(RouteTestCase):
