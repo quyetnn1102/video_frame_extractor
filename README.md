@@ -32,7 +32,7 @@ Only the five platforms above are fetched: yt-dlp's generic extractor, which wou
 
 ## Quick start
 
-Requires Python 3.10 or newer (CI runs 3.10 and 3.11) and [uv](https://docs.astral.sh/uv/getting-started/installation/), which manages the dependencies. FFmpeg is bundled with MoviePy (`imageio-ffmpeg`), so you do not need to install it.
+Requires Python 3.10 or newer (CI runs 3.10 and 3.11) and [uv](https://docs.astral.sh/uv/getting-started/installation/), which manages the dependencies. FFmpeg is bundled with MoviePy (`imageio-ffmpeg`), so you do not need to install it. For YouTube, also install [Node.js](https://nodejs.org) (or Deno): yt-dlp runs YouTube's download challenges in it, and without one YouTube often stops downloads with "HTTP Error 403".
 
 `uv sync` creates the project's own `.venv` from the exact versions in `uv.lock` (and downloads a matching Python if needed). Dependencies never go into your global Python, where the pinned versions could downgrade packages other tools rely on.
 
@@ -231,6 +231,7 @@ The suite is offline and fast: it covers validation, the Flask routes (with the 
 | TikTok: format error | The video may be region-blocked or restricted |
 | "The video was not downloaded" | It exceeds `MAX_VIDEO_DURATION` or `MAX_DOWNLOAD_MB`, or is a live stream |
 | "Text overlay was skipped" | Install ImageMagick (see [Quick start](#quick-start)) |
+| YouTube download stops with "HTTP Error 403: Forbidden" | Install [Node.js](https://nodejs.org) (or Deno) and restart the app: yt-dlp runs YouTube's download challenges in it. If it is installed, update yt-dlp (`uv lock --upgrade-package yt-dlp`) |
 | YouTube sign-in fails | Check that `client_secrets.json` exists, your account is a test user, and the redirect URI matches `http://localhost:5000/oauth2callback` |
 | Trending shows a single demo entry | `logs/app.log` says why: `HTTP 400, API_KEY_INVALID` is a wrong or deleted key, `HTTP 403, API_KEY_HTTP_REFERRER_BLOCKED` or `API_KEY_IP_ADDRESS_BLOCKED` is a key restriction (use *None* or an IP restriction, not a website restriction, because the server sends the request), `SERVICE_DISABLED` means enable *YouTube Data API v3* in the Google Cloud project, `quotaExceeded` means the daily quota is used up |
 | YouTube upload is private | Expected for API projects that have not passed Google's audit |

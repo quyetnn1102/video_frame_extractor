@@ -3,6 +3,8 @@ Enhanced video processing module with improved error handling and performance
 """
 import importlib.util
 import os
+import re
+import shutil
 import cv2
 import yt_dlp
 import uuid
@@ -34,6 +36,9 @@ MAX_DESCRIPTION_LENGTH = 500
 BYTES_PER_MB = 1024 * 1024
 # yt-dlp's wording (lower case) when TikTok serves its bot-check page instead of the video page
 TIKTOK_BLOCKED_MARKER = 'unexpected response from webpage request'
+YOUTUBE_FORBIDDEN_MARKER = 'http error 403'
+JS_RUNTIMES = ('deno', 'node', 'bun')  # yt-dlp uses the first one it finds; any is enough
+ANSI_ESCAPES = re.compile(r'\x1b\[[0-9;]*[A-Za-z]')
 
 # Modern sites (YouTube first) serve video and audio as separate streams, with no single
 # "best" file, so a selector like best[height<=720] finds nothing. Take video+audio and let
@@ -164,6 +169,20 @@ def browser_impersonation_available() -> bool:
     return importlib.util.find_spec('curl_cffi') is not None
 
 
+def javascript_runtime_available() -> bool:
+    """
+    True when Deno, Node.js or Bun is installed. yt-dlp runs YouTube's download challenges
+    (the yt-dlp-ejs scripts) in one of them; without any, YouTube serves fewer formats and
+    often cuts downloads off part-way with "HTTP Error 403: Forbidden".
+    """
+    return any(shutil.which(name) for name in JS_RUNTIMES)
+
+
+def clean_error_text(message: str) -> str:
+    """yt-dlp colours its messages for terminals; the codes are noise on the page and in the log."""
+    return ANSI_ESCAPES.sub('', message)
+
+
 class PlatformProcessor:
     """Base class for platform-specific video processing"""
 
@@ -198,6 +217,8 @@ class PlatformProcessor:
                 f'duration <=? {max_duration} & !is_live'),
             'cachedir': False,
             'allowed_extractors': list(YTDLP_ALLOWED_EXTRACTORS),
+            # yt-dlp only tries Deno by default; Node.js is far more often installed
+            'js_runtimes': {name: {} for name in JS_RUNTIMES},
         }
         ffmpeg = bundled_ffmpeg_path()
         if ffmpeg:
@@ -214,9 +235,19 @@ class PlatformProcessor:
 
 class YouTubeProcessor(PlatformProcessor):
     """YouTube-specific processing"""
-    
+
     def __init__(self):
         super().__init__('youtube')
+
+    def process_download_error(self, error: str) -> str:
+        if YOUTUBE_FORBIDDEN_MARKER in error.lower():
+            if not javascript_runtime_available():
+                return ("YouTube Error: YouTube refused the download (HTTP 403). Install Node.js "
+                        "(https://nodejs.org) or Deno, then restart the app: yt-dlp needs one of them "
+                        "to read YouTube.")
+            return ("YouTube Error: YouTube refused the download (HTTP 403). Try again in a moment; "
+                    "if it keeps happening, update yt-dlp (uv lock --upgrade-package yt-dlp).")
+        return super().process_download_error(error)
 
 class TikTokProcessor(PlatformProcessor):
     """TikTok-specific processing"""
@@ -402,7 +433,7 @@ class EnhancedVideoFrameExtractor:
             except JobCancelled:
                 raise  # not a failure: download_with_ytdlp has already removed the partial files
             except yt_dlp.utils.DownloadError as e:
-                error_msg = str(e)
+                error_msg = clean_error_text(str(e))
                 platform = self.get_platform_from_url(url)
                 processor = self.processors.get(platform)
                 
@@ -572,7 +603,7 @@ class EnhancedVideoFrameExtractor:
                     return True, video_info, None
                     
             except yt_dlp.utils.DownloadError as e:
-                error_msg = str(e)
+                error_msg = clean_error_text(str(e))
                 processor = self.processors.get(platform)
                 if processor:
                     error_msg = processor.process_download_error(error_msg)

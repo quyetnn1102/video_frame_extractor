@@ -36,7 +36,7 @@ from short_video import (MAX_SHORT_DURATION, MIN_SHORT_DURATION, ShortVideoError
                          remove_partial_renders, text_overlay_available)
 from trending import VIDEO_CATEGORIES, get_youtube_trending
 from validators import MAX_TIMESTAMPS, resolve_in_folder, validator
-from video_processor import extractor
+from video_processor import extractor, javascript_runtime_available
 from youtube_uploader import PRIVACY_STATUSES, YouTubeUploaderError, youtube_uploader
 
 APP_VERSION = '2.1.0'
@@ -207,6 +207,10 @@ def create_app() -> Flask:
     # so the Limiter would be garbage collected once create_app() returns and every
     # decorated route would fail with "ReferenceError: weakly-referenced object ...".
     app.extensions['rate_limiter'] = limiter
+
+    if not javascript_runtime_available():
+        app_logger.warning("No JavaScript runtime (Node.js, Deno or Bun) found: YouTube downloads may "
+                           "fail with HTTP 403. Install Node.js and restart the app.")
 
     @app.before_request
     def guard_request():
