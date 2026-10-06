@@ -109,7 +109,13 @@ def load_speech_model():
 def transcribe(video_path: Path, on_progress: ProgressCallback) -> Tuple[str, List[Cue]]:
     """(language code, timed lines) of the speech in a video."""
     model = load_speech_model()
-    segments, info = model.transcribe(str(video_path), vad_filter=True)
+    try:  # decodes the sound and detects the language at once; no progress (or cancel) in here
+        segments, info = model.transcribe(str(video_path), vad_filter=True)
+    except Exception as error:  # no audio track, or sound that cannot be decoded
+        app_logger.error(f"Speech could not be read ({type(error).__name__})")
+        raise SubtitleError('Could not read the sound of this short. It may have no audio.') from error
+    if not info.duration_after_vad:  # nothing but silence or music: the language is a guess
+        return info.language, []
     try:
         translation_route(info.language)  # say so now, before minutes of listening
     except TranslationError as error:

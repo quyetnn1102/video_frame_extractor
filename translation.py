@@ -204,8 +204,16 @@ def translate_lines(lines: Sequence[str], pair: Tuple[str, str]) -> List[str]:
     if not flat:
         return [''] * len(lines)
     folder = model_folder(pair)
-    tokenizer = sentencepiece.SentencePieceProcessor(model_file=str(folder / 'sentencepiece.model'))
-    translator = ctranslate2.Translator(str(folder / 'model'), device='cpu')
+    try:
+        tokenizer = sentencepiece.SentencePieceProcessor(model_file=str(folder / 'sentencepiece.model'))
+        translator = ctranslate2.Translator(str(folder / 'model'), device='cpu')
+    except (RuntimeError, OSError, ValueError) as error:  # damaged files: fetch them again next time
+        app_logger.error(f"Translation model {pair[0]}->{pair[1]} could not be loaded "
+                         f"({type(error).__name__})")
+        with _download_lock:
+            shutil.rmtree(folder, ignore_errors=True)
+        raise TranslationError('The translation model could not be loaded. It will be downloaded '
+                               'again: try once more.') from error
     results = translator.translate_batch([tokenizer.encode(sentence, out_type=str) for sentence in flat],
                                          beam_size=BEAM_SIZE, max_batch_size=MAX_BATCH_SIZE)
     translated = iter(detokenize(result.hypotheses[0]) for result in results)
@@ -218,6 +226,13 @@ def split_sentences(line: str) -> List[str]:
     return [part.strip() for part in SENTENCE_END.split(line) if part.strip()]
 
 
+def _share_of(on_progress: Optional[ProgressCallback], number: int, count: int) -> Optional[ProgressCallback]:
+    """Progress of download `number` of `count` as part of one bar, so it never goes back."""
+    if on_progress is None:
+        return None
+    return lambda fraction: on_progress(None if fraction is None else (number + fraction) / count)
+
+
 def translate_to_vietnamese(lines: Sequence[str], source: str,
                             on_download: Optional[ProgressCallback] = None) -> List[str]:
     """
@@ -225,8 +240,8 @@ def translate_to_vietnamese(lines: Sequence[str], source: str,
     Raises TranslationError when the language is not supported or a model cannot be fetched.
     """
     route = translation_route(source)
-    for pair in route:
-        ensure_model(pair, on_download)
+    for number, pair in enumerate(route):
+        ensure_model(pair, _share_of(on_download, number, len(route)))
     translated = list(lines)
     for pair in route:
         translated = translate_lines(translated, pair)
