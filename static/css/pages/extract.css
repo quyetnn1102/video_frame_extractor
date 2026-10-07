@@ -3,13 +3,48 @@
     grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
     grid-template-areas:
         "link time"
-        "go   time";
+        "go   go";
     gap: 1.5rem 2rem;
 }
 
 .extract-grid .field-link { grid-area: link; }
 .extract-grid .field-time { grid-area: time; display: flex; flex-direction: column; }
-.extract-grid .go { grid-area: go; align-self: end; }
+.extract-grid .go { grid-area: go; padding-top: var(--space-4); border-top: 1px solid var(--rule); }
+
+.timecode-tools {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2);
+}
+
+.timecode-tools .hint {
+    margin: 0;
+}
+
+.format-choice {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    font-size: var(--text-sm);
+    color: var(--ink-soft);
+}
+
+.format-choice select {
+    width: auto;
+    min-height: 2.75rem;
+}
+
+/* Before any timecode: where the frames will appear (no fake frames) */
+.strip-empty {
+    grid-column: 1 / -1;
+    padding: var(--space-6) var(--space-4);
+    text-align: center;
+    color: var(--ink-soft);
+    border: 1px dashed var(--field-edge);
+    border-radius: var(--radius);
+}
 
 /* A log sheet: ruled lines, one timecode per line */
 .timecodes {

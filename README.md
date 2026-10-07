@@ -1,9 +1,12 @@
-# VideoExtract
+# Tallframe
 
-A local web app that downloads a video from a link, extracts still frames at the timestamps you choose, and cuts short vertical clips (9:16) that you can download or upload to your own YouTube channel.
+**Turn videos into short clips and frames.**
+
+A local web app (the repository is still called `video_frame_extractor`) that downloads a video from a link, extracts still frames at the timestamps you choose, and cuts short vertical clips (9:16) that you can download or upload to your own YouTube channel.
 
 - **Frame extraction**: paste a link and a list of timestamps, get a JPEG per timestamp.
 - **Short videos**: pick a start time and length (1-300 s), optionally crop to 9:16 and add a caption.
+- **Vietnamese subtitles** (offline): a copy of a short with its speech subtitled in Vietnamese.
 - **YouTube upload** (optional): upload a finished short to your own channel, private by default.
 - **Trending page** (optional): the most popular YouTube videos, via the official YouTube Data API.
 - **Dashboard**: request history and system load.
@@ -60,22 +63,24 @@ Open <http://localhost:5000>. Downloads, frames and shorts are stored in `downlo
 
 **Optional extras**
 
-- *Text overlay on shorts* needs [ImageMagick](https://imagemagick.org/). Without it the short is still created, just without the caption. If MoviePy cannot find ImageMagick, set the `IMAGEMAGICK_BINARY` environment variable to the path of `magick.exe` / `convert`.
+- *Text overlay on shorts* needs [ImageMagick](https://imagemagick.org/). Without it the caption field is hidden (the Dashboard's Setup card says why). If MoviePy cannot find ImageMagick, set the `IMAGEMAGICK_BINARY` environment variable to the path of `magick.exe` / `convert`.
 - *Trending page* needs a YouTube Data API key in `.env`: `YOUTUBE_API_KEY=...`. Without one the page shows a single demo entry.
 
 ## Usage
 
 **Home** (`/`): paste a link and choose **Create short** or **Extract frames**; the link is carried over to that page. Your most recent shorts and a short guide are shown below.
 
-**Extract frames** (`/extract`): paste a video link and enter timestamps, one per line, as seconds (`90`), `MM:SS` (`1:30`) or `H:MM:SS` (`1:02:03`). Seconds must be 00-59 (and minutes too in `H:MM:SS`), a timestamp cannot exceed `MAX_VIDEO_DURATION`, and at most 50 are accepted. The video is deleted after the frames are extracted.
+**Extract frames** (`/extract`): paste a video link and enter timestamps, one per line, as seconds (`90`), `MM:SS` (`1:30`) or `H:MM:SS` (`1:02:03`). Seconds must be 00-59 (and minutes too in `H:MM:SS`), a timestamp cannot exceed `MAX_VIDEO_DURATION`, and at most 50 are accepted. Each line is checked as you type ("3 valid · 1 invalid"), timecodes past the end of the analyzed video are named, and **Sort and remove duplicates** tidies the list. Frames are saved as JPG (smaller) or PNG (every pixel). The video is deleted after the frames are extracted.
 
-**Create a short** (`/create-short`): paste a link, choose the length and an optional start time (`90` or `1:30`; blank starts at the beginning), quality, vertical crop and caption. Wide or tall sources are cropped around the center to 9:16 and scaled to 1080x1920. Then download the MP4 or upload it to YouTube.
+**Create a short** (`/create-short`): paste a link, choose the length and an optional start time (`90` or `1:30`; blank starts at the beginning), quality, vertical crop and caption. Wide or tall sources are cropped to 9:16 and scaled to 1080x1920; for a wide video, drag the outlined area on its thumbnail (or use the arrow keys) to choose which part is kept. Quality sets the bitrate (1, 2 or 5 Mbit/s), not the size. The link is analyzed first, so a start time or length past the end of the video is caught before anything is downloaded. A failed short can be tried again with the same settings.
 
-**Vietnamese subtitles**: under any short in "Your shorts", **Vietnamese subtitles** makes a copy (titled "... Vietsub") with the speech subtitled in Vietnamese; the original is kept. It works on this computer, without an online service: [faster-whisper](https://github.com/SYSTRAN/faster-whisper) writes down the speech (Chinese, English or Vietnamese), the [Argos Translate](https://github.com/argosopentech/argos-translate) models translate it (Chinese through English), subtitles already burned into the picture (white text with a dark outline, as on Douyin and TikTok) are found and blurred while they show, and the Vietnamese lines are drawn in their place. The first run downloads the models into `models/` (about 500 MB for speech, 70 MB per translation model); after that it needs no network. A 1-minute short takes about 2 minutes on a laptop CPU. Machine translation is understandable but not polished, and names or wordplay come out literally.
+**Your shorts** (`/shorts`): every short you have made, kept until you delete it. Search titles, sort them, show only Vietsub copies, play one, download it; **More** has Add Vietnamese subtitles, Upload to YouTube (or how to set it up), Copy file name and Delete. Badges say which shorts are Vietsub copies, in use (by subtitles or an upload) or already uploaded.
 
-**Trending** (`/trending`): browse popular YouTube videos by region and category, and send one to the extractor.
+**Vietnamese subtitles**: in Your shorts, **More > Add Vietnamese subtitles** makes a copy (titled "... Vietsub") with the speech subtitled in Vietnamese; the original is kept. It works on this computer, without an online service: [faster-whisper](https://github.com/SYSTRAN/faster-whisper) writes down the speech (Chinese, English or Vietnamese), the [Argos Translate](https://github.com/argosopentech/argos-translate) models translate it (Chinese through English), subtitles already burned into the picture (white text with a dark outline, as on Douyin and TikTok) are found and blurred while they show, and the Vietnamese lines are drawn in their place. The first run downloads the models into `models/` (about 500 MB for speech, 70 MB per translation model); after that it needs no network. A 1-minute short takes about 2 minutes on a laptop CPU. Machine translation is understandable but not polished, and names or wordplay come out literally.
 
-**Dashboard** (`/dashboard`): request counts per platform, success rate, extracted frames, and CPU/memory/disk usage. Frame extraction and short creation are recorded; other calls are not.
+**Trending** (`/trending`): browse popular YouTube videos by region and category, and send one to Create short or Extract frames. When the list is sample data, the page says why (no API key, a refused key, the daily quota, or YouTube not answering).
+
+**Dashboard** (`/dashboard`): request counts per platform, success rate, extracted frames, and CPU/memory/disk usage. Frame extraction and short creation are recorded; other calls are not. The **Setup** card says what this computer has for the optional parts (Node.js for YouTube, ImageMagick for captions, YouTube upload, the Trending API key, Douyin cookies, the subtitle models).
 
 ## Configuration
 
@@ -145,12 +150,12 @@ All endpoints return JSON (errors as `{"success": false, "error": "..."}`) and r
 
 | Method and path | Purpose | Limit |
 |---|---|---|
-| `GET /`, `/extract`, `/create-short`, `/trending`, `/dashboard` | Pages | default |
+| `GET /`, `/extract`, `/create-short`, `/shorts`, `/trending`, `/dashboard` | Pages | default |
 | `POST /api/validate-url` `{url}` | Validate a link and fetch title/duration | 30/min |
-| `POST /api/video-info` `{url}` | Video details without downloading | 20/min |
+| `POST /api/video-info` `{url}` | Video details without downloading (title, length, frame size, platform); a failure gives `reason` (`invalid` or `unreadable`) and the platform's tips | 20/min |
 | `POST /api/test-platform` `{url}` | Platform guidance for a link | 30/min |
-| `POST /api/extract` `{url, timestamps[]}` | Download, extract frames, delete the download | 10/min |
-| `POST /api/create-short` `{url, start_time, duration, quality, vertical_format, text_overlay}` | Create a short | 5/min |
+| `POST /api/extract` `{url, timestamps[], format}` | Download, extract frames (`format`: `jpg`, the default, or `png`), delete the download | 10/min |
+| `POST /api/create-short` `{url, start_time, duration, quality, vertical_format, crop_position, text_overlay}` | Create a short (`crop_position`: where a wide video is cropped, 0 left to 1 right, 0.5 by default) | 5/min |
 | `POST /api/clip-suggestions` `{url, duration}` | Up to 5 moments of a YouTube video worth a short, from its "Most replayed" heatmap and captions (read without downloading the video) | 10/min |
 | `POST /api/jobs/extract` `{url, timestamps[]}` | Same as `/api/extract`, as a background job: answers `202` with the job at once | 10/min |
 | `POST /api/jobs/create-short` (same body as `/api/create-short`) | Same as `/api/create-short`, as a background job | 5/min |
@@ -161,12 +166,12 @@ All endpoints return JSON (errors as `{"success": false, "error": "..."}`) and r
 | `GET /frames/<file>`, `GET /shorts/<file>` | Serve generated files | default |
 | `GET /shorts/posters/<file>` | A short's thumbnail (made when the short is created, or at startup for older ones) | none (file) |
 | `POST /api/frames/archive` `{filenames[]}` | The named frames (up to 50) as one `frames.zip` | 10/min |
-| `GET /api/shorts` | Earlier shorts in `generated_shorts/`, newest first (the Create short page shows them again after a refresh) | default |
-| `POST /api/shorts/delete` `{filename}` | Delete a short by file name | 30/min |
+| `GET /api/shorts?offset=&limit=` | A page of the shorts in `generated_shorts/`, newest first, with `total`; each short says whether a job or upload is using it (`busy`) and why YouTube would refuse it (`upload_problem`) | default |
+| `POST /api/shorts/delete` `{filename}` | Delete a short by file name (`409` while it is in use) | 30/min |
 | `POST /api/cleanup` | Delete files older than `AUTO_CLEANUP_HOURS` | 5/min |
-| `GET /api/trending?region=&category=&max_results=` | Popular YouTube videos | default |
+| `GET /api/trending?region=&category=&max_results=` | Popular YouTube videos; `reason` says why when they are sample data (`no_key`, `bad_key`, `quota`, `unavailable`) or none (`empty`) | default |
 | `GET /api/video-categories` | Category list | default |
-| `GET /api/youtube-auth` | Sign-in state only (safe to poll) | 120/min |
+| `GET /api/youtube-auth` | Sign-in state, and whether upload is set up (`configured`); safe to poll | 120/min |
 | `POST /api/youtube-auth/start` | Begin sign-in; returns the Google consent URL | 20/min |
 | `GET /oauth2callback` | Google redirects back here after sign-in | 10/min |
 | `POST /api/upload-to-youtube` `{filename, title, description, tags, privacy}` | Upload a short from `generated_shorts/` by file name | 5/min |

@@ -2,41 +2,13 @@
     'use strict';
 
     const MAX_DURATION_SECONDS = 300;
-    const AUTH_TIMEOUT_MS = 300000;
-    const AUTH_POLL_MS = 1000;
-    const BYTES_PER_MB = 1024 * 1024;
-    const UPLOAD_TITLE_LIMIT = 100;          // TITLE_LIMIT in youtube_uploader.py
-    const UPLOAD_DESCRIPTION_LIMIT = 5000;   // DESCRIPTION_LIMIT
     const $ = (id) => document.getElementById(id);
-    let busy = false;              // the YouTube sign-in/upload overlay is open
     let rendering = false;         // a short is being made (a background job)
-    let subtitling = false;        // a subtitled copy is being made (one at a time)
-    let signedIn = false;          // set once the server confirms the YouTube sign-in
-    let cancelRequested = false;   // set by the Cancel button while waiting for sign-in
+    let source = null;             // the analyzed video link (video-source.js), set at the end
 
     // Server text is untrusted for display purposes: everything below is built
     // with textContent / addEventListener instead of HTML strings.
-    const { element, notice, scrollBehavior, relativeTime, postJson } = ui;
-
-    function safeUrl(value, allowedPrefixes) {
-        return allowedPrefixes.some((prefix) => typeof value === 'string' && value.startsWith(prefix))
-            ? value : '';
-    }
-
-    function showLoading(message, cancellable) {
-        $('cancelLoadingBtn').hidden = !cancellable;
-        ui.showBusy(message);
-        if (cancellable) $('cancelLoadingBtn').focus();
-    }
-
-    function hideLoading() {
-        $('cancelLoadingBtn').hidden = true;
-        ui.hideBusy();
-    }
-
-    $('cancelLoadingBtn').addEventListener('click', () => {
-        cancelRequested = true;
-    });
+    const { element, notice, postJson, safeUrl } = ui;
 
     // ---- length presets ---------------------------------------------------
 
@@ -49,6 +21,7 @@
         $('customDurationDiv').hidden = duration !== 'custom';
         if (duration === 'custom') $('customDuration').focus();
         else ui.clearFieldError($('customDuration'));
+        updateTiming();
     }
 
     function getDuration() {
@@ -61,24 +34,195 @@
     }
 
     document.querySelectorAll('.duration-option').forEach((option) => {
-        option.addEventListener('click', () => selectDuration(option));
+        // A preset longer than the video stays visible, with the reason, but cannot be chosen
+        option.addEventListener('click', () => {
+            if (option.getAttribute('aria-disabled') !== 'true') selectDuration(option);
+        });
     });
 
     // ---- crop diagram -----------------------------------------------------
 
+    // ---- crop: which part of a wide picture the 9:16 short keeps -------------------
+
+    const CROP_STEP = 0.05;
+    const CROP_PAGE_STEP = 0.25;
+    let cropPosition = 0.5;   // 0 is the left edge, 1 the right (crop_position on the server)
+    let croppedVideoUrl = '';
+
+    function analyzedVideo() {
+        const state = source ? source.state() : null;
+        return state && state.status === 'ready' ? state.video : null;
+    }
+
+    // The share of the width a 9:16 window covers, or null when nothing is cut from the sides
+    function cropShare(video) {
+        const width = Number(video && video.width);
+        const height = Number(video && video.height);
+        if (!(width > 0 && height > 0)) return null;
+        const share = (height * 9 / 16) / width;
+        return share < 1 ? share : null;
+    }
+
+    function positionText() {
+        const percent = Math.round(cropPosition * 100);
+        const side = percent <= 33 ? 'Left' : percent >= 67 ? 'Right' : 'Center';
+        return `${side} (${percent}% from the left)`;
+    }
+
+    function cropCaption(vertical, video, movable) {
+        if (!vertical) return 'The whole picture is kept. Nothing is cropped.';
+        if (movable) return 'Drag the outlined area, or use the arrow keys, to choose what the short keeps.';
+        if (video && video.width && video.height) return 'This video is not wider than 9:16, so nothing is cut from the sides.';
+        return 'The outlined area is what you keep. Analyze a link to choose which part of a wide video.';
+    }
+
     function updateCropDiagram() {
         const vertical = $('verticalFormat').checked;
+        const video = analyzedVideo();
+        const share = vertical ? cropShare(video) : null;
+        const movable = share !== null;
+        const thumbnail = video && /^https:\/\//.test(video.thumbnail || '') ? video.thumbnail : '';
+
         $('cropFigure').classList.toggle('is-full', !vertical);
-        $('cropCaption').textContent = vertical
-            ? 'The outlined area is what you keep. Wide videos are cropped around the center.'
-            : 'The whole picture is kept. Nothing is cropped.';
+        $('cropFigure').classList.toggle('is-movable', movable);
+        $('cropThumb').hidden = !thumbnail;
+        if (thumbnail && $('cropThumb').src !== thumbnail) $('cropThumb').src = thumbnail;
+        $('cropFrame').style.aspectRatio = video && video.width && video.height ? `${video.width} / ${video.height}` : '';
+
+        const keep = $('cropKeep');
+        keep.tabIndex = movable ? 0 : -1;
+        if (movable) keep.removeAttribute('aria-disabled');
+        else keep.setAttribute('aria-disabled', 'true');
+        keep.style.width = movable ? `${share * 100}%` : '';
+        keep.style.left = movable ? `${cropPosition * (1 - share) * 100}%` : '';
+        keep.setAttribute('aria-valuenow', String(Math.round(cropPosition * 100)));
+        keep.setAttribute('aria-valuetext', positionText());
+        $('cropCaption').textContent = cropCaption(vertical, video, movable);
     }
+
+    function moveCrop(position) {
+        cropPosition = Math.min(1, Math.max(0, position));
+        updateCropDiagram();
+    }
+
+    $('cropKeep').addEventListener('keydown', (event) => {
+        if (!$('cropFigure').classList.contains('is-movable')) return;
+        const moves = {
+            ArrowLeft: cropPosition - CROP_STEP, ArrowDown: cropPosition - CROP_STEP,
+            ArrowRight: cropPosition + CROP_STEP, ArrowUp: cropPosition + CROP_STEP,
+            PageDown: cropPosition - CROP_PAGE_STEP, PageUp: cropPosition + CROP_PAGE_STEP, Home: 0, End: 1,
+        };
+        if (!(event.key in moves)) return;
+        event.preventDefault();
+        moveCrop(moves[event.key]);
+    });
+
+    // Dragging: the window follows the pointer, centred on it
+    function cropFromPointer(event) {
+        const share = cropShare(analyzedVideo());
+        if (share === null) return;
+        const frame = $('cropFrame').getBoundingClientRect();
+        const keepWidth = share * frame.width;
+        moveCrop((event.clientX - frame.left - keepWidth / 2) / (frame.width - keepWidth));
+    }
+
+    $('cropFrame').addEventListener('pointerdown', (event) => {
+        if (!$('cropFigure').classList.contains('is-movable')) return;
+        $('cropFrame').setPointerCapture(event.pointerId);
+        cropFromPointer(event);
+        $('cropKeep').focus({ preventScroll: true });
+    });
+    $('cropFrame').addEventListener('pointermove', (event) => {
+        if ($('cropFrame').hasPointerCapture(event.pointerId)) cropFromPointer(event);
+    });
 
     $('verticalFormat').addEventListener('change', updateCropDiagram);
 
-    // ---- link check -------------------------------------------------------
+    // ---- the video: analyzed once its link is pasted (video-source.js) ------------
 
-    ui.attachLinkCheck($('validateShortBtn'), $('shortVideoUrl'), $('shortLinkStatus'));
+    // Its length, once known: start, length and the presets are checked against it
+    function sourceDuration() {
+        const state = source ? source.state() : null;
+        const seconds = state && state.status === 'ready' ? Number(state.video.duration) : NaN;
+        return seconds > 0 ? seconds : null;
+    }
+
+    function startSeconds() {
+        const value = $('startTime').value.trim();
+        if (!value) return 0;
+        const parsed = value.includes(':') ? ui.parseTimecode(value) : Number(value);
+        return parsed !== null && Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
+    }
+
+    function chosenLength() {
+        try {
+            return getDuration();
+        } catch (error) {
+            return null;
+        }
+    }
+
+    function updateLengthOptions(total) {
+        document.querySelectorAll('.duration-option[data-note]').forEach((option) => {
+            const tooLong = total !== null && Number(option.dataset.duration) > total;
+            option.querySelector('small').textContent = tooLong ? 'Longer than the video' : option.dataset.note;
+            if (tooLong) option.setAttribute('aria-disabled', 'true');
+            else option.removeAttribute('aria-disabled');
+        });
+    }
+
+    // "Ends at 2:15 of 3:33", or how much of the clip the video has room for
+    function updateTiming() {
+        const total = sourceDuration();
+        const start = startSeconds();
+        const length = chosenLength();
+        updateLengthOptions(total);
+        if (!rendering) $('createSubmit').textContent = length ? `Create ${Math.round(length)}-second short` : 'Create short';
+        const hint = $('startHint');
+        if (total === null || start === null || length === null) {
+            hint.textContent = 'Leave blank to start from the beginning.';
+        } else if (start >= total) {
+            hint.textContent = `The video is ${ui.formatClock(total)} long: start before that.`;
+        } else if (start + length > total) {
+            hint.textContent = `Runs past the end of the video (${ui.formatClock(total)}): ` +
+                `the short will be ${ui.formatClock(total - start)} long.`;
+        } else {
+            hint.textContent = `Ends at ${ui.formatClock(start + length)} of ${ui.formatClock(total)}.`;
+        }
+    }
+
+    function updateSuggest(state) {
+        const youtube = state.status === 'ready' && state.video.platform === 'youtube';
+        if (youtube) $('suggestBtn').removeAttribute('aria-disabled');
+        else $('suggestBtn').setAttribute('aria-disabled', 'true');
+        $('suggestHint').textContent = state.status === 'ready' && !youtube
+            ? 'Only for YouTube links: other sites do not share which parts people replay.'
+            : 'For YouTube links: finds the parts people replay most, at the length above. Takes a few seconds.';
+    }
+
+    function onSourceChange(state) {
+        if (state.url !== croppedVideoUrl) {  // another video: its crop starts in the center
+            croppedVideoUrl = state.url;
+            cropPosition = 0.5;
+        }
+        updateSuggest(state);
+        updateTiming();
+        updateCropDiagram();
+        recheckShownErrors();
+    }
+
+    // An error shown for the previous link, or checked against its length, may no longer apply
+    function recheckShownErrors() {
+        [[$('shortVideoUrl'), linkError], [$('startTime'), startTimeError]].forEach(([input, check]) => {
+            if (input.getAttribute('aria-invalid') !== 'true') return;
+            const message = check();
+            if (message) ui.setFieldError(input, message);
+            else ui.clearFieldError(input);
+        });
+    }
+
+    $('startTime').addEventListener('input', updateTiming);
+    $('customDuration').addEventListener('input', updateTiming);
 
     // ---- check the form before anything is downloaded ----------------------
 
@@ -86,6 +230,9 @@
         const url = $('shortVideoUrl').value.trim();
         if (!url) return 'Enter a video link to cut a short from';
         if (!ui.isLink(url)) return 'Enter a full link, starting with https://';
+        if (source && source.state().status === 'invalid') {
+            return 'This link cannot be used: ' + (source.state().message || 'see above');
+        }
         return null;
     }
 
@@ -103,8 +250,14 @@
         const value = $('startTime').value.trim();
         // Seconds without a colon are read as a number by the server (parse_start_time)
         const asSeconds = value.includes(':') ? NaN : Number(value);
-        if (!value || ui.parseTimecode(value) !== null || (Number.isFinite(asSeconds) && asSeconds >= 0)) return null;
-        return 'Enter the start as m:ss, h:mm:ss or seconds, for example 1:30 or 90';
+        if (value && ui.parseTimecode(value) === null && !(Number.isFinite(asSeconds) && asSeconds >= 0)) {
+            return 'Enter the start as m:ss, h:mm:ss or seconds, for example 1:30 or 90';
+        }
+        const total = sourceDuration();
+        if (total !== null && startSeconds() >= total) {
+            return `Start before the end of the video (${ui.formatClock(total)})`;
+        }
+        return null;
     }
 
     const checks = [[$('shortVideoUrl'), linkError], [$('customDuration'), lengthError],
@@ -125,10 +278,7 @@
     const PRESET_LENGTHS = [15, 30, 60];
     const LENGTH_MATCH_SECONDS = 0.5;
 
-    function clock(totalSeconds) {
-        const seconds = Math.floor(totalSeconds);
-        return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
-    }
+    const clock = (totalSeconds) => ui.formatClock(Math.floor(totalSeconds));
 
     // Fills in the start and length; a suggestion that ends on a line may be a little shorter
     function useSuggestion(clip) {
@@ -168,14 +318,8 @@
 
     async function suggestMoments() {
         const status = $('suggestStatus');
-        const url = $('shortVideoUrl').value.trim();
+        const url = source.state().url;
         $('suggestions').replaceChildren();
-        if (!ui.isLink(url)) {
-            ui.setFieldError($('shortVideoUrl'), 'Enter a YouTube link first');
-            $('shortVideoUrl').focus();
-            status.replaceChildren();
-            return;
-        }
         let duration;
         try {
             duration = getDuration();
@@ -205,28 +349,52 @@
         $('suggestions').replaceChildren(...data.clips.map(suggestionItem));
     }
 
-    $('suggestBtn').addEventListener('click', () => ui.whileWorking($('suggestBtn'), 'Looking...', suggestMoments));
+    $('suggestBtn').addEventListener('click', () => {
+        if ($('suggestBtn').getAttribute('aria-disabled') === 'true') {
+            $('suggestStatus').replaceChildren(notice('info', 'Analyze a YouTube link first.',
+                'Paste it above; suggestions use its replay data.'));
+            return;
+        }
+        ui.whileWorking($('suggestBtn'), 'Looking...', suggestMoments);
+    });
 
     // ---- create a short: a background job, followed in a progress card ----------
 
     function setRendering(isRendering) {
         rendering = isRendering;
         const submit = $('createSubmit');
-        submit.textContent = isRendering ? 'Creating...' : 'Create short';
+        submit.textContent = 'Creating...';
+        if (!isRendering) updateTiming();
         if (isRendering) submit.setAttribute('aria-disabled', 'true');
         else submit.removeAttribute('aria-disabled');
+    }
+
+    // The finished short: downloaded from here, or found again in Your shorts
+    function showNewShort(result) {
+        const message = notice('ok', 'Your short is ready.', 'It is saved in Your shorts until you delete it.');
+        const download = element('a', 'btn btn-sm btn-primary notice-action', 'Download');
+        download.href = safeUrl(result.download_url, ['/shorts/']);
+        download.download = result.filename;
+        const open = element('a', 'btn btn-sm notice-action', 'Open in Your shorts');
+        open.href = '/shorts?short=' + encodeURIComponent(result.filename);
+        message.append(download, open);
+        $('formStatus').replaceChildren(message,
+            ...(result.warnings || []).map((warning) => notice('warn', 'Note.', warning)));
+        download.focus();  // the progress card, and the focus in it, is gone
     }
 
     async function showOutcome(job) {
         const status = $('formStatus');
         if (job.state === 'succeeded') {
-            await showNewShort(job.result);
-            $('resultHeading').focus({ preventScroll: true });  // the new short is first in this list
+            showNewShort(job.result);
             return;
         }
-        status.replaceChildren(job.state === 'cancelled'
-            ? notice('info', 'Cancelled.', 'No short was made.')
-            : notice('error', 'Could not create the short.', job.error || 'Try again in a moment.'));
+        if (job.state === 'cancelled') {
+            status.replaceChildren(notice('info', 'Cancelled.', 'No short was made.'));
+        } else {
+            status.replaceChildren(withRetry(notice('error', 'Could not create the short.',
+                job.error || 'Try again in a moment.')));
+        }
         $('createSubmit').focus();  // the progress card, and the focus in it, is gone
     }
 
@@ -256,412 +424,54 @@
             quality: $('quality').value,
             vertical_format: $('verticalFormat').checked,
         };
-        const overlayText = $('overlayText').value.trim();
+        // The field exists only where captions can be drawn (ImageMagick)
+        const overlayText = $('overlayText') ? $('overlayText').value.trim() : '';
         if (overlayText) body.text_overlay = { text: overlayText };
+        if (body.vertical_format) body.crop_position = Number(cropPosition.toFixed(3));
+        startJob(body);
+    });
 
+    let lastRequest = null;   // what "Try again" sends
+
+    async function startJob(body) {
+        lastRequest = body;
+        const status = $('formStatus');
+        status.replaceChildren();
         setRendering(true);
         try {
             followJob(await jobs.start('/api/jobs/create-short', body));
         } catch (error) {
             setRendering(false);
-            status.replaceChildren(notice('error', 'Could not start.', error.message));
+            status.replaceChildren(withRetry(notice('error', 'Could not start.', error.message)));
         }
-    });
+    }
+
+    // The same short again, with the settings it was asked with
+    function withRetry(message) {
+        if (!lastRequest) return message;
+        const retry = element('button', 'btn btn-sm notice-action', 'Try again');
+        retry.type = 'button';
+        retry.addEventListener('click', () => {
+            if (!rendering) startJob(lastRequest);
+        });
+        message.append(retry);
+        return message;
+    }
 
     // A short still being made when this page was (re)opened: follow it. Finished ones are
-    // already in "Your shorts", which is read from disk.
+    // in Your shorts, which is read from disk.
     async function resumeRunningJob() {
-        const [job, subtitleJob] = await Promise.all([jobs.latest('short'), jobs.latest('subtitles')]);
+        const job = await jobs.latest('short');
         if (!rendering && job && jobs.isActive(job)) followJob(job);  // rendering: just started here
-        if (!subtitling && subtitleJob && jobs.isActive(subtitleJob)) followSubtitleJob(subtitleJob);
-    }
-
-    // ---- your shorts: kept on disk, listed again after a refresh ------------
-
-    // Deleting cannot be undone, so it is confirmed in a dialog (no time limit to beat)
-    function confirmDelete(item) {
-        const dialog = element('dialog', 'dialog');
-        dialog.setAttribute('aria-labelledby', 'deleteHeading');
-        dialog.addEventListener('close', () => dialog.remove());
-
-        const heading = element('h2', undefined, 'Delete this short?');
-        heading.id = 'deleteHeading';
-        const note = element('p', undefined, `"${item.title}" is removed from this computer. This cannot be undone.`);
-
-        const remove = element('button', 'btn btn-danger', 'Delete short');
-        remove.type = 'button';
-        remove.addEventListener('click', () => {
-            dialog.close();
-            deleteShort(item);
-        });
-        const keep = element('button', 'btn', 'Keep it');
-        keep.type = 'button';
-        keep.addEventListener('click', () => dialog.close());
-
-        const actions = element('div', 'actions');
-        actions.append(remove, keep);
-        dialog.append(heading, note, actions);
-        document.body.append(dialog);
-        dialog.showModal();
-        keep.focus();  // the safe choice is the default
-    }
-
-    async function deleteShort(item) {
-        try {
-            const { ok, data } = await postJson('/api/shorts/delete', { filename: item.filename });
-            if (!ok || !data.success) throw new Error(data.error || 'Could not delete the short');
-            await loadLibrary();
-            $('resultsStatus').replaceChildren(notice('ok', 'Short deleted.', `"${item.title}" was removed.`));
-        } catch (error) {
-            $('resultsStatus').replaceChildren(notice('error', 'Could not delete the short.', error.message));
-        }
-        // The deleted card took focus with it; continue from the list heading
-        $('resultHeading').focus();
-    }
-
-    function shortCard(item, isNew) {
-        const source = safeUrl(item.url, ['/shorts/']);
-
-        const video = element('video', 'short-video');
-        video.controls = true;
-        video.playsInline = true;
-        const poster = safeUrl(item.poster, ['/shorts/posters/']);
-        if (poster) {
-            video.poster = poster;
-            video.preload = 'none';  // the poster shows it; the video loads when played
-            if (source) video.src = source;
-        } else {
-            video.preload = 'metadata';
-            if (source) video.src = source + '#t=0.1';  // shows the first moment as the cover
-        }
-
-        const meta = element('p', 'short-meta');
-        if (item.duration) meta.append(element('span', undefined, `${item.duration} s`));
-        if (item.size) meta.append(element('span', undefined, (item.size / BYTES_PER_MB).toFixed(1) + ' MB'));
-        meta.append(element('span', undefined, relativeTime(item.created)));
-
-        // Every card has the same three buttons; the labels say which short they act on
-        const download = element('a', 'btn btn-sm', 'Download');
-        download.href = source;
-        download.download = item.filename;
-        download.setAttribute('aria-label', `Download ${item.title}`);
-
-        const upload = element('button', 'btn btn-sm', 'Upload to YouTube');
-        upload.type = 'button';
-        upload.setAttribute('aria-label', `Upload ${item.title} to YouTube`);
-        upload.addEventListener('click', () => reviewUpload(item));
-
-        const subtitle = element('button', 'btn btn-sm subtitle-btn', 'Vietnamese subtitles');
-        subtitle.type = 'button';
-        subtitle.setAttribute('aria-label', `Add Vietnamese subtitles to a copy of ${item.title}`);
-        if (subtitling) subtitle.setAttribute('aria-disabled', 'true');
-        subtitle.addEventListener('click', () => addSubtitles(item));
-
-        const remove = element('button', 'btn btn-sm btn-quiet', 'Delete');
-        remove.type = 'button';
-        remove.setAttribute('aria-label', `Delete ${item.title}`);
-        remove.addEventListener('click', () => confirmDelete(item));
-
-        const actions = element('div', 'short-actions');
-        actions.append(download, upload, subtitle, remove);
-
-        const card = element('li', isNew ? 'card card-flush short-card is-new' : 'card card-flush short-card');
-        const body = element('div', 'short-body');
-        const title = element('h3', 'short-title clamp', item.title);
-        title.tabIndex = -1;  // focused when this short is opened from the Home page
-        body.append(title, meta, actions);
-        card.append(video, body);
-        return card;
-    }
-
-    async function loadLibrary(newFilename) {
-        try {
-            const response = await fetch('/api/shorts');
-            const data = await response.json();
-            if (!response.ok || !data.success) throw new Error(data.error || 'Request failed');
-
-            const cards = data.shorts.map((item) => shortCard(item, item.filename === newFilename));
-            $('resultsContent').replaceChildren(...cards);
-            $('libraryLoading').hidden = true;
-            $('libraryEmpty').hidden = cards.length > 0;
-            $('libraryCount').textContent = cards.length === 1 ? '1 short' : cards.length ? `${cards.length} shorts` : '';
-            return cards;
-        } catch (error) {
-            console.error('Could not load the shorts:', error);
-            $('libraryLoading').hidden = true;
-            $('resultsStatus').replaceChildren(
-                notice('error', 'Could not load your earlier shorts.', 'Refresh the page to try again.'));
-            return [];
-        }
-    }
-
-    async function showNewShort(result, heading = 'Your short is ready.',
-        detail = 'It is first in the list below, and it stays there after you leave this page.') {
-        $('resultsStatus').replaceChildren(
-            notice('ok', heading, detail),
-            ...(result.warnings || []).map((warning) => notice('warn', 'Note.', warning)));
-        const cards = await loadLibrary(result.filename);
-        if (cards.length) cards[0].scrollIntoView({ behavior: scrollBehavior(), block: 'center' });
-    }
-
-    // ---- Vietnamese subtitles: a copy of a short, made by a background job -------
-
-    function setSubtitling(isSubtitling) {
-        subtitling = isSubtitling;
-        document.querySelectorAll('.subtitle-btn').forEach((button) => {
-            if (isSubtitling) button.setAttribute('aria-disabled', 'true');
-            else button.removeAttribute('aria-disabled');
-        });
-    }
-
-    async function showSubtitleOutcome(job) {
-        if (job.state === 'succeeded') {
-            const count = job.result.subtitle_count;
-            await showNewShort(job.result, 'Vietnamese subtitles added.',
-                `${count} ${count === 1 ? 'line' : 'lines'} translated from ${job.result.language}. ` +
-                'The subtitled copy is first in the list below; the original is unchanged.');
-        } else {
-            $('resultsStatus').replaceChildren(job.state === 'cancelled'
-                ? notice('info', 'Cancelled.', 'No subtitled copy was made.')
-                : notice('error', 'Could not add subtitles.', job.error || 'Try again in a moment.'));
-        }
-        $('resultHeading').focus({ preventScroll: job.state === 'succeeded' });  // the progress card is gone
-    }
-
-    function followSubtitleJob(job) {
-        setSubtitling(true);
-        jobs.follow(job, $('subtitleJobPanel'), {
-            title: 'Adding Vietnamese subtitles',
-            onFinish: (final) => {
-                setSubtitling(false);
-                showSubtitleOutcome(final);
-            },
-        });
-    }
-
-    async function addSubtitles(item) {
-        if (subtitling) return;
-        setSubtitling(true);  // before the request, so a second click does nothing
-        $('resultsStatus').replaceChildren();
-        try {
-            followSubtitleJob(await jobs.start('/api/jobs/subtitles', { filename: item.filename }));
-        } catch (error) {
-            setSubtitling(false);
-            $('resultsStatus').replaceChildren(notice('error', 'Could not start.', error.message));
-        }
-    }
-
-
-    // ---- YouTube upload ---------------------------------------------------
-
-    const sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
-
-    async function isSignedInToYouTube() {
-        const response = await fetch('/api/youtube-auth');
-        const data = await response.json();
-        if (!response.ok) throw new Error(data.error || 'Could not check the YouTube sign-in');
-        return data.authenticated === true;
-    }
-
-    // The popup must be opened synchronously inside the click handler (before any
-    // asynchronous work), otherwise browsers treat it as unrequested and may block it.
-    function openSignInWindow() {
-        return window.open('', 'youtube_auth', 'width=600,height=700,scrollbars=yes,resizable=yes');
-    }
-
-    async function ensureSignedIn(popup) {
-        if (await isSignedInToYouTube()) {
-            signedIn = true;
-            if (popup) popup.close();
-            return true;
-        }
-        if (!popup) throw new Error('Allow pop-ups for this page and try again');
-
-        const { ok, data } = await postJson('/api/youtube-auth/start', {});
-        if (!ok || !data.auth_url) {
-            popup.close();
-            throw new Error(data.error || 'Could not start the YouTube sign-in');
-        }
-        popup.location.href = data.auth_url;
-        showLoading('Waiting for you to sign in to YouTube in the other window...', true);
-
-        // Poll the server rather than the popup state: Google's pages can sever the
-        // link to the opener, which makes the popup's closed flag unreliable.
-        const deadline = Date.now() + AUTH_TIMEOUT_MS;
-        while (Date.now() < deadline) {
-            await sleep(AUTH_POLL_MS);
-            if (cancelRequested) {
-                popup.close();
-                return false;
-            }
-            if (await isSignedInToYouTube()) {
-                signedIn = true;
-                popup.close();
-                return true;
-            }
-        }
-        popup.close();
-        throw new Error('Sign-in timed out');
-    }
-
-    // Review before anything is published: title, description and who can see it
-    function reviewUpload(item) {
-        const dialog = element('dialog', 'dialog upload-dialog');
-        dialog.setAttribute('aria-labelledby', 'uploadReviewHeading');
-        dialog.addEventListener('close', () => dialog.remove());
-
-        const heading = element('h2', undefined, 'Upload to YouTube');
-        heading.id = 'uploadReviewHeading';
-        const form = element('form', 'stack');
-        form.noValidate = true;
-
-        function field(label, control, hint) {
-            const wrapper = element('div', 'field');
-            const caption = element('label', undefined, label);
-            caption.htmlFor = control.id;
-            wrapper.append(caption, control);
-            if (hint) wrapper.append(element('p', 'hint', hint));
-            return wrapper;
-        }
-
-        const title = element('input');
-        Object.assign(title, { id: 'uploadTitle', type: 'text', maxLength: UPLOAD_TITLE_LIMIT, value: item.title || '' });
-        const description = element('textarea');
-        Object.assign(description, { id: 'uploadDescription', rows: 3, maxLength: UPLOAD_DESCRIPTION_LIMIT,
-                                     value: 'Created with VideoExtract' });
-        const privacy = element('select');
-        privacy.id = 'uploadPrivacy';
-        [['private', 'Private: only you'], ['unlisted', 'Unlisted: anyone with the link'],
-         ['public', 'Public: everyone']].forEach(([value, label]) => {
-            const option = element('option', undefined, label);
-            option.value = value;
-            privacy.append(option);
-        });
-
-        const upload = element('button', 'btn btn-primary', 'Upload');
-        upload.type = 'submit';
-        const keep = element('button', 'btn', 'Not now');
-        keep.type = 'button';
-        keep.addEventListener('click', () => dialog.close());
-        const actions = element('div', 'actions');
-        actions.append(upload, keep);
-
-        form.append(field('Title', title, `Up to ${UPLOAD_TITLE_LIMIT} characters.`),
-                    field('Description', description),
-                    field('Who can watch it', privacy, 'You can change this later in YouTube Studio.'),
-                    actions);
-        title.addEventListener('input', () => ui.clearFieldError(title));
-        form.addEventListener('submit', (event) => {
-            event.preventDefault();
-            if (!title.value.trim()) {
-                ui.setFieldError(title, 'Enter a title');
-                title.focus();
-                return;
-            }
-            const details = { title: title.value.trim(), description: description.value.trim(), privacy: privacy.value };
-            dialog.close();
-            startYouTubeUpload(item.filename, details);  // still inside the click: the sign-in popup may open
-        });
-
-        dialog.append(heading, form);
-        document.body.append(dialog);
-        dialog.showModal();
-        title.focus();
-    }
-
-    function startYouTubeUpload(filename, details) {
-        const popup = signedIn ? null : openSignInWindow();  // synchronous: see above
-        uploadToYouTube(filename, details, popup);
-    }
-
-    async function uploadToYouTube(filename, details, popup) {
-        if (busy) {
-            if (popup) popup.close();
-            return;
-        }
-        busy = true;
-        cancelRequested = false;
-        let uploaded = null;
-        const status = $('resultsStatus');
-        status.replaceChildren();
-        showLoading('Signing in to YouTube...');
-        try {
-            if (!(await ensureSignedIn(popup))) {
-                status.replaceChildren(notice('warn', 'Sign-in cancelled.', 'Nothing was uploaded.'));
-                return;
-            }
-            showLoading('Uploading to YouTube...');
-            const { ok, data } = await postJson('/api/upload-to-youtube', {
-                filename: filename,
-                title: details.title,
-                description: details.description,
-                tags: ['Shorts'],
-                privacy: details.privacy,
-            });
-            if (!ok || !data.success) throw new Error(data.error || 'Upload failed');
-            uploaded = data;
-        } catch (error) {
-            console.error('YouTube upload failed:', error);
-            status.replaceChildren(notice('error', 'Upload failed.', error.message));
-        } finally {
-            if (popup && !popup.closed) popup.close();
-            busy = false;
-            hideLoading();
-        }
-        // Opened only after the overlay is gone, so closing it returns focus to the Upload button
-        if (uploaded) showYouTubeSuccess(uploaded);
-    }
-
-    function showYouTubeSuccess(result) {
-        const dialog = element('dialog', 'dialog');
-        dialog.setAttribute('aria-labelledby', 'uploadedHeading');
-        dialog.addEventListener('close', () => dialog.remove());
-
-        const heading = element('h2', undefined, 'Uploaded to YouTube');
-        heading.id = 'uploadedHeading';
-        const note = element('p', undefined,
-            `Your video was uploaded as ${result.privacy}. You can change this in YouTube Studio.`);
-
-        const actions = element('div', 'actions');
-        const watchUrl = safeUrl(result.youtube_url, ['https://www.youtube.com/']);
-        const studioUrl = safeUrl(result.studio_url, ['https://studio.youtube.com/']);
-        [[watchUrl, 'btn btn-primary', 'View on YouTube'],
-         [studioUrl, 'btn', 'Edit in YouTube Studio']].forEach(([href, classes, label]) => {
-            if (!href) return;
-            const link = element('a', classes, label);
-            link.href = href;
-            link.target = '_blank';
-            link.rel = 'noopener noreferrer';
-            actions.append(link);
-        });
-        const close = element('button', 'btn', 'Close');
-        close.type = 'button';
-        close.addEventListener('click', () => dialog.close());
-        actions.append(close);
-
-        dialog.append(heading, note, actions);
-        document.body.append(dialog);
-        dialog.showModal();
-    }
-
-    $('libraryStart').addEventListener('click', () => $('shortVideoUrl').focus());
-
-    // Opened from a short on the Home page (?short=<file name>): highlight it and take focus there
-    async function showRequestedShort() {
-        const requested = new URLSearchParams(window.location.search).get('short');
-        const cards = await loadLibrary(requested || undefined);
-        const card = requested && cards.find((item) => item.classList.contains('is-new'));
-        if (!card) return;
-        card.scrollIntoView({ behavior: scrollBehavior(), block: 'center' });
-        card.querySelector('.short-title').focus({ preventScroll: true });
     }
 
     // ---- prefill from ?url= -----------------------------------------------
 
     const prefill = new URLSearchParams(window.location.search).get('url');
     if (prefill) $('shortVideoUrl').value = prefill;
-    window.attachLinkPreview($('shortVideoUrl'), $('shortLinkPreview'));
+    source = videoSource.attach({ input: $('shortVideoUrl'), button: $('analyzeShortBtn'),
+                                  panel: $('shortLinkPreview'), onChange: onSourceChange });
+    onSourceChange(source.state());  // the empty start reports no change, so apply it once
     updateCropDiagram();
-    showRequestedShort();
     resumeRunningJob();
 })();

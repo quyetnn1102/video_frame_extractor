@@ -7,7 +7,7 @@ own. The API key is sent in a header (never in the URL) and is never logged.
 import os
 import re
 from datetime import datetime
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 
@@ -22,6 +22,15 @@ DESCRIPTION_PREVIEW_LENGTH = 200
 REGION_PATTERN = re.compile(r'[A-Z]{2}')
 CATEGORY_PATTERN = re.compile(r'\d{1,3}')
 ERROR_CODE_PATTERN = re.compile(r'[A-Za-z][A-Za-z0-9_]{0,63}')  # e.g. API_KEY_INVALID, quotaExceeded
+
+# Why there are no live results, so the page can say what to do (None: live results)
+NO_KEY, BAD_KEY, QUOTA, UNAVAILABLE, EMPTY = 'no_key', 'bad_key', 'quota', 'unavailable', 'empty'
+QUOTA_CODES = frozenset({'quotaExceeded', 'dailyLimitExceeded', 'rateLimitExceeded',
+                         'userRateLimitExceeded', 'RESOURCE_EXHAUSTED'})
+# videos.list answers 404 for a category that has no chart in a region: no videos, not a failure
+NO_CHART_CODES = frozenset({'videoChartNotFound', 'NOT_FOUND'})
+KEY_CODES = frozenset({'keyInvalid', 'keyExpired', 'API_KEY_INVALID', 'API_KEY_EXPIRED',
+                       'accessNotConfigured', 'SERVICE_DISABLED'})
 
 # Single source of truth for category names and the /api/video-categories list.
 VIDEO_CATEGORIES = {
@@ -104,9 +113,8 @@ def get_fallback_trending_data() -> List[Dict[str, Any]]:
 
 
 def _preview(description: str) -> str:
-    if len(description) > DESCRIPTION_PREVIEW_LENGTH:
-        return description[:DESCRIPTION_PREVIEW_LENGTH] + '...'
-    return description
+    """The start of a description; the page shows two lines of it and adds its own ellipsis."""
+    return description[:DESCRIPTION_PREVIEW_LENGTH]
 
 
 def _to_video(item: Dict[str, Any]) -> Dict[str, Any]:
@@ -154,13 +162,37 @@ def describe_api_failure(error: Exception) -> str:
     return ', '.join(parts)
 
 
+def failure_reason(error: Exception) -> str:
+    """EMPTY, QUOTA, BAD_KEY or UNAVAILABLE for a failed API call, from Google's error codes."""
+    response = getattr(error, 'response', None)
+    codes = set(_error_codes(response)) if response is not None else set()
+    if codes & NO_CHART_CODES:
+        return EMPTY
+    if codes & QUOTA_CODES:
+        return QUOTA
+    if codes & KEY_CODES:
+        return BAD_KEY
+    return UNAVAILABLE
+
+
 def get_youtube_trending(category: str = '0', region: str = DEFAULT_REGION,
                          max_results: int = 20) -> List[Dict[str, Any]]:
     """Fetch the most popular videos; falls back to sample data on any failure."""
+    videos, _ = fetch_trending(category, region, max_results)
+    return videos or get_fallback_trending_data()
+
+
+def fetch_trending(category: str = '0', region: str = DEFAULT_REGION,
+                   max_results: int = 20) -> Tuple[List[Dict[str, Any]], Optional[str]]:
+    """
+    (videos, reason). The reason is None for live results; otherwise the videos are the sample
+    data (NO_KEY, BAD_KEY, QUOTA, UNAVAILABLE) or none at all (EMPTY: YouTube has no videos
+    for this category and region).
+    """
     api_key = os.getenv('YOUTUBE_API_KEY')
     if not api_key:
         app_logger.error("YouTube API key not found in environment variables")
-        return get_fallback_trending_data()
+        return get_fallback_trending_data(), NO_KEY
 
     region = region if REGION_PATTERN.fullmatch(region or '') else DEFAULT_REGION
     params = {
@@ -182,12 +214,16 @@ def get_youtube_trending(category: str = '0', region: str = DEFAULT_REGION,
         response.raise_for_status()
         items = response.json().get('items')
     except (requests.RequestException, ValueError) as error:
+        reason = failure_reason(error)
+        if reason == EMPTY:
+            app_logger.info("YouTube has no chart for this category and region")
+            return [], EMPTY
         app_logger.error(f"YouTube API request failed ({describe_api_failure(error)})")
-        return get_fallback_trending_data()
+        return get_fallback_trending_data(), reason
 
     if not items:
         app_logger.warning("No items found in YouTube API response")
-        return get_fallback_trending_data()
+        return [], EMPTY
 
     videos = []
     for item in items:
@@ -198,7 +234,7 @@ def get_youtube_trending(category: str = '0', region: str = DEFAULT_REGION,
 
     if not videos:
         app_logger.warning("No valid videos processed from YouTube API")
-        return get_fallback_trending_data()
+        return get_fallback_trending_data(), UNAVAILABLE
 
     app_logger.info(f"Fetched {len(videos)} trending videos from YouTube API")
-    return videos
+    return videos, None

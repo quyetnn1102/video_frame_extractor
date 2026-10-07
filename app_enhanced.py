@@ -29,13 +29,16 @@ from clip_finder import ClipFinderError, suggest_clips
 from config import get_config
 from database import db_manager, get_analytics, get_recent_requests
 from jobs import QUEUED, RUNNING, JobFailed, JobQueueFull, JobRegistry, NullReporter
-from library import POSTER_FOLDER, folder_size_bytes, list_shorts, remove_poster, sync_posters
+from library import DEFAULT_LIMIT, MAX_LIMIT, POSTER_FOLDER, folder_size_bytes, remove_poster, sync_posters
+from library_api import BUSY_SHORT_MESSAGE, library_page, shorts_in_use, uploading
 from logger import LogContext, api_logger, app_logger
 from media_jobs import (DEFAULT_SHORT_DURATION, EXTRACT_STAGES, SHORT_STAGES, SUBTITLE_STAGES,
                         finish_request_record, parse_extract_request, parse_short_request, run_recorded)
 from short_video import (MAX_SHORT_DURATION, MIN_SHORT_DURATION, ShortVideoError, parse_duration,
                          remove_partial_renders, text_overlay_available)
-from trending import VIDEO_CATEGORIES, get_youtube_trending
+from platform_guidance import PLATFORM_GUIDANCE, PLATFORM_NAMES
+from setup_checks import setup_checks
+from trending import VIDEO_CATEGORIES, fetch_trending
 from validators import MAX_TIMESTAMPS, resolve_in_folder, validator
 from video_processor import extractor, javascript_runtime_available
 from youtube_uploader import PRIVACY_STATUSES, YouTubeUploaderError, youtube_uploader
@@ -48,11 +51,24 @@ CROSS_SITE_VALUES = ('cross-site', 'same-site')
 JOB_ID_PATTERN = re.compile(r'[0-9a-f]{32}')
 RECENT_REQUESTS_SHOWN = 10
 MAX_TRENDING_RESULTS = 50
+FRAME_EXTENSIONS = tuple(f'.{name}' for name in media_jobs.FRAME_FORMATS)
+PAGE_NUMBER = re.compile(r'[0-9]{1,7}')
 
 # One registry per process: deploy.py runs a single worker, so every request sees the same jobs
 job_registry = JobRegistry(max_workers=get_config().MAX_CONCURRENT_JOBS)
 # Held while checking for a running subtitle job and starting one, so two requests cannot both start
 subtitle_start_lock = threading.Lock()
+
+
+def page_parameter(name: str, default: int, maximum: int) -> Optional[int]:
+    """A whole-number query parameter between 0 and `maximum`; None when it is not one."""
+    raw = request.args.get(name, '')
+    if raw == '':
+        return default
+    if not PAGE_NUMBER.fullmatch(raw):  # ASCII digits only: str.isdigit() also accepts "²"
+        return None
+    value = int(raw)
+    return value if value <= maximum else None
 
 CONTENT_SECURITY_POLICY = "; ".join([
     "default-src 'self'",
@@ -78,36 +94,6 @@ HTTP_ERROR_MESSAGES = {
     429: 'Rate limit exceeded. Please try again later.',
 }
 
-PLATFORM_GUIDANCE = {
-    'youtube': {
-        'status': 'supported',
-        'notes': 'Public videos, Shorts and live replays up to the duration limit',
-        'tips': ['Copy the URL from the browser address bar or the Share button'],
-    },
-    'tiktok': {
-        'status': 'supported',
-        'notes': 'Public videos; some are region-blocked',
-        'tips': ['Share → Copy link works (vm.tiktok.com / vt.tiktok.com links are fine)'],
-    },
-    'facebook': {
-        'status': 'limited',
-        'notes': 'Public videos only',
-        'tips': ['Videos that need a login or are private cannot be downloaded',
-                 'fb.watch share links are supported'],
-    },
-    'instagram': {
-        'status': 'limited',
-        'notes': 'Public posts and reels; some content needs a logged-in session',
-        'tips': ['Use public posts or reels',
-                 'For restricted content provide instagram_cookies.txt (see the README)'],
-    },
-    'douyin': {
-        'status': 'limited',
-        'notes': 'Public videos; Douyin often refuses automated downloads',
-        'tips': ['douyin.com/video/<id>, ?modal_id=<id> and v.douyin.com share links all work',
-                 'If Douyin refuses, export your browser cookies to douyin_cookies.txt (see the README)'],
-    },
-}
 
 OAUTH_RESULT_PAGE = """<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><title>YouTube sign-in</title>
@@ -277,7 +263,12 @@ def create_app() -> Flask:
 
     @app.route('/trending')
     def trending_page():
-        return render_template('trending.html')
+        categories = sorted(VIDEO_CATEGORIES.items(), key=lambda item: item[1])
+        return render_template('trending.html', categories=categories)
+
+    @app.route('/shorts')
+    def shorts_page():
+        return render_template('shorts.html')
 
     @app.route('/create-short')
     def create_short_page():
@@ -291,11 +282,13 @@ def create_app() -> Flask:
             return render_template('dashboard.html', analytics=get_analytics(),
                                    system_info=system_info,
                                    recent_requests=get_recent_requests(limit=RECENT_REQUESTS_SHOWN),
-                                   storage=storage_usage(config), cleanup_hours=config.AUTO_CLEANUP_HOURS)
+                                   storage=storage_usage(config), cleanup_hours=config.AUTO_CLEANUP_HOURS,
+                                   setup=setup_checks())
         except Exception as error:  # the page should still load without metrics
             app_logger.error(f"Dashboard error ({type(error).__name__})")
             return render_template('dashboard.html', analytics={}, system_info={},
-                                   recent_requests=[], storage={}, cleanup_hours=config.AUTO_CLEANUP_HOURS)
+                                   recent_requests=[], storage={}, cleanup_hours=config.AUTO_CLEANUP_HOURS,
+                                   setup=[])
 
     # -- API: validation and information --------------------------------------
 
@@ -348,13 +341,15 @@ def create_app() -> Flask:
             return json_error('URL is required', 400)
 
         url = data['url'].strip()
-        is_valid, _, error = validator.validate_url(url)
-        if not is_valid:
-            return json_error(error, 400)
+        is_valid, platform, error = validator.validate_url(url)
+        tips = PLATFORM_GUIDANCE.get(platform, {}).get('tips', [])
+        if not is_valid:  # 'invalid': the link cannot be used at all
+            return jsonify({'success': False, 'error': error, 'reason': 'invalid', 'tips': tips}), 400
 
         success, video_info, info_error = extractor.get_video_info(url)
-        if not success:
-            return json_error(info_error, 400)
+        if not success:  # 'unreadable': a supported link whose details could not be read
+            return jsonify({'success': False, 'error': info_error, 'reason': 'unreadable', 'tips': tips}), 400
+        video_info['platform_name'] = PLATFORM_NAMES.get(video_info.get('platform'), video_info.get('platform'))
         return jsonify({'success': True, 'video_info': video_info})
 
     @app.route('/api/test-platform', methods=['POST'])
@@ -406,10 +401,11 @@ def create_app() -> Flask:
 
         category = request.args.get('category', '0')
         region = request.args.get('region', 'US')
-        videos = get_youtube_trending(category, region, max_results)
+        videos, reason = fetch_trending(category, region, max_results)
         return jsonify({
-            # Sample data stands in when YouTube cannot be reached; the page must say so
+            # Sample data stands in when YouTube cannot be reached; the page must say so, and why
             'sample': bool(videos) and all(str(video.get('id', '')).startswith('fallback') for video in videos),
+            'reason': reason,
             'api_key_configured': bool(os.getenv('YOUTUBE_API_KEY')),
             'platform': platform,
             'category': category,
@@ -441,7 +437,7 @@ def create_app() -> Flask:
     @app.route('/frames/<filename>')
     @limiter.exempt
     def serve_frame(filename):
-        path = resolve_in_folder(config.FRAMES_FOLDER, filename, ('.jpg',))
+        path = resolve_in_folder(config.FRAMES_FOLDER, filename, FRAME_EXTENSIONS)
         if path is None:
             return json_error('Not found', 404)
         return send_from_directory(config.FRAMES_FOLDER, path.name)
@@ -455,12 +451,12 @@ def create_app() -> Flask:
         if (not isinstance(names, list) or not names or len(names) > MAX_TIMESTAMPS
                 or not all(isinstance(name, str) for name in names)):
             return json_error('filenames must be a list of frame file names', 400)
-        paths = [path for path in (resolve_in_folder(config.FRAMES_FOLDER, name, ('.jpg',))
+        paths = [path for path in (resolve_in_folder(config.FRAMES_FOLDER, name, FRAME_EXTENSIONS)
                                    for name in dict.fromkeys(names)) if path is not None]
         if not paths:
             return json_error('These frames are no longer on disk', 404)
         buffer = io.BytesIO()
-        with zipfile.ZipFile(buffer, 'w', zipfile.ZIP_STORED) as archive:  # JPEGs do not compress further
+        with zipfile.ZipFile(buffer, 'w', zipfile.ZIP_STORED) as archive:  # JPEG and PNG are compressed already
             for path in paths:
                 try:
                     archive.write(path, arcname=path.name)
@@ -512,12 +508,12 @@ def create_app() -> Flask:
 
     # -- API: background jobs (download + extract / render, with progress and cancel) ----
 
-    def start_job(kind: str, stages, record_id: int, work):
+    def start_job(kind: str, stages, record_id: int, work, subject: Optional[str] = None):
         """Queues `work` (it records its own outcome); answers 202 with the job, or 429."""
         queued_at = time.time()
         try:
             job = job_registry.submit(kind, stages, work, on_cancel_while_queued=lambda: finish_request_record(
-                record_id, 'cancelled', queued_at, 'Cancelled by the user'))
+                record_id, 'cancelled', queued_at, 'Cancelled by the user'), subject=subject)
         except JobQueueFull:
             finish_request_record(record_id, 'failed', queued_at, 'Too many jobs waiting')
             return json_error('Too many jobs are running or waiting. Wait for one to finish.', 429)
@@ -569,7 +565,8 @@ def create_app() -> Flask:
                    for job in job_registry.snapshots()):
                 return json_error('Subtitles are already being added to a short. Wait for it to finish.', 409)
             return start_job('subtitles', SUBTITLE_STAGES, 0,
-                             lambda reporter: media_jobs.add_vietnamese_subtitles(path, reporter))
+                             lambda reporter: media_jobs.add_vietnamese_subtitles(path, reporter),
+                             subject=path.name)
 
     # Polled about once a second by an open page, so not counted against the API limit
     @app.route('/api/jobs')
@@ -613,7 +610,12 @@ def create_app() -> Flask:
 
     @app.route('/api/shorts')
     def list_generated_shorts():
-        return jsonify({'success': True, 'shorts': list_shorts(config.SHORTS_FOLDER)})
+        """A page of the library, newest first, with what each short can do right now."""
+        limit = page_parameter('limit', DEFAULT_LIMIT, MAX_LIMIT)
+        offset = page_parameter('offset', 0, 1_000_000)
+        if not limit or offset is None:
+            return json_error(f'offset and limit must be whole numbers (limit 1 to {MAX_LIMIT})', 400)
+        return jsonify({'success': True, **library_page(config.SHORTS_FOLDER, offset, limit, job_registry)})
 
     @app.route('/api/shorts/delete', methods=['POST'])
     @limiter.limit("30 per minute")
@@ -621,6 +623,8 @@ def create_app() -> Flask:
         path, error = requested_short()
         if error:
             return error
+        if path.name in shorts_in_use(job_registry):
+            return json_error(BUSY_SHORT_MESSAGE, 409)
         try:
             path.unlink()
         except PermissionError:
@@ -652,7 +656,8 @@ def create_app() -> Flask:
     @limiter.limit("120 per minute")  # the page polls this while the sign-in window is open
     def youtube_auth_status():
         """Sign-in state only. No side effects, so polling cannot disturb a sign-in in progress."""
-        return jsonify({'authenticated': youtube_uploader.is_authenticated()})
+        return jsonify({'authenticated': youtube_uploader.is_authenticated(),
+                        'configured': youtube_uploader.is_configured()})
 
     @app.route('/api/youtube-auth/start', methods=['POST'])
     @limiter.limit("20 per minute")
@@ -713,18 +718,18 @@ def create_app() -> Flask:
         if video_path is None:
             return json_error('Video not found', 404)
 
-        if not youtube_uploader.is_authenticated():
-            return json_error('Please sign in to YouTube first', 401)
-
-        is_valid, validation_message = youtube_uploader.validate_short_video(str(video_path))
-        if not is_valid:
-            return json_error(f'Video validation failed: {validation_message}', 400)
-
-        success, message, video_id = youtube_uploader.upload_video(
-            video_path=str(video_path), title=title, description=description,
-            tags=tags, privacy_status=privacy, is_short=True)
+        with uploading(video_path.name):  # Delete waits from here until the upload is over
+            if not youtube_uploader.is_authenticated():
+                return json_error('Please sign in to YouTube first', 401)
+            is_valid, validation_message = youtube_uploader.validate_short_video(str(video_path))
+            if not is_valid:
+                return json_error(f'Video validation failed: {validation_message}', 400)
+            success, message, video_id = youtube_uploader.upload_video(
+                video_path=str(video_path), title=title, description=description,
+                tags=tags, privacy_status=privacy, is_short=True)
         if not success:
             return json_error(message, 502)
+        db_manager.record_upload(video_path.name, video_id, privacy)  # the library shows it
 
         return jsonify({
             'success': True,

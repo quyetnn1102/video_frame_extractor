@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Extract frames - VideoExtract</title>
+    <title>Extract frames - Tallframe</title>
     <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
     <link rel="stylesheet" href="/static/css/app.css">
     <link rel="stylesheet" href="/static/css/shell.css">
@@ -30,26 +30,37 @@
                         <div class="field field-link">
                             <label for="videoUrl">Video link</label>
                             <div class="input-row">
-                                <input type="url" id="videoUrl" required autocomplete="off"
+                                <input type="url" id="videoUrl" required autocomplete="off" aria-describedby="videoUrlHint"
                                        placeholder="https://www.youtube.com/watch?v=dQw4w9WgXcQ">
-                                <button type="button" class="btn" id="validateBtn">Check link</button>
+                                <button type="button" class="btn" id="analyzeBtn">Analyze video</button>
                             </div>
-                            <p class="hint">Only use videos you own or have permission to use.</p>
-                            <div class="link-status" id="linkStatus" role="status"></div>
+                            <p class="hint" id="videoUrlHint">Only use videos you own or have permission to use.</p>
                             <div class="preview-slot" id="linkPreview" aria-live="polite"></div>
                         </div>
 
                         <div class="field field-time">
                             <label for="timestamps">Timecodes</label>
                             <textarea class="timecodes" id="timestamps" rows="5" required spellcheck="false"
+                                      aria-describedby="timestampsHint timecodeSummary"
                                       autocomplete="off" placeholder="0:05&#10;0:30&#10;1:15"></textarea>
-                            <p class="hint">One per line, as m:ss or h:mm:ss. Up to 50.</p>
+                            <p class="hint" id="timestampsHint">One per line, as 90, 1:30 or 1:02:03. Up to 50.</p>
+                            <div class="timecode-tools">
+                                <p class="hint" id="timecodeSummary"></p>
+                                <button type="button" class="btn btn-sm btn-quiet" id="sortTimecodesBtn">Sort and remove duplicates</button>
+                            </div>
                         </div>
 
                         <div class="go stack">
                             <div id="formStatus" role="alert"></div>
                             <div class="actions">
                                 <button type="submit" class="btn btn-primary" id="extractSubmit">Extract frames</button>
+                                <label class="format-choice" for="frameFormat">
+                                    Save as
+                                    <select id="frameFormat">
+                                        <option value="jpg" selected>JPG (smaller files)</option>
+                                        <option value="png">PNG (every pixel kept)</option>
+                                    </select>
+                                </label>
                             </div>
                             <div class="job-panel" id="jobPanel"></div>
                         </div>
@@ -75,7 +86,7 @@
 
     <script src="/static/js/ui.js"></script>
     <script src="/static/js/job-progress.js"></script>
-    <script src="/static/js/link-preview.js"></script>
+    <script src="/static/js/video-source.js"></script>
     <script src="/static/js/pages/extract.js"></script>
 </body>
 </html>

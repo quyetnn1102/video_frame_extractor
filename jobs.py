@@ -5,13 +5,14 @@ A request starts a job and returns at once; the page polls the job for its stage
 and can cancel it. Jobs live in memory only (one process: deploy.py runs a single worker), so a
 restart forgets them. The files a finished job produced stay on disk and are listed as before.
 """
+import itertools
 import queue
 import threading
 import time
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Callable, Dict, List, Optional, Sequence, Tuple
+from typing import Any, Callable, Dict, List, Optional, Sequence, Set, Tuple
 
 from logger import app_logger
 
@@ -53,6 +54,8 @@ class Job:
     started: Optional[float] = None
     finished: Optional[float] = None
     cancel_requested: threading.Event = field(default_factory=threading.Event)
+    subject: Optional[str] = None  # the file the job works on (a short's name), if any
+    order: int = 0                 # submission order: two jobs can share a clock tick
 
     def to_dict(self) -> Dict[str, Any]:
         """What the browser sees."""
@@ -70,6 +73,7 @@ class Job:
             'error': self.error,
             'created': datetime.fromtimestamp(self.created, timezone.utc).isoformat(),
             'elapsed_seconds': round(end - (self.started or self.created), 1),
+            'subject': self.subject,
         }
 
 
@@ -127,18 +131,21 @@ class JobRegistry:
         self._max_workers = max_workers
         self._max_unfinished = max_unfinished
         self._queue: 'queue.Queue[Optional[Tuple[Job, Callable]]]' = queue.Queue()
+        self._submitted = itertools.count()
         for number in range(max_workers):
             threading.Thread(target=self._worker, name=f'job-{number + 1}', daemon=True).start()
 
     def submit(self, kind: str, stages: Sequence[str],
                work: Callable[[JobReporter], Dict[str, Any]],
-               on_cancel_while_queued: Optional[Callable[[], None]] = None) -> Job:
+               on_cancel_while_queued: Optional[Callable[[], None]] = None,
+               subject: Optional[str] = None) -> Job:
         """
         Queues `work`; it returns the job's result or raises JobFailed / JobCancelled.
         `on_cancel_while_queued` runs when the job is cancelled before it started (the work, which
         would normally record the outcome, then never runs). Raises JobQueueFull.
         """
-        job = Job(id=uuid.uuid4().hex, kind=kind, stages=tuple(stages))
+        job = Job(id=uuid.uuid4().hex, kind=kind, stages=tuple(stages), subject=subject,
+                  order=next(self._submitted))
         with self._lock:
             self._prune()
             unfinished = sum(1 for other in self._jobs.values() if other.state not in FINISHED_STATES)
@@ -151,6 +158,12 @@ class JobRegistry:
         self._queue.put((job, work))
         return job
 
+    def active_subjects(self) -> Set[str]:
+        """The files that queued or running jobs work on."""
+        with self._lock:
+            return {job.subject for job in self._jobs.values()
+                    if job.subject and job.state not in FINISHED_STATES}
+
     def get(self, job_id: str) -> Optional[Job]:
         with self._lock:
             return self._jobs.get(job_id)
@@ -159,7 +172,7 @@ class JobRegistry:
         """Newest first."""
         with self._lock:
             self._prune()
-            return sorted(self._jobs.values(), key=lambda job: job.created, reverse=True)
+            return sorted(self._jobs.values(), key=lambda job: job.order, reverse=True)
 
     def snapshot(self, job_id: str) -> Optional[Dict[str, Any]]:
         """The job as the browser sees it, read in one go (never half of an update)."""
@@ -171,7 +184,7 @@ class JobRegistry:
         """Every job as the browser sees it, newest first."""
         with self._lock:
             self._prune()
-            return [job.to_dict() for job in sorted(self._jobs.values(), key=lambda job: job.created, reverse=True)]
+            return [job.to_dict() for job in sorted(self._jobs.values(), key=lambda job: job.order, reverse=True)]
 
     def cancel(self, job_id: str) -> Optional[Dict[str, Any]]:
         """
@@ -250,6 +263,6 @@ class JobRegistry:
         for job_id in expired:
             del self._jobs[job_id]
         finished = sorted((job for job in self._jobs.values() if job.state in FINISHED_STATES),
-                          key=lambda job: job.created)
+                          key=lambda job: job.order)
         while len(self._jobs) >= MAX_KEPT_JOBS and finished:
             del self._jobs[finished.pop(0).id]

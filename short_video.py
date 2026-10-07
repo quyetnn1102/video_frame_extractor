@@ -15,7 +15,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from config import get_config
 from logger import app_logger
-from validators import validator
+from validators import format_clock, validator
 
 QUALITY_BITRATES = {'low': '1000k', 'medium': '2000k', 'high': '5000k'}
 DEFAULT_QUALITY = 'medium'
@@ -24,6 +24,7 @@ SHORT_SIZE = (1080, 1920)  # width, height of the vertical output
 VERTICAL_ASPECT = 9 / 16
 MIN_SHORT_DURATION = 1
 MAX_SHORT_DURATION = 300  # seconds
+SHORTENED_NOTICE_SECONDS = 0.5  # a clip this much shorter than asked gets a note
 
 MAX_OVERLAY_LENGTH = 100
 FONT_SIZE_LIMITS = (8, 200)
@@ -31,6 +32,7 @@ STROKE_WIDTH_LIMITS = (0, 10)
 OVERLAY_POSITIONS = ('top', 'center', 'bottom')
 DEFAULT_OVERLAY_POSITION = 'bottom'
 OVERLAY_MARGIN = 50
+DEFAULT_CROP_POSITION = 0.5  # the center of a wide video
 
 COLOR_PATTERN = re.compile(r'#[0-9a-fA-F]{6}|[a-zA-Z]{3,20}')
 CONTROL_CHARACTERS = re.compile(r'[\x00-\x1f\x7f]')
@@ -141,10 +143,21 @@ def normalize_text_overlay(value: Any) -> Optional[Dict[str, Any]]:
     }
 
 
-def compute_vertical_crop(width: int, height: int) -> Optional[Tuple[int, int, int, int]]:
+def parse_crop_position(value: Any) -> float:
+    """Where a wide video is cropped: 0 is the left edge, 1 the right, 0.5 (or blank) the center."""
+    if value is None or value == '':
+        return DEFAULT_CROP_POSITION
+    position = _as_number(value, "Crop position")
+    if not 0 <= position <= 1:
+        raise ShortVideoError("Crop position must be between 0 (left) and 1 (right)")
+    return position
+
+
+def compute_vertical_crop(width: int, height: int,
+                          position: float = DEFAULT_CROP_POSITION) -> Optional[Tuple[int, int, int, int]]:
     """
-    Centered crop box (x1, y1, x2, y2) that turns a frame into 9:16, or None
-    when it already is. Handles both too-wide and too-tall sources.
+    Crop box (x1, y1, x2, y2) that turns a frame into 9:16, or None when it already is.
+    A too-wide frame keeps the part at `position` (0 left, 1 right); a too-tall one, the middle.
     """
     if width <= 0 or height <= 0:
         raise ValueError("Frame size must be positive")
@@ -152,7 +165,7 @@ def compute_vertical_crop(width: int, height: int) -> Optional[Tuple[int, int, i
     ratio = width / height
     if ratio > VERTICAL_ASPECT:
         new_width = int(height * VERTICAL_ASPECT)
-        x1 = (width - new_width) // 2
+        x1 = round((width - new_width) * min(1.0, max(0.0, position)))
         return x1, 0, x1 + new_width, height
     if ratio < VERTICAL_ASPECT:
         new_height = int(width / VERTICAL_ASPECT)
@@ -254,7 +267,8 @@ def render_progress_logger(on_progress: Callable[[Optional[float]], None]):
 def create_short(source_path: Path, output_path: Path, *, start: float, duration: float,
                  vertical: bool = False, quality: str = DEFAULT_QUALITY,
                  text_overlay: Optional[Dict[str, Any]] = None,
-                 on_progress: Optional[Callable[[Optional[float]], None]] = None) -> Dict[str, Any]:
+                 on_progress: Optional[Callable[[Optional[float]], None]] = None,
+                 crop_position: float = DEFAULT_CROP_POSITION) -> Dict[str, Any]:
     """
     Cut `duration` seconds from `source_path` starting at `start` into `output_path`.
 
@@ -277,10 +291,12 @@ def create_short(source_path: Path, output_path: Path, *, start: float, duration
                 f"Start time ({start:g}s) exceeds video duration ({video.duration:.1f}s)")
 
         actual_duration = min(duration, video.duration - start)
+        if duration - actual_duration >= SHORTENED_NOTICE_SECONDS:
+            warnings.append(f"Shortened to {format_clock(actual_duration)}: the video ends there.")
         clip = video.subclip(start, start + actual_duration)
 
         if vertical:
-            box = compute_vertical_crop(*clip.size)
+            box = compute_vertical_crop(*clip.size, position=crop_position)
             if box:
                 clip = clip.crop(x1=box[0], y1=box[1], x2=box[2], y2=box[3])
             clip = clip.resize(SHORT_SIZE)

@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Dashboard - VideoExtract</title>
+    <title>Dashboard - Tallframe</title>
     <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
     <link rel="stylesheet" href="/static/css/app.css">
     <link rel="stylesheet" href="/static/css/shell.css">
@@ -97,6 +97,26 @@
                         </section>
                     </section>
                 </div>
+
+                {# What this computer has for the optional parts: said in words, not only by colour #}
+                {% set status_text = {'ready': 'Ready', 'missing': 'Not set up', 'optional': 'Optional'} %}
+                <section class="card setup" aria-labelledby="setupHeading">
+                    <div class="section-head">
+                        <h2 id="setupHeading">Setup</h2>
+                        <p>What this computer has for the optional parts of the app</p>
+                    </div>
+                    <ul class="setup-list">
+                        {% for check in setup %}
+                        <li class="setup-item is-{{ check.status }}">
+                            <span class="setup-status">{{ status_text[check.status] }}</span>
+                            <div>
+                                <strong>{{ check.name }}</strong>
+                                <p>{{ check.detail }}</p>
+                            </div>
+                        </li>
+                        {% endfor %}
+                    </ul>
+                </section>
 
                 <section class="card log" aria-labelledby="logHeading">
                     <div class="section-head">

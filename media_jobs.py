@@ -17,18 +17,19 @@ from urllib.parse import quote
 from config import get_config
 from database import db_manager
 from jobs import JobCancelled, JobFailed
-from library import make_poster, short_title
+from library import VIETSUB_SUFFIX, make_poster, short_title
 from logger import app_logger
-from short_video import (ShortVideoError, create_short, normalize_quality, normalize_text_overlay,
-                         parse_duration, parse_start_time)
+from short_video import (DEFAULT_CROP_POSITION, ShortVideoError, create_short, normalize_quality,
+                         normalize_text_overlay, parse_crop_position, parse_duration, parse_start_time)
 from subtitles import Cue, SubtitleError, render_subtitled, transcribe
 from translation import TranslationError, language_name, translate_to_vietnamese
-from validators import validator
+from validators import format_clock, validator
 from video_processor import extractor
 
 MAX_FRAME_FILENAME_TITLE = 50
 DEFAULT_SHORT_DURATION = 30
-VIETSUB_SUFFIX = ' Vietsub'  # what Vietnamese viewers call a video with Vietnamese subtitles
+MAX_ERRORS_LISTED = 3  # a job that fails on every timecode names this many
+FRAME_FORMATS = ('jpg', 'png')  # JPEG is smaller; PNG keeps every pixel
 
 EXTRACT_STAGES = ('download', 'extract')
 SHORT_STAGES = ('download', 'render')
@@ -40,6 +41,7 @@ class ExtractRequest:
     url: str
     platform: str
     seconds: Tuple[int, ...]
+    image_format: str = 'jpg'
 
 
 @dataclass(frozen=True)
@@ -51,6 +53,7 @@ class ShortRequest:
     quality: str
     vertical: bool
     text_overlay: Optional[Dict[str, Any]]
+    crop_position: float = DEFAULT_CROP_POSITION
 
 
 # -- small file helpers -------------------------------------------------------------
@@ -96,7 +99,11 @@ def parse_extract_request(data: Optional[Dict[str, Any]]) -> Tuple[Optional[Extr
     timestamps_valid, timestamp_errors, seconds_list = validator.validate_timestamps(timestamps)
     if not timestamps_valid:
         return None, '; '.join(timestamp_errors)
-    return ExtractRequest(*checked, seconds=tuple(seconds_list)), None
+    image_format = data.get('format') or 'jpg'
+    if image_format not in FRAME_FORMATS:
+        return None, f"format must be one of: {', '.join(FRAME_FORMATS)}"
+    # 90 and 1:30 are the same moment: one frame each, in the order typed
+    return ExtractRequest(*checked, seconds=tuple(dict.fromkeys(seconds_list)), image_format=image_format), None
 
 
 def parse_short_request(data: Optional[Dict[str, Any]]) -> Tuple[Optional[ShortRequest], Optional[str]]:
@@ -115,13 +122,14 @@ def parse_short_request(data: Optional[Dict[str, Any]]) -> Tuple[Optional[ShortR
         duration = parse_duration(data.get('duration', DEFAULT_SHORT_DURATION))
         quality = normalize_quality(data.get('quality'))
         text_overlay = normalize_text_overlay(overlay_request)
+        crop_position = parse_crop_position(data.get('crop_position'))
     except ShortVideoError as error:
         return None, str(error)
     vertical = data.get('vertical_format', False)
     if not isinstance(vertical, bool):
         return None, 'vertical_format must be true or false'
-    return ShortRequest(*checked, start=start, duration=duration, quality=quality,
-                        vertical=vertical, text_overlay=text_overlay), None
+    return ShortRequest(*checked, start=start, duration=duration, quality=quality, vertical=vertical,
+                        text_overlay=text_overlay, crop_position=crop_position), None
 
 
 # -- the work -----------------------------------------------------------------------
@@ -151,10 +159,13 @@ def run_recorded(record_id: int, crash_message: str, work: Callable[[], Dict[str
     return result
 
 
-def download_source(url: str, reporter) -> Tuple[str, Optional[str]]:
-    """(path, title) of the downloaded video; raises JobFailed with the reason."""
+def download_source(url: str, reporter, start: float = 0.0) -> Tuple[str, Optional[str]]:
+    """
+    (path, title) of the downloaded video; raises JobFailed with the reason. With `start`, a
+    video that ends before it is refused before it is downloaded.
+    """
     reporter.stage('download', 'Downloading the video')
-    video_path, title, error = extractor.download_video(url, on_progress=reporter.progress)
+    video_path, title, error = extractor.download_video(url, on_progress=reporter.progress, start=start)
     if not video_path:
         raise JobFailed(error or 'Download failed')
     return video_path, title
@@ -169,7 +180,7 @@ def extract_frames(request: ExtractRequest, record_id: int, reporter) -> Dict[st
         reporter.stage('extract', 'Extracting frames')
         for done, seconds in enumerate(request.seconds):
             reporter.progress(done / len(request.seconds))
-            frame_filename = f"frame_{seconds}s_{uuid.uuid4().hex[:8]}.jpg"
+            frame_filename = f"frame_{seconds}s_{uuid.uuid4().hex[:8]}.{request.image_format}"
             frame_path = folder / frame_filename
             success, frame_error = extractor.extract_frame_at_timestamp(video_path, seconds, str(frame_path))
             if success:
@@ -177,7 +188,7 @@ def extract_frames(request: ExtractRequest, record_id: int, reporter) -> Dict[st
                                'url': f'/frames/{frame_filename}'})
                 db_manager.log_extracted_frame(record_id, seconds, frame_filename, file_size_or_none(frame_path))
             else:
-                errors.append(f"Timestamp {seconds}s: {frame_error}")
+                errors.append(f"{format_clock(seconds)}: {frame_error}")
         reporter.progress(1)
     except JobCancelled:
         # "Cancelled, nothing was extracted": the frames written so far go too
@@ -188,7 +199,9 @@ def extract_frames(request: ExtractRequest, record_id: int, reporter) -> Dict[st
         remove_quietly(video_path)
 
     if not frames:
-        raise JobFailed('Frame extraction failed: ' + '; '.join(errors))
+        listed = '; '.join(errors[:MAX_ERRORS_LISTED])
+        more = len(errors) - MAX_ERRORS_LISTED
+        raise JobFailed('No frames could be extracted. ' + listed + (f'; and {more} more' if more > 0 else ''))
     # 'url' lets a page that picks up a finished job remember which link the frames came from
     result = {'success': True, 'title': title, 'frames': frames, 'platform': request.platform,
               'url': request.url}
@@ -205,7 +218,7 @@ def short_file_name(video_title: Optional[str]) -> str:
 
 
 def render_short(request: ShortRequest, reporter) -> Dict[str, Any]:
-    video_path, video_title = download_source(request.url, reporter)
+    video_path, video_title = download_source(request.url, reporter, start=request.start)
     output_name = short_file_name(video_title)
     output_path = get_config().SHORTS_FOLDER / output_name
     try:
@@ -213,7 +226,7 @@ def render_short(request: ShortRequest, reporter) -> Dict[str, Any]:
         result = create_short(Path(video_path), output_path, start=request.start,
                               duration=request.duration, vertical=request.vertical,
                               quality=request.quality, text_overlay=request.text_overlay,
-                              on_progress=reporter.progress)
+                              on_progress=reporter.progress, crop_position=request.crop_position)
     except ShortVideoError as error:
         raise JobFailed(str(error)) from error
     finally:

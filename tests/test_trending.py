@@ -99,8 +99,8 @@ class TestGetYoutubeTrending(unittest.TestCase):
         self.assertEqual(video['duration'], '4:13')
         self.assertEqual(video['views'], '1234')
         self.assertEqual(video['category'], 'Music')
-        self.assertTrue(video['description'].endswith('...'))
-        self.assertEqual(len(video['description']), 203)
+        self.assertFalse(video['description'].endswith('...'), 'the page adds the ellipsis')
+        self.assertEqual(len(video['description']), trending.DESCRIPTION_PREVIEW_LENGTH)
 
     def test_untrusted_region_and_category_are_not_forwarded(self):
         with patch('trending.requests.get', return_value=api_response([api_item()])) as get:
@@ -167,3 +167,45 @@ class TestGetYoutubeTrending(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class TestFetchTrendingReasons(unittest.TestCase):
+    """The page tells the user why there are no live results, so each failure keeps its reason."""
+
+    def setUp(self):
+        env = patch.dict(os.environ, {'YOUTUBE_API_KEY': SECRET_KEY_VALUE})
+        env.start()
+        self.addCleanup(env.stop)
+
+    def failing(self, status, codes):
+        response = Mock(status_code=status)
+        response.json.return_value = {'error': {'errors': [{'reason': code} for code in codes]}}
+        response.raise_for_status.side_effect = requests.HTTPError(str(status), response=response)
+        return response
+
+    def test_live_results_have_no_reason(self):
+        with patch('trending.requests.get', return_value=api_response([api_item()])):
+            videos, reason = trending.fetch_trending()
+        self.assertEqual((len(videos), reason), (1, None))
+
+    def test_each_failure_is_named(self):
+        for status, codes, expected in [(403, ['quotaExceeded'], trending.QUOTA),
+                                        (400, ['keyInvalid'], trending.BAD_KEY),
+                                        (503, [], trending.UNAVAILABLE)]:
+            with self.subTest(expected=expected), \
+                    patch('trending.requests.get', return_value=self.failing(status, codes)):
+                videos, reason = trending.fetch_trending()
+            self.assertEqual(reason, expected)
+            self.assertEqual(videos, trending.get_fallback_trending_data())
+
+    def test_without_a_key_the_reason_says_so(self):
+        with patch.dict(os.environ, {'YOUTUBE_API_KEY': ''}):
+            self.assertEqual(trending.fetch_trending()[1], trending.NO_KEY)
+
+    def test_a_category_without_a_chart_is_empty_not_a_failure(self):
+        with patch('trending.requests.get', return_value=self.failing(404, ['videoChartNotFound'])):
+            self.assertEqual(trending.fetch_trending(category='29'), ([], trending.EMPTY))
+
+    def test_no_videos_is_an_empty_list_not_sample_data(self):
+        with patch('trending.requests.get', return_value=api_response([])):
+            self.assertEqual(trending.fetch_trending(), ([], trending.EMPTY))

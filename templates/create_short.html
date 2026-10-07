@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Create short - VideoExtract</title>
+    <title>Create short - Tallframe</title>
     <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
     <link rel="stylesheet" href="/static/css/app.css">
     <link rel="stylesheet" href="/static/css/shell.css">
@@ -30,38 +30,38 @@
                         <div class="field">
                             <label for="shortVideoUrl">Video link</label>
                             <div class="input-row">
-                                <input type="url" id="shortVideoUrl" required autocomplete="off"
+                                <input type="url" id="shortVideoUrl" required autocomplete="off" aria-describedby="shortUrlHint"
                                        placeholder="https://www.youtube.com/watch?v=...">
-                                <button type="button" class="btn" id="validateShortBtn">Check link</button>
+                                <button type="button" class="btn" id="analyzeShortBtn">Analyze video</button>
                             </div>
-                            <p class="hint">YouTube, TikTok, Instagram, Facebook or Douyin. Only use videos you own or have permission to use.</p>
-                            <div class="link-status" id="shortLinkStatus" role="status"></div>
+                            <p class="hint" id="shortUrlHint">YouTube, TikTok, Instagram, Facebook or Douyin. Only use videos you own or have permission to use.</p>
                             <div class="preview-slot" id="shortLinkPreview" aria-live="polite"></div>
                         </div>
 
                         <div class="field">
                             <span class="label" id="durationLabel">Length</span>
                             <div class="durations" role="group" aria-labelledby="durationLabel">
-                                <button type="button" class="duration-option" data-duration="15" aria-pressed="false">
+                                <button type="button" class="duration-option" data-duration="15" data-note="TikTok" aria-pressed="false">
                                     <strong>15 s</strong><small>TikTok</small>
                                 </button>
-                                <button type="button" class="duration-option" data-duration="30" aria-pressed="true">
+                                <button type="button" class="duration-option" data-duration="30" data-note="Reels" aria-pressed="true">
                                     <strong>30 s</strong><small>Reels</small>
                                 </button>
-                                <button type="button" class="duration-option" data-duration="60" aria-pressed="false">
+                                <button type="button" class="duration-option" data-duration="60" data-note="Shorts" aria-pressed="false">
                                     <strong>60 s</strong><small>Shorts</small>
                                 </button>
                                 <button type="button" class="duration-option" data-duration="custom" aria-pressed="false">
-                                    <strong>Other</strong><small>1 to 300 s</small>
+                                    <strong>Custom</strong><small>1 to 300 s</small>
                                 </button>
                             </div>
                             <input type="hidden" id="selectedDuration" value="30">
                         </div>
 
                         <div class="field" id="customDurationDiv" hidden>
-                            <label for="customDuration">Length in seconds</label>
-                            <input type="number" id="customDuration" min="1" max="300" step="0.1" placeholder="1 to 300">
-                            <p class="hint">Only clips of up to 60 seconds can be uploaded to YouTube from here.</p>
+                            <label for="customDuration">Custom length (seconds)</label>
+                            <input type="number" id="customDuration" min="1" max="300" step="0.1" placeholder="1 to 300"
+                                   aria-describedby="customHint">
+                            <p class="hint" id="customHint">Only clips of up to 60 seconds can be uploaded to YouTube from here.</p>
                         </div>
 
                         <div class="field suggest">
@@ -69,7 +69,7 @@
                                 <span class="label" id="suggestLabel">Not sure where to cut?</span>
                                 <button type="button" class="btn btn-sm" id="suggestBtn">Suggest moments</button>
                             </div>
-                            <p class="hint">For YouTube links: finds the parts people replay most, at the length above. Takes a few seconds.</p>
+                            <p class="hint" id="suggestHint">For YouTube links: finds the parts people replay most, at the length above. Takes a few seconds.</p>
                             <div class="suggest-status" id="suggestStatus" role="status"></div>
                             <ol class="suggestions" id="suggestions" aria-labelledby="suggestLabel"></ol>
                         </div>
@@ -77,31 +77,29 @@
                         <div class="two-up">
                             <div class="field">
                                 <label for="startTime">Start at <span class="optional">(optional)</span></label>
-                                <input type="text" id="startTime" autocomplete="off" placeholder="1:30 or 90 (seconds)">
-                                <p class="hint">Leave blank to start from the beginning.</p>
+                                <input type="text" id="startTime" autocomplete="off" placeholder="1:30 or 90 (seconds)"
+                                       aria-describedby="startHint">
+                                <p class="hint" id="startHint" aria-live="polite">Leave blank to start from the beginning.</p>
                             </div>
                             <div class="field">
                                 <label for="quality">Quality</label>
                                 <select id="quality">
-                                    <option value="low">Low (smaller file)</option>
-                                    <option value="medium" selected>Medium</option>
-                                    <option value="high">High (larger file)</option>
+                                    <option value="low">Low: 1 Mbit/s, ~8 MB/min</option>
+                                    <option value="medium" selected>Medium: 2 Mbit/s, ~16 MB/min</option>
+                                    <option value="high">High: 5 Mbit/s, ~38 MB/min</option>
                                 </select>
                             </div>
                         </div>
 
+                        {# Without ImageMagick there is no caption field; the Dashboard's Setup card says why #}
+                        {% if text_overlay_available %}
                         <div class="field">
                             <label for="overlayText">Caption <span class="optional">(optional)</span></label>
-                            {% if text_overlay_available %}
                             <input type="text" id="overlayText" maxlength="100" autocomplete="off"
                                    placeholder="Text shown at the bottom of the clip">
                             <p class="hint">Shown at the bottom of the clip.</p>
-                            {% else %}
-                            <input type="text" id="overlayText" maxlength="100" autocomplete="off" disabled
-                                   aria-describedby="overlayUnavailable" placeholder="Not available on this computer">
-                            <p class="hint" id="overlayUnavailable">Captions need ImageMagick, which was not found. See "Quick start" in the README, then restart the app.</p>
-                            {% endif %}
                         </div>
+                        {% endif %}
 
                         <label class="check" for="verticalFormat">
                             <input type="checkbox" id="verticalFormat" checked>
@@ -116,54 +114,31 @@
                         <div class="job-panel" id="jobPanel"></div>
                     </form>
 
-                    <aside class="aside card" aria-label="About the crop and YouTube upload">
+                    <aside class="aside card" aria-label="About the crop and where shorts go">
                         <figure class="crop" id="cropFigure">
-                            <div class="crop-frame"><div class="crop-keep"></div></div>
+                            <div class="crop-frame" id="cropFrame">
+                                <img class="crop-thumb" id="cropThumb" alt="" hidden>
+                                <div class="crop-keep" id="cropKeep" role="slider" tabindex="-1" aria-disabled="true"
+                                     aria-label="Part of the picture the short keeps" aria-valuemin="0"
+                                     aria-valuemax="100" aria-valuenow="50" aria-valuetext="Center"></div>
+                            </div>
                             <figcaption id="cropCaption">The outlined area is what you keep. Wide videos are cropped around the center.</figcaption>
                         </figure>
 
                         <div class="aside-note">
-                            <h2>Uploading to YouTube is optional</h2>
-                            <p>To upload a finished short to your own channel, set up Google API credentials first (see "YouTube upload" in the README). Uploads start as private.</p>
+                            <h2>Where shorts go</h2>
+                            <p>Finished shorts are saved in <a href="/shorts">Your shorts</a>, where you can download them, add Vietnamese subtitles to a copy or upload them to your own YouTube channel.</p>
                         </div>
                     </aside>
                 </div>
 
-                <section class="library" id="resultsSection" aria-labelledby="resultHeading">
-                    <div class="section-head">
-                        <h2 id="resultHeading" tabindex="-1">Your shorts</h2>
-                        <p id="libraryCount"></p>
-                    </div>
-                    <div id="resultsStatus" role="alert"></div>
-                    <div class="job-panel" id="subtitleJobPanel"></div>
-                    <p class="inline-loading" id="libraryLoading"><span class="mark is-scanning" aria-hidden="true"></span>Loading your shorts...</p>
-                    <ul class="shelf" id="resultsContent"></ul>
-                    <div class="empty-state" id="libraryEmpty" hidden>
-                        <div>
-                            <h3>No shorts yet</h3>
-                            <p>Shorts you make appear here and stay after you leave or refresh this page.</p>
-                        </div>
-                        <button type="button" class="btn" id="libraryStart">Start with a video link</button>
-                    </div>
-                </section>
             </main>
         </div>
     </div>
 
-    <div class="loading-overlay" id="loadingOverlay" role="dialog" aria-modal="true"
-         aria-labelledby="loadingHeading" aria-describedby="loadingMessage">
-        <div class="loading-box">
-            <span class="mark is-scanning" aria-hidden="true"></span>
-            <h2 id="loadingHeading" tabindex="-1">Working on it</h2>
-            <p id="loadingMessage">Please wait.</p>
-            <button type="button" class="btn" id="cancelLoadingBtn" hidden>Cancel</button>
-        </div>
-    </div>
-    <p class="visually-hidden" id="busyStatus" role="status"></p>
-
     <script src="/static/js/ui.js"></script>
     <script src="/static/js/job-progress.js"></script>
-    <script src="/static/js/link-preview.js"></script>
+    <script src="/static/js/video-source.js"></script>
     <script src="/static/js/pages/create-short.js"></script>
 </body>
 </html>

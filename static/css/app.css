@@ -1,4 +1,4 @@
-/* VideoExtract: shared styles.
+/* Tallframe: shared styles.
    Layout follows a creator-tool pattern: dark sidebar, top bar, white workspace, bordered cards,
    black primary buttons. Fonts are self-hosted (the CSP only allows fonts from this origin). */
 
@@ -30,6 +30,7 @@
     --lime-ink: #26340b;
     --tag: #9b2c8f;
     --danger: #b3261e;
+    --danger-strong: #8c1d17;
     --danger-soft: #fcebea;
     --ok: #1f6b3a;
     --ok-soft: #e7f5ec;
@@ -52,7 +53,6 @@
     --topbar-bg: rgba(255, 255, 255, 0.94);
     --chip-bg: rgba(0, 0, 0, 0.78);
     --scrim: rgba(20, 20, 20, 0.55);
-    --focus-ring: 0 0 0 3px rgba(27, 27, 27, 0.18);
     --crop-keep: rgba(255, 255, 255, 0.14);
     --crop-shade: rgba(14, 17, 21, 0.6);
     --dialog-shadow: 0 20px 50px -12px rgba(0, 0, 0, 0.35);
@@ -366,6 +366,7 @@ a.card:hover {
 input[type="text"],
 input[type="url"],
 input[type="number"],
+input[type="search"],
 select,
 textarea {
     width: 100%;
@@ -397,7 +398,7 @@ textarea:focus-visible {
     outline: 2px solid transparent;
     outline-offset: 2px;
     border-color: var(--ink);
-    box-shadow: var(--focus-ring);
+    box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--ink);
 }
 
 select {
@@ -524,11 +525,16 @@ select {
     border-color: var(--primary-hover);
 }
 
-.btn-danger,
-.btn-danger:hover {
+.btn-danger {
     color: var(--surface);
     background: var(--danger);
     border-color: var(--danger);
+}
+
+.btn-danger:hover {
+    color: var(--surface);
+    background: var(--danger-strong);
+    border-color: var(--danger-strong);
 }
 
 .btn-quiet {
@@ -580,13 +586,10 @@ select {
 
 /* ---- link check: the answer to "Check link" ---- */
 
-.link-status:not(:empty) {
-    margin-top: var(--space-3);
-}
-
-.link-status .tips {
-    display: block;
-    margin-top: var(--space-1);
+/* What to try when a link fails (video-source.js) */
+.notice .tips {
+    margin: var(--space-1) 0 0;
+    padding-left: 1.1rem;
     color: var(--ink-soft);
 }
 

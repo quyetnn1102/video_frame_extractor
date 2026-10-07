@@ -75,6 +75,21 @@
         return null;
     }
 
+    /** `value` when it starts with one of `allowedPrefixes` (server data for href/src), else ''. */
+    function safeUrl(value, allowedPrefixes) {
+        return allowedPrefixes.some((prefix) => typeof value === 'string' && value.startsWith(prefix)) ? value : '';
+    }
+
+    /** Seconds as m:ss, or h:mm:ss from an hour ('' when unknown); the same as format_clock in Python. */
+    function formatClock(totalSeconds) {
+        const seconds = Math.round(Number(totalSeconds));
+        if (!Number.isFinite(seconds) || seconds < 0) return '';
+        const hours = Math.floor(seconds / 3600);
+        const minutes = Math.floor((seconds % 3600) / 60);
+        const rest = String(seconds % 60).padStart(2, '0');
+        return hours > 0 ? `${hours}:${String(minutes).padStart(2, '0')}:${rest}` : `${minutes}:${rest}`;
+    }
+
     function isLink(value) {
         try {
             const url = new URL(value);
@@ -218,47 +233,106 @@
         }
     }
 
-    // ---- "Check link": the same check and the same message on every page ------------
+    // ---- "More": rare actions behind one button, so a card shows only its main one ----------
 
     /**
-     * Wires a Check link button: asks the server whether the link can be used, then says so.
-     * @param {HTMLButtonElement} button
-     * @param {HTMLInputElement} input the link field
-     * @param {HTMLElement} status where the result is shown
+     * A button that opens a small menu. Arrow keys move, Escape closes and returns to the button.
+     * A disabled item stays in the menu with its reason, so nothing disappears without a word.
+     * @param {string} label visible text ("More")
+     * @param {string} accessibleName what the menu acts on ("More actions for <title>")
+     * @param {Array<{label: string, onSelect?: function(): void, href?: string, danger?: boolean,
+     *                disabledReason?: string}>} items
+     * @returns {HTMLElement}
      */
-    function attachLinkCheck(button, input, status) {
-        button.addEventListener('click', () => whileWorking(button, 'Checking...', async () => {
-            const url = input.value.trim();
-            if (!url) {
-                status.replaceChildren(notice('error', 'No link yet.', 'Paste a video link first.'));
-                return;
+    function actionMenu(label, accessibleName, items) {
+        const wrapper = element('div', 'menu');
+        const toggle = element('button', 'btn btn-sm menu-toggle', label);
+        toggle.type = 'button';
+        toggle.setAttribute('aria-label', accessibleName);
+        toggle.setAttribute('aria-haspopup', 'menu');
+        toggle.setAttribute('aria-expanded', 'false');
+        const list = element('ul', 'menu-list');
+        list.setAttribute('role', 'menu');
+        list.hidden = true;
+
+        const entries = items.map((item) => {
+            const entry = element(item.href ? 'a' : 'button', item.danger ? 'menu-item is-danger' : 'menu-item', item.label);
+            entry.setAttribute('role', 'menuitem');
+            entry.tabIndex = -1;
+            if (item.href) {
+                entry.href = item.href;
+                entry.target = '_blank';
+                entry.rel = 'noopener noreferrer';
+            } else {
+                entry.type = 'button';
             }
-            try {
-                const { ok, data, parsed } = await postJson('/api/test-platform', { url });
-                // A broken reply says nothing about the link itself
-                if (!parsed) throw new Error('The server did not answer with JSON');
-                const info = data.info || {};
-                if (!ok || !data.valid) {
-                    status.replaceChildren(notice('error', 'This link cannot be used.',
-                        info.notes || data.error || 'It is invalid or from an unsupported site.'));
+            if (item.disabledReason) {
+                entry.setAttribute('aria-disabled', 'true');
+                entry.append(element('span', 'menu-note', item.disabledReason));
+            }
+            entry.addEventListener('click', (event) => {
+                if (item.disabledReason) {
+                    event.preventDefault();
                     return;
                 }
-                const result = notice('ok', 'This link works.',
-                    `${data.platform}: ${info.status || 'ready'}. ${info.notes || ''}`.trim());
-                if (Array.isArray(info.tips) && info.tips.length) {
-                    result.append(element('span', 'tips', 'Tips: ' + info.tips.join(', ')));
-                }
-                status.replaceChildren(result);
-            } catch (error) {
-                console.error('Link check failed:', error);
-                status.replaceChildren(notice('error', 'Could not check the link.', 'Try again in a moment.'));
+                // Focus back on "More" first: a dialog the item opens returns focus there
+                close(true);
+                if (item.onSelect) item.onSelect();
+            });
+            const row = element('li');
+            row.setAttribute('role', 'none');
+            row.append(entry);
+            list.append(row);
+            return entry;
+        });
+
+        function onOutside(event) {
+            if (!wrapper.contains(event.target)) close(false);
+        }
+
+        function open(focusIndex) {
+            list.hidden = false;
+            toggle.setAttribute('aria-expanded', 'true');
+            document.addEventListener('pointerdown', onOutside);
+            entries[(focusIndex + entries.length) % entries.length].focus();
+        }
+
+        function close(returnFocus) {
+            if (list.hidden) return;
+            list.hidden = true;
+            toggle.setAttribute('aria-expanded', 'false');
+            document.removeEventListener('pointerdown', onOutside);
+            if (returnFocus) toggle.focus();
+        }
+
+        toggle.addEventListener('click', () => (list.hidden ? open(0) : close(true)));
+        toggle.addEventListener('keydown', (event) => {
+            if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+                event.preventDefault();
+                open(event.key === 'ArrowDown' ? 0 : -1);
             }
-        }));
+        });
+        list.addEventListener('keydown', (event) => {
+            const index = entries.indexOf(document.activeElement);
+            const moves = { ArrowDown: index + 1, ArrowUp: index - 1, Home: 0, End: entries.length - 1 };
+            if (event.key in moves) {
+                event.preventDefault();
+                entries[(moves[event.key] + entries.length) % entries.length].focus();
+            } else if (event.key === 'Escape') {
+                event.preventDefault();
+                close(true);
+            } else if (event.key === 'Tab') {
+                close(false);
+            }
+        });
+
+        wrapper.append(toggle, list);
+        return wrapper;
     }
 
     window.ui = {
-        element, notice, scrollBehavior, relativeTime, postJson, attachLinkCheck,
-        parseTimecode, isLink, showBusy, hideBusy,
-        setFieldError, clearFieldError, showErrors, clearErrors, revalidateOnInput, whileWorking,
+        element, notice, scrollBehavior, relativeTime, postJson, safeUrl,
+        parseTimecode, formatClock, isLink, showBusy, hideBusy,
+        setFieldError, clearFieldError, showErrors, clearErrors, revalidateOnInput, whileWorking, actionMenu,
     };
 })();

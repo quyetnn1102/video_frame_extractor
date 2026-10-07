@@ -8,10 +8,12 @@ from unittest.mock import Mock, patch
 from urllib.parse import quote
 
 import app_enhanced
+import library_api
 import media_jobs
 from app_enhanced import create_app
 from config import get_config
 from jobs import JobRegistry
+from library import MediaInfo
 from short_video import ShortVideoError
 from youtube_uploader import YouTubeUploaderError
 
@@ -47,6 +49,7 @@ class RouteTestCase(unittest.TestCase):
         self.uploader = self.patch_module('youtube_uploader')
         self.db = self.patch_module('db_manager')
         self.db.log_video_request.return_value = 7
+        self.db.get_uploads.return_value = {}
         # A fresh job registry per test, so jobs from other tests are not listed
         registry = JobRegistry(max_workers=2)
         patcher = patch.object(app_enhanced, 'job_registry', registry)
@@ -58,9 +61,9 @@ class RouteTestCase(unittest.TestCase):
         self.client = self.app.test_client()
 
     def patch_module(self, name):
-        """One mock for the name in app_enhanced and in media_jobs (which does the downloads)."""
+        """One mock for the name in app_enhanced, media_jobs (the downloads) and library_api."""
         mocked = Mock()
-        for module in (app_enhanced, media_jobs):
+        for module in (app_enhanced, media_jobs, library_api):
             if hasattr(module, name):
                 patcher = patch.object(module, name, mocked)
                 patcher.start()
@@ -249,7 +252,7 @@ class TestPagesAndInfo(RouteTestCase):
                 self.assertEqual(self.client.post('/api/test-platform', json=body).status_code, 400)
 
     def test_trending_passes_validated_parameters(self):
-        with patch.object(app_enhanced, 'get_youtube_trending', return_value=[{'id': 'a'}]) as get:
+        with patch.object(app_enhanced, 'fetch_trending', return_value=([{'id': 'a'}], None)) as get:
             data = self.client.get('/api/trending?region=VN&category=10&max_results=5').get_json()
         get.assert_called_once_with('10', 'VN', 5)
         self.assertEqual(data['total'], 1)
@@ -327,6 +330,19 @@ class TestValidateAndVideoInfo(RouteTestCase):
         self.extractor.get_video_info.return_value = (False, None, 'Not available')
         response = self.client.post('/api/video-info', json={'url': VALID_URL})
         self.assertEqual((response.status_code, response.get_json()['error']), (400, 'Not available'))
+
+    def test_video_info_names_the_platform_as_it_writes_itself(self):
+        self.extractor.get_video_info.return_value = (True, {'title': 'T', 'platform': 'tiktok'}, None)
+        data = self.client.post('/api/video-info', json={'url': VALID_URL}).get_json()
+        self.assertEqual(data['video_info']['platform_name'], 'TikTok')
+
+    def test_video_info_failures_say_whether_the_link_can_still_be_tried(self):
+        self.extractor.get_video_info.return_value = (False, None, 'Private video')
+        unreadable = self.client.post('/api/video-info', json={'url': VALID_URL}).get_json()
+        self.assertEqual(unreadable['reason'], 'unreadable', 'a supported link may still download')
+        self.assertTrue(unreadable['tips'], "the platform's tips come along")
+        invalid = self.client.post('/api/video-info', json={'url': 'https://example.com/video'}).get_json()
+        self.assertEqual(invalid['reason'], 'invalid')
 
 
 class TestExtractFrames(RouteTestCase):
@@ -420,7 +436,7 @@ class TestShortsLibrary(RouteTestCase):
 
     def setUp(self):
         super().setUp()
-        patcher = patch('library.video_duration', return_value=30.0)
+        patcher = patch('library.read_media_info', return_value=MediaInfo(30.0, 1080, 1920))
         patcher.start()
         self.addCleanup(patcher.stop)
 
@@ -588,6 +604,7 @@ class TestYouTubeRoutes(RouteTestCase):
         kwargs = self.uploader.upload_video.call_args.kwargs
         self.assertEqual(Path(kwargs['video_path']), short.resolve())
         self.assertEqual((kwargs['title'], kwargs['privacy_status']), ('My title', 'private'))
+        self.db.record_upload.assert_called_once_with(short.name, 'vid123', 'private')
 
     def test_server_paths_are_never_accepted(self):
         short = self.make_short()
@@ -633,8 +650,9 @@ class TestYouTubeRoutes(RouteTestCase):
         for signed_in in (True, False):
             with self.subTest(signed_in=signed_in):
                 self.uploader.is_authenticated.return_value = signed_in
+                self.uploader.is_configured.return_value = True
                 response = self.client.get('/api/youtube-auth')
-                self.assertEqual(response.get_json(), {'authenticated': signed_in})
+                self.assertEqual(response.get_json(), {'authenticated': signed_in, 'configured': True})
         self.uploader.begin_auth.assert_not_called()
 
     def test_starting_sign_in_returns_the_consent_url(self):
@@ -962,21 +980,28 @@ class TestPhaseFourRoutes(RouteTestCase):
         self.assertNotIn('<b>', page)
 
     def test_trending_says_when_it_shows_sample_data(self):
-        from trending import get_fallback_trending_data
-        with patch.object(app_enhanced, 'get_youtube_trending', return_value=get_fallback_trending_data()):
+        from trending import QUOTA, get_fallback_trending_data
+        with patch.object(app_enhanced, 'fetch_trending', return_value=(get_fallback_trending_data(), QUOTA)):
             data = self.client.get('/api/trending').get_json()
         self.assertTrue(data['sample'])
+        self.assertEqual(data['reason'], 'quota', 'the page says why there are no live results')
         self.assertIn('api_key_configured', data)
-        with patch.object(app_enhanced, 'get_youtube_trending', return_value=[{'id': 'abc'}]):
-            self.assertFalse(self.client.get('/api/trending').get_json()['sample'])
+        with patch.object(app_enhanced, 'fetch_trending', return_value=([{'id': 'abc'}], None)):
+            live = self.client.get('/api/trending').get_json()
+        self.assertEqual((live['sample'], live['reason']), (False, None))
 
-    def test_the_caption_field_says_when_imagemagick_is_missing(self):
-        for available, expected in [(True, 'Shown at the bottom of the clip'), (False, 'Captions need ImageMagick')]:
+    def test_the_caption_field_is_there_only_with_imagemagick_and_setup_says_why(self):
+        for available in (True, False):
             with self.subTest(available=available):
-                with patch.object(app_enhanced, 'text_overlay_available', return_value=available):
-                    page = self.client.get('/create-short').get_data(as_text=True)
-                self.assertIn(expected, page)
-                self.assertEqual('id="overlayText" maxlength="100" autocomplete="off" disabled' in page, not available)
+                with patch.object(app_enhanced, 'text_overlay_available', return_value=available), \
+                        patch('setup_checks.text_overlay_available', return_value=available), \
+                        patch.object(app_enhanced, 'collect_system_info', return_value={}):
+                    create = self.client.get('/create-short').get_data(as_text=True)
+                    dashboard = self.client.get('/dashboard').get_data(as_text=True)
+                self.assertEqual('id="overlayText"' in create, available)
+                self.assertNotIn('ImageMagick', create, 'installation steps belong to the Setup card')
+                self.assertIn('Captions on shorts', dashboard)
+                self.assertEqual('Captions need ImageMagick' in dashboard, not available)
 
 
 class TestClipSuggestions(RouteTestCase):

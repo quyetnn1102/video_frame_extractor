@@ -97,6 +97,16 @@ class DatabaseManager:
                 ''')
                 
                 # Create indexes for better performance
+                # Shorts uploaded to YouTube, so the library can show it (one row per short)
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS youtube_uploads (
+                        filename TEXT PRIMARY KEY,
+                        video_id TEXT NOT NULL,
+                        privacy TEXT NOT NULL,
+                        uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                ''')
+
                 cursor.execute('CREATE INDEX IF NOT EXISTS idx_video_requests_platform ON video_requests(platform)')
                 cursor.execute('CREATE INDEX IF NOT EXISTS idx_video_requests_created_at ON video_requests(created_at)')
                 cursor.execute('CREATE INDEX IF NOT EXISTS idx_extracted_frames_request_id ON extracted_frames(request_id)')
@@ -170,6 +180,27 @@ class DatabaseManager:
         except Exception as e:
             app_logger.error(f"Failed to log user analytics: {str(e)}")
     
+    def record_upload(self, filename: str, video_id: str, privacy: str) -> None:
+        """Remembers that a short was uploaded (a later upload of the same short replaces it)."""
+        try:
+            with self.connection() as conn:
+                conn.execute('''
+                    INSERT OR REPLACE INTO youtube_uploads (filename, video_id, privacy) VALUES (?, ?, ?)
+                ''', (filename, video_id, privacy))
+                conn.commit()
+        except Exception as e:
+            app_logger.error(f"Failed to record an upload ({type(e).__name__})")
+
+    def get_uploads(self) -> Dict[str, Dict[str, str]]:
+        """{file name: {'video_id', 'privacy'}} of the shorts uploaded to YouTube."""
+        try:
+            with self.connection() as conn:
+                rows = conn.execute('SELECT filename, video_id, privacy FROM youtube_uploads').fetchall()
+        except Exception as e:
+            app_logger.error(f"Failed to read the uploads ({type(e).__name__})")
+            return {}
+        return {row[0]: {'video_id': row[1], 'privacy': row[2]} for row in rows}
+
     def record_system_metric(self, metric_name: str, metric_value: float, metadata: Dict = None):
         """Record system performance metric"""
         try:

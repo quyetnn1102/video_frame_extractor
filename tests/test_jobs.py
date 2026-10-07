@@ -193,5 +193,20 @@ class TestJobCancelledIsAnException(unittest.TestCase):
         self.assertTrue(issubclass(JobCancelled, Exception))
 
 
+class TestJobSubjects(unittest.TestCase):
+    def test_only_unfinished_jobs_count_as_using_a_file(self):
+        registry = JobRegistry(max_workers=1)
+        self.addCleanup(registry.shutdown)
+        release = threading.Event()
+        job = registry.submit('subtitles', ('render',), lambda reporter: release.wait(5) and {}, subject='a.mp4')
+        self.assertEqual(registry.active_subjects(), {'a.mp4'})
+        self.assertEqual(registry.snapshot(job.id)['subject'], 'a.mp4')
+        release.set()
+        deadline = time.time() + 5
+        while registry.active_subjects() and time.time() < deadline:
+            time.sleep(0.01)
+        self.assertEqual(registry.active_subjects(), set())
+
+
 if __name__ == '__main__':
     unittest.main()

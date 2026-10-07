@@ -1,8 +1,11 @@
 """Lists the shorts already made, so the Create short page can show them again later."""
+import json
 import os
 import re
+import threading
 import time
 import uuid
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -12,6 +15,9 @@ from logger import app_logger
 from validators import resolve_in_folder
 
 DEFAULT_LIMIT = 24
+VIETSUB_SUFFIX = ' Vietsub'  # ends the title of a copy with Vietnamese subtitles (what viewers call it)
+MAX_LIMIT = 100              # shorts per page of the library
+MAX_CACHED_MEDIA_INFO = 2000
 POSTER_FOLDER = '.posters'   # inside the shorts folder: one small JPEG per short
 POSTER_WIDTH = 360           # pixels; enough for a list card at 2x
 POSTER_QUALITY = 80
@@ -27,19 +33,103 @@ def short_title(stem: str) -> str:
     return _GENERATED_SUFFIX.sub('', stem).strip() or FALLBACK_TITLE
 
 
-def video_duration(path: Path) -> Optional[float]:
-    """Length in seconds read from the file header, or None when it cannot be read."""
+@dataclass(frozen=True)
+class MediaInfo:
+    duration: Optional[float]  # seconds
+    width: Optional[int]
+    height: Optional[int]
+
+
+UNKNOWN_MEDIA = MediaInfo(None, None, None)
+
+
+def read_media_info(path: Path) -> MediaInfo:
+    """Length and frame size read from the file header; None for what cannot be read."""
     import cv2  # imported here: it is slow to load and only needed for this
 
     capture = cv2.VideoCapture(str(path))
     try:
         fps = capture.get(cv2.CAP_PROP_FPS)
         frames = capture.get(cv2.CAP_PROP_FRAME_COUNT)
-        if fps and fps > 0 and frames and frames > 0:
-            return round(frames / fps, 1)
-        return None
+        width = int(capture.get(cv2.CAP_PROP_FRAME_WIDTH) or 0)
+        height = int(capture.get(cv2.CAP_PROP_FRAME_HEIGHT) or 0)
+        duration = round(frames / fps, 1) if fps and fps > 0 and frames and frames > 0 else None
+        return MediaInfo(duration, width or None, height or None)
     finally:
         capture.release()
+
+
+def video_duration(path: Path) -> Optional[float]:
+    """Length in seconds read from the file header, or None when it cannot be read."""
+    return read_media_info(path).duration
+
+
+# A short never changes once it is in the library, so what was read stays true while the file
+# keeps its size and time stamp. Listing a large library then opens no video at all.
+_media_cache: Dict[Tuple[str, int, int], MediaInfo] = {}
+_media_cache_lock = threading.Lock()
+
+
+def info_path(video_path: Path) -> Path:
+    """Where a short's length and size are kept between runs: next to its poster."""
+    return poster_path(video_path).with_suffix('.json')
+
+
+def _number(value: Any, kind: type) -> Optional[Any]:
+    return value if isinstance(value, kind) and not isinstance(value, bool) and value > 0 else None
+
+
+def _saved_media_info(path: Path, stat: os.stat_result) -> Optional[MediaInfo]:
+    """What an earlier run read from this short, if the file has not changed since."""
+    try:
+        saved = json.loads(info_path(path).read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        return None
+    if not isinstance(saved, dict) or saved.get('mtime_ns') != stat.st_mtime_ns or saved.get('size') != stat.st_size:
+        return None
+    return MediaInfo(_number(saved.get('duration'), (int, float)), _number(saved.get('width'), int),
+                     _number(saved.get('height'), int))
+
+
+def _save_media_info(path: Path, stat: os.stat_result, info: MediaInfo) -> None:
+    target = info_path(path)
+    partial = target.with_name(f'.{uuid.uuid4().hex}.partial')
+    try:
+        target.parent.mkdir(exist_ok=True)
+        partial.write_text(json.dumps({'mtime_ns': stat.st_mtime_ns, 'size': stat.st_size, 'duration': info.duration,
+                                       'width': info.width, 'height': info.height}), encoding='utf-8')
+        os.replace(partial, target)
+    except OSError as error:  # only a cache: the next run reads the video again
+        app_logger.warning(f"Could not save a short's length ({type(error).__name__})")
+    finally:
+        partial.unlink(missing_ok=True)
+
+
+def cached_media_info(path: Path, stat: os.stat_result) -> MediaInfo:
+    """
+    A short's length and size: from memory, else from what an earlier run saved next to the
+    poster, else read from the video (once) and saved. Listing the library then opens no video,
+    even right after a restart.
+    """
+    key = (str(path), stat.st_mtime_ns, stat.st_size)
+    with _media_cache_lock:
+        known = _media_cache.get(key)
+    if known is not None:
+        return known
+    info = _saved_media_info(path, stat)
+    if info is None:
+        try:
+            info = read_media_info(path)
+        except Exception as error:  # a damaged file is listed without its length, never an error
+            app_logger.warning(f"Could not read a short's length ({type(error).__name__})")
+            info = UNKNOWN_MEDIA
+        else:
+            _save_media_info(path, stat, info)
+    with _media_cache_lock:
+        if len(_media_cache) >= MAX_CACHED_MEDIA_INFO:
+            _media_cache.clear()  # mostly entries of deleted or replaced shorts
+        _media_cache[key] = info
+    return info
 
 
 def folder_size_bytes(folder: Path) -> int:
@@ -109,10 +199,12 @@ def make_poster(video_path: Path) -> bool:
 
 
 def remove_poster(video_path: Path) -> None:
-    try:
-        poster_path(video_path).unlink(missing_ok=True)
-    except OSError as error:
-        app_logger.warning(f"Could not remove a poster ({type(error).__name__})")
+    """Removes what the library keeps about a short: its poster and its saved length."""
+    for kept in (poster_path(video_path), info_path(video_path)):
+        try:
+            kept.unlink(missing_ok=True)
+        except OSError as error:
+            app_logger.warning(f"Could not remove a poster ({type(error).__name__})")
 
 
 def sync_posters(folder: Path) -> Tuple[int, int]:
@@ -135,6 +227,13 @@ def sync_posters(folder: Path) -> Tuple[int, int]:
             removed += 1
         except OSError:
             continue  # in use; the next sync removes it
+    # Saved lengths of shorts that are gone (they are not counted: only posters are)
+    for saved in (folder / POSTER_FOLDER).glob('*.json'):
+        if saved.stem not in shorts and not (folder / (saved.stem + '.mp4')).exists():
+            try:
+                saved.unlink()
+            except OSError:
+                continue
     # Temporary files left by a crash mid-write (recent ones may still be in use)
     for partial in (folder / POSTER_FOLDER).glob('*.partial'):
         try:
@@ -145,31 +244,44 @@ def sync_posters(folder: Path) -> Tuple[int, int]:
     return made, removed
 
 
-def list_shorts(folder: Path, limit: int = DEFAULT_LIMIT) -> List[Dict[str, Any]]:
-    """The newest shorts in `folder`, newest first."""
+def _newest_first(folder: Path) -> List[Tuple[Path, os.stat_result]]:
     folder = Path(folder)
     if not folder.is_dir():
         return []
-
     found = []
     for entry in folder.glob('*.mp4'):
         path = resolve_in_folder(folder, entry.name, ('.mp4',))
         if path is None:
             continue
         try:
-            stat = path.stat()
+            found.append((path, path.stat()))
         except OSError:
             continue  # removed while listing
-        found.append((stat.st_mtime, path, stat.st_size))
-    found.sort(key=lambda item: item[0], reverse=True)
+    found.sort(key=lambda item: item[1].st_mtime, reverse=True)
+    return found
 
-    return [{
+
+def count_shorts(folder: Path) -> int:
+    return len(_newest_first(folder))
+
+
+def describe_short(path: Path, stat: os.stat_result) -> Dict[str, Any]:
+    info = cached_media_info(path, stat)
+    return {
         'filename': path.name,
         'title': short_title(path.stem),
-        'size': size,
-        'created': datetime.fromtimestamp(modified, tz=timezone.utc).isoformat(),
-        'duration': video_duration(path),
+        'size': stat.st_size,
+        'created': datetime.fromtimestamp(stat.st_mtime, tz=timezone.utc).isoformat(),
+        'duration': info.duration,
+        'width': info.width,
+        'height': info.height,
         'url': '/shorts/' + quote(path.name),
         # A still image for lists, so a page need not load every video to show it
         'poster': '/shorts/posters/' + quote(poster_path(path).name) if poster_path(path).is_file() else None,
-    } for modified, path, size in found[:limit]]
+    }
+
+
+def list_shorts(folder: Path, limit: int = DEFAULT_LIMIT, offset: int = 0) -> List[Dict[str, Any]]:
+    """The shorts in `folder`, newest first: `limit` of them, after skipping `offset`."""
+    page = _newest_first(folder)[offset:offset + limit]
+    return [describe_short(path, stat) for path, stat in page]

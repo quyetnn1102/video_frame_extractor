@@ -6,9 +6,12 @@
         <h1>{{ page_title }}</h1>
     </div>
     <div class="topbar-actions">
+        {# Home has its own launcher and every Trending card its own actions: no shortcut there #}
         {% if active_page == 'create' %}
         <a class="btn" href="/extract">Extract frames</a>
-        {% else %}
+        {% elif active_page == 'extract' %}
+        <a class="btn" href="/create-short">Create short</a>
+        {% elif active_page in ('shorts', 'dashboard') %}
         <a class="btn" href="/create-short">
             <svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg><span class="btn-label">New short</span>
         </a>

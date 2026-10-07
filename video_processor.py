@@ -16,7 +16,7 @@ from config import get_config
 from jobs import JobCancelled
 from link_resolver import resolve_short_url
 from logger import video_logger, LogContext
-from validators import validator, ValidationError
+from validators import ValidationError, format_clock, validator
 
 # Extensions the frame extractor accepts for downloaded videos.
 ALLOWED_VIDEO_EXTENSIONS = ('.mp4', '.avi', '.mov', '.mkv', '.webm', '.flv', '.m4v')
@@ -79,6 +79,23 @@ EXTRACT_FAILED_MESSAGE = (
 NOT_DOWNLOADED_MESSAGE = "The video was not downloaded (it may exceed the size or duration limit)"
 
 
+def duration_filter(max_duration: int, start: float = 0.0):
+    """
+    yt-dlp's filter for what may be downloaded: not live, not longer than the limit and, when
+    the short starts at `start`, longer than that (checked before anything is downloaded).
+    A video that does not report its length is let through (`?`).
+    """
+    condition = f'duration <=? {max_duration} & !is_live'
+    if start > 0:
+        condition += f' & duration >? {start}'
+    return yt_dlp.utils.match_filter_func(condition)
+
+
+def start_past_end_message(start: float, duration: float) -> str:
+    return (f"The start time ({format_clock(start)}) is past the end of the video "
+            f"({format_clock(duration)}). Choose an earlier start.")
+
+
 def remove_partial_downloads(folder: Path, unique_id: str) -> None:
     """Delete everything a (failed) download left behind under its random id."""
     for path in Path(folder).glob(f'*{unique_id}*'):
@@ -88,8 +105,8 @@ def remove_partial_downloads(folder: Path, unique_id: str) -> None:
             video_logger.warning(f"Could not remove partial download ({type(error).__name__})")
 
 
-def download_with_ytdlp(url: str, opts: Dict[str, Any],
-                        folder: Path) -> Tuple[Optional[str], Optional[str], Optional[str]]:
+def download_with_ytdlp(url: str, opts: Dict[str, Any], folder: Path,
+                        start: float = 0.0) -> Tuple[Optional[str], Optional[str], Optional[str]]:
     """
     Download `url` into `folder` with yt-dlp in a single pass.
 
@@ -120,6 +137,9 @@ def download_with_ytdlp(url: str, opts: Dict[str, Any],
     finished = find_downloaded_file(folder, unique_id)
     if finished is None:  # skipped by the duration/size filter, or only partial files exist
         remove_partial_downloads(folder, unique_id)
+        duration = info.get('duration')
+        if start > 0 and isinstance(duration, (int, float)) and 0 < duration <= start:
+            return None, None, start_past_end_message(start, duration)
         return None, None, NOT_DOWNLOADED_MESSAGE
     return str(finished), validator.sanitize_filename(info.get('title') or 'unknown'), None
 
@@ -214,8 +234,7 @@ class PlatformProcessor:
             'progress_hooks': [make_size_limit_hook(self.config.MAX_DOWNLOAD_MB * BYTES_PER_MB)],
             'socket_timeout': self.config.SOCKET_TIMEOUT,
             'retries': self.config.DOWNLOAD_RETRIES,
-            'match_filter': yt_dlp.utils.match_filter_func(
-                f'duration <=? {max_duration} & !is_live'),
+            'match_filter': duration_filter(max_duration),
             'cachedir': False,
             'allowed_extractors': list(YTDLP_ALLOWED_EXTRACTORS),
             # yt-dlp only tries Deno by default; Node.js is far more often installed
@@ -411,14 +430,15 @@ class EnhancedVideoFrameExtractor:
                 video_logger.warning(f"URL validation failed: {str(e)}", url=validator.hash_sensitive_data(url))
                 return False, 'unknown', str(e)
     
-    def download_video(self, url: str, on_progress: Optional[Callable[[Optional[float]], None]] = None
-                       ) -> Tuple[Optional[str], Optional[str], Optional[str]]:
+    def download_video(self, url: str, on_progress: Optional[Callable[[Optional[float]], None]] = None,
+                       start: float = 0.0) -> Tuple[Optional[str], Optional[str], Optional[str]]:
         """
         Download video and return path, title, and any error
 
         Args:
             on_progress: called with the share downloaded (0..1, None while unknown); it may
                 raise JobCancelled, which stops the download and is passed on to the caller.
+            start: where a short will start; a video that ends before it is not downloaded.
         Returns:
             (file_path, title, error_message)
         """
@@ -445,10 +465,10 @@ class EnhancedVideoFrameExtractor:
                 
                 # Special handling for Instagram
                 if platform == 'instagram':
-                    return self._download_instagram_video(url, processor, hooks)
+                    return self._download_instagram_video(url, processor, hooks, start)
 
                 # Standard download process
-                return self._download_standard_video(url, processor, hooks)
+                return self._download_standard_video(url, processor, hooks, start)
 
             except JobCancelled:
                 raise  # not a failure: download_with_ytdlp has already removed the partial files
@@ -476,26 +496,28 @@ class EnhancedVideoFrameExtractor:
                                      error=str(e))
                 return None, None, "Unexpected error during download. See the application log."
     
-    @staticmethod
-    def _options_with_hooks(processor: PlatformProcessor, url: str, hooks: Sequence) -> Dict[str, Any]:
+    def _options_with_hooks(self, processor: PlatformProcessor, url: str, hooks: Sequence,
+                            start: float = 0.0) -> Dict[str, Any]:
         # A new list: the processor's options are shared by every download (and thread)
         opts = processor.get_download_options(url)
         opts['progress_hooks'] = [*opts.get('progress_hooks', []), *hooks]
+        if start > 0:
+            opts['match_filter'] = duration_filter(self.config.MAX_VIDEO_DURATION, start)
         return opts
 
-    def _download_standard_video(self, url: str, processor: PlatformProcessor,
-                                 hooks: Sequence = ()) -> Tuple[Optional[str], Optional[str], Optional[str]]:
+    def _download_standard_video(self, url: str, processor: PlatformProcessor, hooks: Sequence = (),
+                                 start: float = 0.0) -> Tuple[Optional[str], Optional[str], Optional[str]]:
         """Download video using standard process"""
-        opts = self._options_with_hooks(processor, url, hooks)
-        file_path, title, error = download_with_ytdlp(url, opts, self.config.DOWNLOAD_FOLDER)
+        opts = self._options_with_hooks(processor, url, hooks, start)
+        file_path, title, error = download_with_ytdlp(url, opts, self.config.DOWNLOAD_FOLDER, start)
         if file_path:
             video_logger.log_video_processing(processor.platform, url, 'download', 'success')
         return file_path, title, error
     
-    def _download_instagram_video(self, url: str, processor: InstagramProcessor,
-                                  hooks: Sequence = ()) -> Tuple[Optional[str], Optional[str], Optional[str]]:
+    def _download_instagram_video(self, url: str, processor: InstagramProcessor, hooks: Sequence = (),
+                                  start: float = 0.0) -> Tuple[Optional[str], Optional[str], Optional[str]]:
         """Download Instagram video with cookie fallback"""
-        base_opts = self._options_with_hooks(processor, url, hooks)
+        base_opts = self._options_with_hooks(processor, url, hooks, start)
 
         try:
             file_path, title = processor.try_with_cookies(url, base_opts)
@@ -550,7 +572,7 @@ class EnhancedVideoFrameExtractor:
                 cap.release()
                 
                 if not ret:
-                    return False, f"Could not extract frame at timestamp {timestamp}s"
+                    return False, "no frame there (it may be past the end of the video)"
                 
                 # Save frame
                 success = cv2.imwrite(output_path, frame)
@@ -614,7 +636,10 @@ class EnhancedVideoFrameExtractor:
                         # description is often present but None (TikTok, Instagram, Facebook)
                         'description': (info.get('description') or '')[:MAX_DESCRIPTION_LENGTH],
                         'thumbnail': info.get('thumbnail'),
-                        'platform': platform
+                        'platform': platform,
+                        # Frame size of the best format, so a page can tell wide from vertical
+                        'width': info.get('width'),
+                        'height': info.get('height'),
                     }
                     
                     video_logger.info("Video info extracted successfully", 

@@ -14,6 +14,7 @@ SCRIPT_ID_LOOKUP = re.compile(r"""(?:getElementById\(|\$\()\s*['"]([^'"]+)['"]\s
 INTERPOLATED_INNER_HTML = re.compile(r'innerHTML\s*\+?=\s*`[^`]*\$\{')
 INTERPOLATED_INLINE_HANDLER = re.compile(r'\bon\w+\s*=\s*"[^"]*\$\{')
 PAGE_SCRIPT = re.compile(r'<script src="/static/js/pages/([\w-]+\.js)"></script>')
+YOUTUBE_UPLOAD_SCRIPT = (STATIC_DIR / 'js' / 'youtube-upload.js').read_text(encoding='utf-8')
 
 
 def page_source(path):
@@ -27,8 +28,8 @@ def page_source(path):
 class TestTemplates(unittest.TestCase):
     def test_templates_were_found(self):
         names = {path.name for path in TEMPLATE_FILES}
-        self.assertEqual(names, {'index.html', 'extract.html', 'create_short.html', 'trending.html',
-                                 'dashboard.html'})
+        self.assertEqual(names, {'index.html', 'extract.html', 'create_short.html', 'shorts.html',
+                                 'trending.html', 'dashboard.html'})
 
     def test_pages_share_the_sidebar_and_top_bar_instead_of_copying_them(self):
         for path in TEMPLATE_FILES:
@@ -36,7 +37,7 @@ class TestTemplates(unittest.TestCase):
                 text = path.read_text(encoding='utf-8')
                 for include in ['partials/icons.html', 'partials/sidebar.html', 'partials/topbar.html']:
                     self.assertIn(f"{{% include '{include}' %}}", text)
-                self.assertRegex(text, r"\{% set active_page = '(home|extract|create|trending|dashboard)' %\}")
+                self.assertRegex(text, r"\{% set active_page = '(home|extract|create|shorts|trending|dashboard)' %\}")
                 self.assertIn('src="/static/js/shell.js"', text)
         for partial in ['icons', 'sidebar', 'topbar']:
             self.assertTrue((TEMPLATES_DIR / 'partials' / f'{partial}.html').is_file())
@@ -69,20 +70,23 @@ class TestTemplates(unittest.TestCase):
     def test_create_short_form_matches_the_api(self):
         text = page_source(TEMPLATES_DIR / 'create_short.html')
         for field in ['shortVideoUrl', 'startTime', 'selectedDuration', 'quality',
-                      'overlayText', 'verticalFormat', 'loadingOverlay', 'resultsSection']:
+                      'overlayText', 'verticalFormat', 'jobPanel', 'formStatus']:
             self.assertIn(f'id="{field}"', text)
         self.assertIn("'/api/jobs/create-short'", text)
-        self.assertIn("'/api/upload-to-youtube'", text)
-        self.assertNotIn('video_path', text, 'the upload API takes a file name, not a server path')
         self.assertNotIn('type="file"', text, 'the API takes a URL, not an uploaded file')
+        self.assertIn("'/shorts?short=' + encodeURIComponent(result.filename)", text,
+                      'a finished short links to itself in Your shorts')
+        self.assertIn("'/api/upload-to-youtube'", YOUTUBE_UPLOAD_SCRIPT)
+        self.assertNotIn('video_path', YOUTUBE_UPLOAD_SCRIPT, 'the upload API takes a file name, not a server path')
 
     def test_earlier_shorts_are_listed_again_when_the_page_opens(self):
         """The result used to live only in the page, so leaving or refreshing it lost the short."""
-        text = page_source(TEMPLATES_DIR / 'create_short.html')
-        self.assertIn("fetch('/api/shorts')", text)
+        text = page_source(TEMPLATES_DIR / 'shorts.html')
+        self.assertIn("fetch(`/api/shorts?limit=${FETCH_LIMIT}&offset=${shorts.length}`)", text,
+                      'every page of the library is read, not only the first 24')
         self.assertIn("'/api/shorts/delete'", text)
-        self.assertIn('loadLibrary();', text, 'the list must be requested on page load')
-        section = re.search(r'<section[^>]*id="resultsSection"[^>]*>', text).group(0)
+        self.assertIn('await refresh(requested || null);', text, 'the list must be requested on page load')
+        section = re.search(r'<section[^>]*aria-labelledby="resultHeading"[^>]*>', text).group(0)
         self.assertNotIn('hidden', section, 'the list of shorts must be visible on a fresh page')
 
     def test_the_last_extraction_is_remembered_by_the_extract_page(self):
@@ -90,16 +94,21 @@ class TestTemplates(unittest.TestCase):
         self.assertIn('localStorage.setItem', text)
         self.assertIn('savedExtraction()', text)
 
-    def test_link_fields_show_a_preview_from_the_shared_script(self):
-        script = STATIC_DIR / 'js' / 'link-preview.js'
+    def test_link_fields_are_analyzed_by_the_shared_script(self):
+        """One "Analyze video" step on every page: the same check, wording and errors."""
+        script = STATIC_DIR / 'js' / 'video-source.js'
         self.assertTrue(script.is_file())
         for page, slot in [('index.html', 'launchPreview'), ('extract.html', 'linkPreview'),
                            ('create_short.html', 'shortLinkPreview')]:
             with self.subTest(template=page):
                 text = page_source(TEMPLATES_DIR / page)
-                self.assertIn('src="/static/js/link-preview.js"', text)
+                self.assertIn('src="/static/js/video-source.js"', text)
+                self.assertLess(text.index('src="/static/js/ui.js"'), text.index('src="/static/js/video-source.js"'),
+                                'video-source.js uses ui.js')
+                self.assertIn('videoSource.attach(', text)
                 self.assertIn(f'id="{slot}"', text)
                 self.assertIn(f"$('{slot}')", text)
+                self.assertNotIn('Check link', text, 'the button is called "Analyze video"')
         self.assertNotIn('innerHTML', script.read_text(encoding='utf-8'),
                          'titles and channel names come from other sites')
 
@@ -110,17 +119,17 @@ class TestTemplates(unittest.TestCase):
         self.assertIn('id="extractWarnings"', text)
 
     def test_youtube_sign_in_flow_is_robust(self):
-        text = page_source(TEMPLATES_DIR / 'create_short.html')
+        text = YOUTUBE_UPLOAD_SCRIPT
         self.assertIn("'/api/youtube-auth/start'", text)
         # The sign-in is awaited by polling the server; popup.closed is unreliable once
         # Google's pages sever the link to the opener
-        wait_logic = text.split('async function ensureSignedIn')[1].split('function startYouTubeUpload')[0]
+        wait_logic = text.split('async function ensureSignedIn')[1].split('function dialogShell')[0]
         self.assertNotIn('.closed', re.sub(r'//.*', '', wait_logic), 'code must not rely on popup.closed')
         # window.open has to run in the click handler, before any await
-        handler = text.split('function startYouTubeUpload')[1].split('async function uploadToYouTube')[0]
+        handler = text.split("form.addEventListener('submit'")[1].split('dialog.append(form)')[0]
         self.assertIn('openSignInWindow()', handler)
         self.assertNotIn('await', handler)
-        self.assertIn('id="cancelLoadingBtn"', text)
+        self.assertIn('id="cancelLoadingBtn"', page_source(TEMPLATES_DIR / 'shorts.html'))
 
     def test_pages_share_one_stylesheet_and_its_fonts_exist(self):
         for path in TEMPLATE_FILES:
@@ -135,7 +144,7 @@ class TestTemplates(unittest.TestCase):
 
     def test_loading_overlay_is_hidden_until_needed_and_covers_the_page(self):
         # the rule lives in the shared stylesheet; the page must contain the overlay it styles
-        self.assertIn('id="loadingOverlay"', page_source(TEMPLATES_DIR / 'create_short.html'))
+        self.assertIn('id="loadingOverlay"', page_source(TEMPLATES_DIR / 'shorts.html'))
         text = STYLESHEET.read_text(encoding='utf-8')
         rule = re.search(r'\.loading-overlay\s*\{([^}]*)\}', text).group(1)
         for declaration in ['position: fixed', 'display: none', 'z-index']:
@@ -161,7 +170,7 @@ class TestTemplates(unittest.TestCase):
         """Only the YouTube sign-in and upload still block the page; renders are background jobs."""
         ui = (STATIC_DIR / 'js' / 'ui.js').read_text(encoding='utf-8')
         self.assertIn(".inert = true", ui, 'the page behind the overlay must not be reachable')
-        text = page_source(TEMPLATES_DIR / 'create_short.html')
+        text = page_source(TEMPLATES_DIR / 'shorts.html') + YOUTUBE_UPLOAD_SCRIPT
         overlay = re.search(r'<div class="loading-overlay"[^>]*>', text).group(0)
         self.assertIn('role="dialog"', overlay)
         self.assertIn('aria-modal="true"', overlay)
@@ -171,6 +180,7 @@ class TestTemplates(unittest.TestCase):
         self.assertIn('ui.showBusy(', text)
         self.assertIn('ui.hideBusy(', text)
         self.assertNotIn('loading-overlay', page_source(TEMPLATES_DIR / 'extract.html'))
+        self.assertNotIn('loading-overlay', page_source(TEMPLATES_DIR / 'create_short.html'))
 
     def test_long_work_runs_as_a_background_job_with_progress_and_cancel(self):
         for page, route, kind in [('extract.html', '/api/jobs/extract', "'extract'"),
@@ -197,7 +207,7 @@ class TestTemplates(unittest.TestCase):
                 self.assertIn('novalidate', form, 'browser tooltips would pre-empt the error summary')
                 self.assertIn('id="errorSummary" class="error-summary" tabindex="-1" hidden', text)
                 self.assertIn('ui.showErrors(', text)
-                self.assertIn('ui.attachLinkCheck(', text, 'Check link has a busy state in ui.js')
+                self.assertIn('>Analyze video</button>', text)
 
     def test_the_timecode_limit_matches_the_server(self):
         from validators import MAX_TIMESTAMPS
@@ -206,7 +216,7 @@ class TestTemplates(unittest.TestCase):
         self.assertIn(f'Up to {MAX_TIMESTAMPS}.', text)
 
     def test_deleting_a_short_is_confirmed_in_a_dialog_without_a_time_limit(self):
-        text = page_source(TEMPLATES_DIR / 'create_short.html')
+        text = page_source(TEMPLATES_DIR / 'shorts.html')
         self.assertNotIn('Click again', text)
         delete = text.split('function confirmDelete')[1].split('async function deleteShort')[0]
         self.assertIn('showModal()', delete)
@@ -249,9 +259,10 @@ class TestTemplates(unittest.TestCase):
         for script in sorted((STATIC_DIR / 'js' / 'pages').glob('*.js')):
             with self.subTest(script=script.name):
                 text = script.read_text(encoding='utf-8')
-                for helper in ['element', 'notice', 'scrollBehavior', 'relativeTime', 'postJson', 'isLink']:
+                for helper in ['element', 'notice', 'scrollBehavior', 'relativeTime', 'postJson', 'isLink',
+                               'safeUrl', 'formatClock']:
                     self.assertNotIn(f'function {helper}(', text, 'use the one in static/js/ui.js')
-                self.assertNotIn("'/api/test-platform'", text, 'Check link goes through ui.attachLinkCheck')
+                self.assertNotIn("'/api/video-info'", text, 'links are analyzed by video-source.js')
 
     def test_each_page_has_at_most_one_primary_button(self):
         """The top bar shortcut is secondary, so it never competes with the page's own action."""
@@ -286,7 +297,7 @@ class TestTemplates(unittest.TestCase):
 
     def test_page_level_improvements(self):
         home = page_source(TEMPLATES_DIR / 'index.html')
-        self.assertIn("'/create-short?short=' + encodeURIComponent(item.filename)", home, 'a recent short opens itself')
+        self.assertIn("'/shorts?short=' + encodeURIComponent(item.filename)", home, 'a recent short opens itself')
         self.assertIn("$('startSection').hidden", home, 'the first-visit steps go once there are shorts')
 
         trending = page_source(TEMPLATES_DIR / 'trending.html')
@@ -300,8 +311,8 @@ class TestTemplates(unittest.TestCase):
         self.assertIn("'/api/clip-suggestions'", create, 'Suggest moments asks the server')
         self.assertIn("$('createSubmit').focus()", create)
         self.assertNotIn('resetFormBtn', create, 'no Reset beside the main action')
-        self.assertIn('function reviewUpload', create, 'title, description and privacy are reviewed first')
-        self.assertIn("privacy: details.privacy", create)
+        self.assertIn('function review(', YOUTUBE_UPLOAD_SCRIPT, 'title, description and privacy are reviewed first')
+        self.assertIn("privacy: details.privacy", YOUTUBE_UPLOAD_SCRIPT)
 
         extract = page_source(TEMPLATES_DIR / 'extract.html')
         self.assertIn("'/api/frames/archive'", extract)

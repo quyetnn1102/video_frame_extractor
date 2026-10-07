@@ -1,4 +1,4 @@
-/* VideoExtract: the app shell shared by every page (dark sidebar, top bar, mobile drawer).
+/* Tallframe: the app shell shared by every page (dark sidebar, top bar, mobile drawer).
    Tokens such as --side and --side-w are defined in app.css, which is loaded first. */
 
 .sidebar-collapsed {
